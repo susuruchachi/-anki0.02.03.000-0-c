@@ -1,4 +1,4 @@
-// ★★★ すするanki0.02.50-g - ソーシャル機能（ランキング・フレンド・チャット・成績比較・オンライン対戦） ★★★
+// ★★★ すするanki0.02.51-g - ソーシャル機能（ランキング・フレンド・チャット・成績比較・オンライン対戦） ★★★
 
 // ★ グローバル変数の安全な初期化
 window.shareStats = localStorage.getItem('shareStats') === 'true';
@@ -145,7 +145,7 @@ async function loadCategoryRanking(catName) {
   }
 }
 
-// ★ 成績保存 (shareStatsのクラッシュ対策済み)
+// ★ 成績保存
 async function recordCategoryScore(catName, isCorrect) {
   const isShared = typeof window.shareStats !== 'undefined' ? window.shareStats : (localStorage.getItem('shareStats') === 'true');
   if(!currentUser || !isShared) return;
@@ -308,69 +308,57 @@ function initOnlineMatchPage() {
   const container = document.getElementById('onlineMatchScopeSelectors');
   if (container) {
     container.innerHTML = '';
-    createOnlineMatchScopeSelect(0, getTopLevelCategories());
+    
+    // ★【0.02.51-g追加】共有カテゴリーのみを抽出してリスト化
+    const sharedCats = [...new Set(db.filter(q => q.sharedDocId).map(q => q.category))];
+    
+    if (sharedCats.length === 0) {
+      container.innerHTML = '<div style="color:var(--danger); font-size:0.85rem; padding:10px; background:var(--bg3); border-radius:8px; border:1px solid rgba(255,79,106,0.3);">⚠️ 共有カテゴリーがありません。オンライン対戦は共有カテゴリーのみ出題可能です。まずは公開カテゴリーを購読するか、共有URLから追加してください。</div>';
+      selectedScopePath = [];
+    } else {
+      const select = document.createElement('select');
+      select.className = 'form-control';
+      select.style.marginBottom = '8px';
+      
+      const optDefault = document.createElement('option');
+      optDefault.value = "";
+      optDefault.innerText = "🌐 対戦する共有カテゴリーを選択...";
+      optDefault.disabled = true;
+      optDefault.selected = true;
+      select.appendChild(optDefault);
+      
+      sharedCats.forEach(cat => {
+        const opt = document.createElement('option');
+        opt.value = cat;
+        opt.innerText = `🌐 ${escapeHtml(cat)}`;
+        select.appendChild(opt);
+      });
+      
+      select.onchange = (e) => {
+        const val = e.target.value;
+        selectedScopePath = [val];
+        updateOnlineWaitingCount();
+      };
+      
+      container.appendChild(select);
+    }
   }
   const gameView = document.getElementById('onlineGameView');
   if (gameView) gameView.style.display = 'none';
   updateOnlineWaitingCount();
 }
 
-function createOnlineMatchScopeSelect(depth, categoriesToShow) {
-  if (categoriesToShow.length === 0) return;
-  const container = document.getElementById('onlineMatchScopeSelectors');
-  if (!container) return;
-
-  const select = document.createElement('select');
-  select.className = 'form-control';
-  select.style.marginBottom = '8px';
-
-  if (depth === 0) {
-    const optAll = document.createElement('option');
-    optAll.value = "all";
-    optAll.innerText = "🌐 全てから出題";
-    select.appendChild(optAll);
-  }
-  const optDefault = document.createElement('option');
-  optDefault.value = "";
-  optDefault.innerText = depth === 0 ? "📁 トップカテゴリー..." : "📂 サブカテゴリー...";
-  optDefault.disabled = true;
-  optDefault.selected = true;
-  select.appendChild(optDefault);
-
-  categoriesToShow.forEach(cat => {
-    const opt = document.createElement('option');
-    opt.value = cat;
-    opt.innerText = depth === 0 ? `📁 ${cat}` : `📂 ${cat}`;
-    select.appendChild(opt);
-  });
-  
-  select.onchange = (e) => {
-    const val = e.target.value;
-    const selects = Array.from(container.querySelectorAll('select'));
-    selects.forEach((sel, idx) => { if (idx > depth) sel.remove(); });
-    
-    if (val === "all") {
-      selectedScopePath = ["all"];
-      updateOnlineWaitingCount();
-      return;
-    }
-    
-    selectedScopePath[depth] = val;
-    selectedScopePath = selectedScopePath.slice(0, depth + 1);
-    const children = categoryTree[val] || [];
-    if (children.length > 0) {
-      createOnlineMatchScopeSelect(depth + 1, children);
-    }
-    updateOnlineWaitingCount();
-  };
-  
-  container.appendChild(select);
-}
-
 async function updateOnlineWaitingCount() {
   const el = document.getElementById('onlineWaitingCountBadge');
   if (!el) return;
-  const scope = selectedScopePath.length > 0 && selectedScopePath[0] !== 'all' ? selectedScopePath[selectedScopePath.length - 1] : 'all';
+  
+  if (!selectedScopePath || selectedScopePath.length === 0 || selectedScopePath[0] === 'all' || selectedScopePath[0] === '') {
+      el.textContent = '⚪ 共有カテゴリーを選択すると待機人数が表示されます';
+      el.style.color = 'var(--text3)';
+      return;
+  }
+  
+  const scope = selectedScopePath[0];
   try {
     const snap = await firestore.collection('susuru_anki_matches')
       .where('status', '==', 'waiting')
@@ -387,20 +375,28 @@ async function updateOnlineWaitingCount() {
 
 function startOnlineMatching() {
   if (!currentUser) return alert("オンライン対戦にはログインが必要です。");
+  if (!selectedScopePath || selectedScopePath.length === 0 || selectedScopePath[0] === 'all' || selectedScopePath[0] === '') {
+    return alert("⚠️ 対戦する共有カテゴリーを選択してください。");
+  }
+  
   const qCount = parseInt(document.getElementById('onlineMatchQuestionCount').value) || 10;
   const timeLimit = parseInt(document.getElementById('onlineMatchTimeLimit').value) || 15;
   const quizFormat = document.getElementById('onlineMatchFormat').value || 'desc';
-  const scope = selectedScopePath.length > 0 && selectedScopePath[0] !== "all" ? selectedScopePath[selectedScopePath.length - 1] : "all";
+  const scope = selectedScopePath[0];
   
   startOnlineMatch(scope, qCount, timeLimit, false, quizFormat);
 }
 
 function createQuickMatch() {
   if (!currentUser) return alert("招待リンク作成にはログインが必要です。");
+  if (!selectedScopePath || selectedScopePath.length === 0 || selectedScopePath[0] === 'all' || selectedScopePath[0] === '') {
+    return alert("⚠️ 対戦する共有カテゴリーを選択してください。");
+  }
+  
   const qCount = parseInt(document.getElementById('onlineMatchQuestionCount').value) || 10;
   const timeLimit = parseInt(document.getElementById('onlineMatchTimeLimit').value) || 15;
   const quizFormat = document.getElementById('onlineMatchFormat').value || 'desc';
-  const scope = selectedScopePath.length > 0 && selectedScopePath[0] !== "all" ? selectedScopePath[selectedScopePath.length - 1] : "all";
+  const scope = selectedScopePath[0];
   
   startOnlineMatch(scope, qCount, timeLimit, true, quizFormat);
 }
@@ -436,17 +432,13 @@ async function startOnlineMatch(scope, qCount, timeLimit, isPrivate, quizFormat 
       }
     }
     
-    let pool = [];
-    if (scope === 'all') {
-      pool = [...db];
-    } else {
-      const subCats = typeof getAllSubcategories === 'function' ? getAllSubcategories(scope) : [scope];
-      pool = db.filter(q => subCats.includes(q.category));
-    }
-    if (pool.length === 0) pool = [...db];
+    // 【修正済】scopeは必ず特定のカテゴリー名として渡される
+    const subCats = typeof getAllSubcategories === 'function' ? getAllSubcategories(scope) : [scope];
+    let pool = db.filter(q => subCats.includes(q.category));
+    
     if (pool.length === 0) {
       removeOnlineMatchOverlay();
-      return alert("⚠️ 出題できる問題カードがありません。先にカードを作成してください。");
+      return alert("⚠️ 出題できる問題カードがありません。先にカードを作成するか同期してください。");
     }
     
     pool.sort(() => Math.random() - 0.5);
@@ -515,7 +507,6 @@ function listenToMatch() {
   matchUnsubscribe = firestore.collection('susuru_anki_matches').doc(currentMatchId)
     .onSnapshot((doc) => {
       if (!doc.exists) {
-        // ★【0.02.50-g追加】相手の切断等でルームが削除された場合
         if (currentMatchId) {
           alert("❌ ルームが解散されました。");
           if (typeof quitOnlineMatchUI === 'function') quitOnlineMatchUI();
@@ -525,9 +516,8 @@ function listenToMatch() {
       
       const data = doc.data();
       
-      // ★【0.02.50-g追加】相手が退出または切断した時の終了処理
       let myRole = data.player1 === currentUser.uid ? 'player1' : (data.player2 === currentUser.uid ? 'player2' : null);
-      window.myMatchRole = myRole; // main.jsでの退出通知用に保持
+      window.myMatchRole = myRole; 
       let enemyRole = myRole === 'player1' ? 'player2' : 'player1';
       
       if (data.status === 'playing' && data[`${enemyRole}Disconnected`] === true) {
@@ -545,7 +535,13 @@ function listenToMatch() {
       if (data.status === 'playing') {
         const isPlayer1 = data.player1 === currentUser.uid;
         const myFinished = isPlayer1 ? data.player1Finished : data.player2Finished;
-        const oppProgress = isPlayer1 ? (data.player2Progress || 0) : (data.player1Progress || 0);
+        
+        // ★【0.02.51-g追加】相手が既にゴールしている場合は進行度を強制的にMAXにする
+        let oppProgress = isPlayer1 ? (data.player2Progress || 0) : (data.player1Progress || 0);
+        const oppFinished = isPlayer1 ? data.player2Finished : data.player1Finished;
+        if (oppFinished && data.questions) {
+            oppProgress = data.questions.length;
+        }
         matchLastOppProgress = oppProgress;
         
         if (!matchGameStarted && !myFinished) {
@@ -956,13 +952,14 @@ async function finishOnlineGame() {
   try {
     const doc = await firestore.collection('susuru_anki_matches').doc(currentMatchId).get();
     const isPlayer1 = doc.data().player1 === currentUser.uid;
+    // ★【0.02.51-g追加】ゴールした瞬間に、自分のProgressをMAX(問題数)に更新する
     if (isPlayer1) {
       await firestore.collection('susuru_anki_matches').doc(currentMatchId).update({
-        player1Score: matchScore, player1Finished: true
+        player1Score: matchScore, player1Finished: true, player1Progress: matchQuestions.length
       });
     } else {
       await firestore.collection('susuru_anki_matches').doc(currentMatchId).update({
-        player2Score: matchScore, player2Finished: true
+        player2Score: matchScore, player2Finished: true, player2Progress: matchQuestions.length
       });
     }
   } catch (e) {
@@ -1036,7 +1033,6 @@ window.quitOnlineMatchUI = function() {
   matchGameStarted = false;
   matchOppProgressCallback = null;
   matchLastOppProgress = 0;
-  // ★【0.02.50-g追加】正常終了時は復帰用データを削除
   localStorage.removeItem('susuru_anki_last_match');
   initOnlineMatchPage();
 }
@@ -1071,7 +1067,6 @@ window.cancelOnlineMatch = async function() {
       if (doc.exists && doc.data().status === 'waiting') await docRef.delete();
     } catch (e) { console.error(e); }
     currentMatchId = null;
-    // ★【0.02.50-g追加】キャンセル時も復帰用データを削除
     localStorage.removeItem('susuru_anki_last_match');
   }
 }
