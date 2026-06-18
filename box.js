@@ -6,16 +6,22 @@ function filterBoxByStatus(statusType) { currentViewContext = statusType; openPa
 function renderBox() {
   const container = document.getElementById('boxList'); container.innerHTML = '';
   let filtered = [...db]; let titleString = "📝 全ての問題一覧";
-  // 卒業判定：レベル5 かつ level5Correct が5以上
 
   let navContainer = null;
   const specialViews = ['all', 'grad', 'master', 'normal', 'weak', 'shikkari', 'unseen'];
   
   if (typeof currentViewContext === 'object' && currentViewContext.type === 'category') {
     const currentCat = currentViewContext.value;
+    const showAllSub = currentViewContext.showAllSub || false; // デフォルトは直下のみ表示
     const subCats = getAllSubcategories(currentCat); 
-    filtered = db.filter(q => subCats.includes(q.category));
-    titleString = `🔖 ${currentCat}`;
+    
+    if (showAllSub) {
+      filtered = db.filter(q => subCats.includes(q.category));
+      titleString = `🔖 ${currentCat} (全階層を表示中)`;
+    } else {
+      filtered = db.filter(q => q.category === currentCat);
+      titleString = `🔖 ${currentCat}`;
+    }
     
     let parentCat = null;
     if (typeof categoryTree !== 'undefined') {
@@ -25,41 +31,71 @@ function renderBox() {
     }
     
     navContainer = document.createElement('div');
-    navContainer.style.cssText = 'display:flex; gap:8px; overflow-x:auto; padding-bottom:10px; margin-bottom:10px; border-bottom:1px solid var(--border);';
+    navContainer.style.cssText = 'display:flex; flex-direction:column; gap:10px; padding-bottom:15px; margin-bottom:15px; border-bottom:1px solid var(--border);';
+    
+    // 操作ボタンエリア（階層移動 ＆ 一括表示トグル）
+    const topBar = document.createElement('div');
+    topBar.style.cssText = 'display:flex; gap:8px; flex-wrap:wrap;';
     
     if (parentCat) {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'btn btn-secondary';
-      btn.style.cssText = 'padding:6px 12px; font-size:0.8rem; white-space:nowrap; border-radius:20px; width:auto; background:var(--bg3);';
-      btn.innerText = `⬆️ 上の階層 (${parentCat})`;
-      btn.onclick = (e) => { 
+      const btnUp = document.createElement('button');
+      btnUp.type = 'button';
+      btnUp.className = 'btn btn-secondary';
+      btnUp.style.cssText = 'padding:6px 12px; font-size:0.85rem; width:auto; border-radius:20px;';
+      btnUp.innerHTML = `⬆️ 上の階層 (${escapeHtml(parentCat)})`;
+      btnUp.onclick = (e) => { 
         e.preventDefault();
         currentViewContext = { type: 'category', value: parentCat }; 
         renderBox(); 
       };
-      navContainer.appendChild(btn);
+      topBar.appendChild(btnUp);
     }
+
+    // サブフォルダーが存在する場合のみ、一括表示トグルを出す
+    if (subCats.length > 1) { 
+      const btnToggle = document.createElement('button');
+      btnToggle.type = 'button';
+      btnToggle.className = showAllSub ? 'btn btn-accent' : 'btn btn-secondary';
+      btnToggle.style.cssText = 'padding:6px 12px; font-size:0.85rem; width:auto; border-radius:20px;';
+      btnToggle.innerHTML = showAllSub ? `🔄 直下の問題のみ表示` : `📚 下位フォルダーの問題も一括表示`;
+      btnToggle.onclick = (e) => { 
+        e.preventDefault();
+        currentViewContext.showAllSub = !showAllSub; 
+        renderBox(); 
+      };
+      topBar.appendChild(btnToggle);
+    }
+    navContainer.appendChild(topBar);
     
-    if (typeof categoryTree !== 'undefined' && categoryTree[currentCat]) {
-      const children = categoryTree[currentCat] || [];
+    // サブフォルダーを箱分けして表示
+    if (typeof categoryTree !== 'undefined' && categoryTree[currentCat] && categoryTree[currentCat].length > 0) {
+      const children = categoryTree[currentCat];
+      
+      const subTitle = document.createElement('div');
+      subTitle.style.cssText = 'font-size:0.8rem; color:var(--text2); font-weight:bold; margin-top:5px;';
+      subTitle.innerText = '📂 サブフォルダー';
+      navContainer.appendChild(subTitle);
+      
+      const subGrid = document.createElement('div');
+      subGrid.style.cssText = 'display:grid; grid-template-columns:repeat(auto-fill, minmax(130px, 1fr)); gap:8px;';
+      
       children.forEach(c => {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'btn btn-secondary';
-        btn.style.cssText = 'padding:6px 12px; font-size:0.8rem; white-space:nowrap; border-radius:20px; width:auto;';
-        btn.innerText = `📂 ${c}`;
+        btn.style.cssText = 'padding:10px; font-size:0.9rem; text-align:left; justify-content:flex-start; height:auto; background:var(--bg3);';
+        
+        const childCount = db.filter(q => q.category === c).length;
+        btn.innerHTML = `📁 ${escapeHtml(c)} <span style="font-size:0.7rem; color:var(--text3); float:right; margin-top:2px;">${childCount}</span>`;
         btn.onclick = (e) => { 
           e.preventDefault();
           currentViewContext = { type: 'category', value: c }; 
           renderBox(); 
         };
-        navContainer.appendChild(btn);
+        subGrid.appendChild(btn);
       });
+      navContainer.appendChild(subGrid);
     }
-    
-    if (navContainer.childNodes.length === 0) navContainer = null;
-    
   } else if (typeof currentViewContext === 'string' && currentViewContext !== 'all') {
     titleString = `📊 実績抽出カードの一覧`;
     if (currentViewContext === 'grad') filtered = db.filter(q => q.level >= 5 && (q.level5Correct || 0) >= 5);

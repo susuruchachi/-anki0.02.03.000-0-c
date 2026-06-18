@@ -283,16 +283,10 @@ async function deletePublicCategory(docId, catName) {
 }
 
 async function unsubscribeSharedCategory(catName) {
-  const sharedCard = db.find(q => q.category === catName && q.sharedDocId);
-  if (!sharedCard) return alert("⚠️ 購読情報が見つかりません");
-  const docId = sharedCard.sharedDocId;
-
   if (!confirm("「" + catName + "」の購読を解除しますか？\n\n※このフォルダーと中の問題がすべて削除されます。\n（学習成績も消えます）")) return;
 
-  const targetCats = [...new Set(db.filter(q => q.sharedDocId === docId).map(q => q.category))];
-  let allTarget = [];
-  targetCats.forEach(c => { allTarget.push(...getAllSubcategories(c)); });
-  allTarget = [...new Set(allTarget)];
+  // ★ 修正箇所：問題が含まれていない空のサブフォルダーも確実に消すため、getAllSubcategoriesを使用
+  const allTarget = getAllSubcategories(catName);
 
   db = db.filter(q => !allTarget.includes(q.category));
   categories = categories.filter(c => !allTarget.includes(c));
@@ -301,15 +295,19 @@ async function unsubscribeSharedCategory(catName) {
     else if (categoryTree[p]) categoryTree[p] = categoryTree[p].filter(c => !allTarget.includes(c));
   }
 
-  subscribedDocs = subscribedDocs.filter(id => id !== docId);
-  delete sharedDocPermissions[docId];
-
-  if (currentUser) {
-    try {
-      await firestore.collection('susuru_anki_shared').doc(docId).update({
-        subscriberUids: firebase.firestore.FieldValue.arrayRemove(currentUser.uid)
-      });
-    } catch(e) { /* 無視 */ }
+  // もし docId が特定できる場合は共有情報からも消す
+  const sharedCard = db.find(q => q.category === catName && q.sharedDocId);
+  if (sharedCard) {
+    const docId = sharedCard.sharedDocId;
+    subscribedDocs = subscribedDocs.filter(id => id !== docId);
+    delete sharedDocPermissions[docId];
+    if (currentUser) {
+      try {
+        await firestore.collection('susuru_anki_shared').doc(docId).update({
+          subscriberUids: firebase.firestore.FieldValue.arrayRemove(currentUser.uid)
+        });
+      } catch(e) { /* 無視 */ }
+    }
   }
 
   saveData(true);
@@ -359,7 +357,7 @@ function renderPublicCategories() {
     card.innerHTML = `
       <div class="q-card-text">${escapeHtml(cat.catName)}</div>
       <div style="font-size:0.85rem; color:var(--text2); margin-top:4px;">作成者: <span style="color:var(--text);">${escapeHtml(cat.ownerName || 'Unknown')}</span></div>
-      <div style="font-size:0.8rem; color:var(--text3); margin-top:6px;">カード数: <span style="color:var(--primary); font-weight:bold;">${(cat.cards || []).length}問</span>　👥 利用者: <span style="color:var(--accent); font-weight:bold;">${(cat.subscriberUids || []).length}人</span></div>
+      <div style="font-size:0.8rem; color:var(--text3); margin-top:6px;">カード数: <span style="color:var(--primary); font-weight:bold;">${(cat.cards || []).length}問</span> 👥 利用者: <span style="color:var(--accent); font-weight:bold;">${(cat.subscriberUids || []).length}人</span></div>
       <button class="btn btn-secondary" style="margin-top:10px; width:100%;" onclick="openPage('pgShared'); listenToSharedDoc('${cat.id}')">🌐 詳細・共同編集者の管理</button>
       ${subscribeBtn}
       ${isOwner ? `<button class="btn btn-danger" style="margin-top:8px; width:100%;" onclick="deletePublicCategory('${cat.id}', '${escapeHtml(cat.catName)}')">🗑️ 削除</button>` : ''}`;
@@ -370,11 +368,8 @@ function renderPublicCategories() {
 async function unsubscribePublicCategory(docId, catName) {
   if (!confirm(`「${catName}」の購読を解除しますか？\n\n※このカテゴリーの問題がすべてローカルから削除されます。`)) return;
 
-  // 対象docIdに紐づく全カテゴリーを収集してローカルから削除
-  const targetCats = [...new Set(db.filter(q => q.sharedDocId === docId).map(q => q.category))];
-  let allTarget = [];
-  targetCats.forEach(c => { allTarget.push(...getAllSubcategories(c)); });
-  allTarget = [...new Set(allTarget)];
+  // ★ 修正箇所：問題が含まれていない空のサブフォルダーも確実に消すため、getAllSubcategoriesを使用
+  const allTarget = getAllSubcategories(catName);
 
   db = db.filter(q => !allTarget.includes(q.category));
   categories = categories.filter(c => !allTarget.includes(c));
@@ -429,7 +424,7 @@ async function loadMyPublicCategories() {
           <div style="font-weight:bold; font-size:0.9rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(cat.catName || '不明')}</div>
           <div style="font-size:0.75rem; color:var(--text3); margin-top:2px;">
             ${isActive ? '<span style="color:var(--success);">🌐 公開中</span>' : '<span style="color:var(--text3);">🔒 非公開（残存）</span>'}
-            　カード: ${(cat.cards || []).length}問　👥 ${(cat.subscriberUids || []).length}人
+             カード: ${(cat.cards || []).length}問 👥 ${(cat.subscriberUids || []).length}人
           </div>
         </div>
         <button class="btn btn-danger" style="width:auto; padding:6px 12px; font-size:0.8rem; margin-left:10px; flex-shrink:0;" onclick="deleteMyPublicCategory('${doc.id}', '${escapeHtml(cat.catName || '不明')}')">🗑️ 削除</button>`;
@@ -489,6 +484,7 @@ async function importPublicCategory(docId, catName) {
     }
   } catch(e) { alert('⚠️ 購読に失敗しました'); }
 }
+
 // ★【0.02.59-g】構造エクスプローラーからのカテゴリー追加・削除をsharedDocに同期
 // 指定カテゴリーを含むsharedDocId（オーナー or 共同編集者）を探す
 function findEditableSharedDocForCat(catName) {
