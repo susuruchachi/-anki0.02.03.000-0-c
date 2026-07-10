@@ -158,6 +158,34 @@ body.light-mode .sync-status { background: rgba(255,255,255,0.9); }
 .sync-status.error { color: var(--danger); border-color: var(--danger); }
 .sync-status.hidden { opacity: 0; transform: translateY(-20px); }
 .update-banner-title { font-weight: bold; color: var(--primary); display:flex; align-items:center; }
+
+/* 漢文・古典用の縦書きコンテナ */
+.kanbun-container {
+  writing-mode: vertical-rl; /* 縦書き・右から左へ */
+  font-family: 'Noto Serif JP', 'S行書', serif;
+  font-size: 1.8rem;
+  line-height: 2.5;
+  height: 250px; /* 画面に収まる高さに調整 */
+  margin: 0 auto;
+  padding: 10px;
+}
+
+/* 返り点（レ点、一二三点など）の配置調整 */
+.kaeriten {
+  font-size: 0.65rem;
+  vertical-align: sub;
+  margin-left: -0.2em;
+  margin-right: 0.1em;
+  color: var(--warn);
+}
+
+/* 問題・解答文内の画像がはみ出さないようにする */
+#lblQuizQuestion img, #feedbackAnswerText img, #selfAnswerDisplay img, .kanbun-container img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+
 </style>
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
@@ -166,6 +194,12 @@ body.light-mode .sync-status { background: rgba(255,255,255,0.9); }
 <script>
   document.title = "すするanki " + (typeof APP_VERSION !== 'undefined' ? APP_VERSION : '');
 </script>
+
+<!-- KaTeXのCSSとJavaScriptをCDNから読み込む -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
+
 </head>
 <body>
 

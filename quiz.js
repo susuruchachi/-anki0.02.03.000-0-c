@@ -1,4 +1,61 @@
 // ----------------- クイズ機能 -----------------
+
+// ----------------- ネイティブ発音対応 TTSエンジン -----------------
+function isEnglishText(text) {
+  if (!text) return false;
+  const cleanText = text.trim();
+  // 英語のアルファベットや一般的な記号だけで構成されているか（日本語が含まれていないか）
+  return /^[A-Za-z0-9\s,.:;?!"'\-()]+$/.test(cleanText);
+}
+
+function getBestVoice(langPrefix) {
+  if (!('speechSynthesis' in window)) return null;
+  const voices = window.speechSynthesis.getVoices();
+  let bestVoice = voices.find(v => 
+    v.lang.toLowerCase().startsWith(langPrefix) && 
+    (v.name.includes('Google') || v.name.includes('Premium') || v.name.includes('Natural'))
+  );
+  if (!bestVoice) {
+    bestVoice = voices.find(v => v.lang.toLowerCase().startsWith(langPrefix));
+  }
+  return bestVoice;
+}
+
+function speakText(text, options = {}) {
+  if (!('speechSynthesis' in window) || localStorage.getItem('muteTTS') === 'true') return;
+  window.speechSynthesis.cancel();
+  if (!text || text.trim() === "") return;
+
+  const div = document.createElement('div');
+  div.innerHTML = text;
+  const plainText = div.textContent || div.innerText || "";
+
+  const utterance = new SpeechSynthesisUtterance(plainText);
+  utterance.rate = options.rate || 1.0;
+  utterance.pitch = options.pitch || 1.0;
+  utterance.volume = options.volume || 1.0;
+
+  if (isEnglishText(plainText)) {
+    const enVoice = getBestVoice('en');
+    if (enVoice) { utterance.voice = enVoice; utterance.lang = enVoice.lang; }
+    else { utterance.lang = 'en-US'; }
+  } else {
+    const jaVoice = getBestVoice('ja');
+    if (jaVoice) { utterance.voice = jaVoice; utterance.lang = jaVoice.lang; }
+    else { utterance.lang = 'ja-JP'; }
+  }
+  
+  utterance.onerror = (e) => console.error("TTSエラー:", e);
+  window.speechSynthesis.speak(utterance);
+}
+
+if ('speechSynthesis' in window) {
+  window.speechSynthesis.onvoiceschanged = () => {
+    getBestVoice('en'); getBestVoice('ja');
+  };
+}
+// -----------------------------------------------------------
+
 const SCOPE_STORAGE_KEY = 'susuru_anki_scope_path';
 function saveScopePath() {
   try { localStorage.setItem(SCOPE_STORAGE_KEY, JSON.stringify(selectedScopePath)); } catch(e) {}
@@ -124,7 +181,16 @@ function loadQuizQuestion() {
   quizPhase='q'; selectedChoiceIdx=null; window.currentSelfJudge=null;
   const cur = quizPool[quizIndex];
   document.getElementById('lblQuizProgress').innerText = `Q ${quizIndex+1}/${quizPool.length}`;
-  document.getElementById('lblQuizQuestion').innerText = cur.question;
+  const qEl = document.getElementById('lblQuizQuestion');
+    qEl.innerHTML = cur.question;
+    if (typeof renderMathInElement === 'function') {
+      renderMathInElement(qEl, {
+        delimiters: [
+          {left: '$$', right: '$$', display: true},
+          {left: '$', right: '$', display: false}
+        ]
+      });
+    }
   document.getElementById('quizFeedback').style.display = 'none';
   document.getElementById('txtQuickNote').value = cur.note || '';
 
@@ -332,7 +398,12 @@ function renderTapInput() {
 function buildSelfMode(cur) { document.getElementById('btnShowAnswer').style.display = 'inline-flex'; document.getElementById('selfJudgeArea').style.display = 'none'; }
 function showSelfAnswer() {
   stopQuizTimer(); document.getElementById('btnShowAnswer').style.display = 'none';
-  document.getElementById('selfAnswerDisplay').innerText = `A: ${getPrimaryAnswer(quizPool[quizIndex].answer)}`;
+  const saEl = document.getElementById('selfAnswerDisplay');
+    saEl.innerHTML = `A: ${getPrimaryAnswer(quizPool[quizIndex].answer)}`;
+    if (typeof renderMathInElement === 'function') {
+      renderMathInElement(saEl, { delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}] });
+    }
+    speakText(getPrimaryAnswer(quizPool[quizIndex].answer));
   document.getElementById('selfJudgeArea').style.display = 'block';
 }
 function submitSelfMode(judge) {
@@ -451,7 +522,12 @@ function evaluateRoundAnswer(isCorrect, head) {
   
   const fb = document.getElementById('quizFeedback');
   document.getElementById('feedbackResultText').innerText = head;
-  document.getElementById('feedbackAnswerText').innerText = `正解: ${getPrimaryAnswer(cur.answer)}`;
+  const fbAnsEl = document.getElementById('feedbackAnswerText');
+  fbAnsEl.innerHTML = `正解: ${getPrimaryAnswer(cur.answer)}`;
+  if (typeof renderMathInElement === 'function') {
+    renderMathInElement(fbAnsEl, { delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}] });
+  }
+  speakText(getPrimaryAnswer(cur.answer));
   fb.className = `feedback-area ${isCorrect ? 'correct':'incorrect'}`; fb.style.display = 'flex';
   
   document.getElementById('btnQuizPass').style.display = 'none';
