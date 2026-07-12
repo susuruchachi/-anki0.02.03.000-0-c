@@ -695,7 +695,7 @@ body.light-mode .sync-status { background: rgba(255,255,255,0.9); }
 <div class="ctx-overlay" id="bulkAddOverlay" style="display:none;" onclick="closeBulkAdd()">
   <div class="menu-card" style="padding:20px; max-width:90%; width:400px;" onclick="event.stopPropagation()">
     <h3 style="color:var(--text); margin-bottom:10px; font-size:1.1rem;" id="bulkAddTitle">一括追加</h3>
-    <textarea id="txtBulkAdd" class="form-control" style="height:150px; margin-bottom:15px; font-family:'JetBrains Mono', monospace; font-size:0.85rem;" placeholder="問題,答え(カンマ、読点、スペース区切り)&#10;問題,答え"></textarea>
+    <textarea id="txtBulkAdd" class="form-control" style="height:150px; margin-bottom:15px; font-family:'JetBrains Mono', monospace; font-size:0.85rem;" placeholder="【入力方法1】問題,答え (カンマ区切り)&#10;【入力方法2】問題と答えを交互に改行"></textarea>
     <div class="form-row">
       <button class="btn btn-secondary" style="flex:1;" onclick="closeBulkAdd()">キャンセル</button>
       <button class="btn" style="flex:1;" onclick="submitBulkAdd()">追加する</button>
