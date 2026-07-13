@@ -32,12 +32,19 @@ async function syncSubscriptions() {
       cloudCards.forEach(cq => {
         let lq = db.find(q => q.id === cq.id);
         if (lq) {
-          if (lq.question !== cq.question || lq.answer !== cq.answer || lq.category !== cq.category) {
-            lq.question = cq.question; lq.answer = cq.answer; lq.category = cq.category; changed = true;
+          // ★【0.02.63】questionImage/answerImage も差分検知・同期対象に含める
+          if (lq.question !== cq.question || lq.answer !== cq.answer || lq.category !== cq.category || lq.questionImage !== cq.questionImage || lq.answerImage !== cq.answerImage) {
+            lq.question = cq.question; lq.answer = cq.answer; lq.category = cq.category;
+            if (cq.questionImage) lq.questionImage = cq.questionImage; else delete lq.questionImage;
+            if (cq.answerImage) lq.answerImage = cq.answerImage; else delete lq.answerImage;
+            changed = true;
           }
           if (lq.sharedDocId !== docId) { lq.sharedDocId = docId; changed = true; }
         } else {
-          db.push({ id: cq.id, question: cq.question, answer: cq.answer, category: cq.category, sharedDocId: docId, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 });
+          const newLocalCard = { id: cq.id, question: cq.question, answer: cq.answer, category: cq.category, sharedDocId: docId, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 };
+          if (cq.questionImage) newLocalCard.questionImage = cq.questionImage;
+          if (cq.answerImage) newLocalCard.answerImage = cq.answerImage;
+          db.push(newLocalCard);
           changed = true;
         }
       });
@@ -68,11 +75,19 @@ async function updateCardInSharedDoc(docId, card, action) {
     let newCards = [...data.cards];
     if (action === 'edit') {
        const idx = newCards.findIndex(c => c.id === card.id);
-       if (idx !== -1) { newCards[idx].question = card.question; newCards[idx].answer = card.answer; newCards[idx].category = card.category; }
+       if (idx !== -1) {
+         newCards[idx].question = card.question; newCards[idx].answer = card.answer; newCards[idx].category = card.category;
+         // ★【0.02.63】画像は「値がある時だけキーを持たせる」形でFirestoreにundefinedが渡らないようにする
+         if (card.questionImage) newCards[idx].questionImage = card.questionImage; else delete newCards[idx].questionImage;
+         if (card.answerImage) newCards[idx].answerImage = card.answerImage; else delete newCards[idx].answerImage;
+       }
     } else if (action === 'delete') {
        newCards = newCards.filter(c => c.id !== card.id);
     } else if (action === 'add') {
-       newCards.push({ id: card.id, question: card.question, answer: card.answer, category: card.category, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 });
+       const newCardData = { id: card.id, question: card.question, answer: card.answer, category: card.category, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 };
+       if (card.questionImage) newCardData.questionImage = card.questionImage;
+       if (card.answerImage) newCardData.answerImage = card.answerImage;
+       newCards.push(newCardData);
     }
     await firestore.collection("susuru_anki_shared").doc(docId).update({ cards: newCards });
   } catch(e) { console.error("Cloud update failed", e); }
@@ -464,7 +479,12 @@ async function importPublicCategory(docId, catName) {
       if (!q.question || !q.answer) return;
       let existing = db.find(d => d.id === q.id);
       if (existing) { existing.sharedDocId = docId; } 
-      else { db.push({ id: q.id, question: q.question, answer: q.answer, category: q.category, sharedDocId: docId, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 }); count++; }
+      else {
+        const newLocalCard = { id: q.id, question: q.question, answer: q.answer, category: q.category, sharedDocId: docId, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 };
+        if (q.questionImage) newLocalCard.questionImage = q.questionImage;
+        if (q.answerImage) newLocalCard.answerImage = q.answerImage;
+        db.push(newLocalCard); count++;
+      }
     });
     autoMerge(); alert(`✅ 購読完了！\n新規追加: ${count}件`); openPage('pgBox');
     syncSubscriptions();

@@ -129,15 +129,18 @@ function renderBox() {
     const isGrad = item.level >= 5 && (item.level5Correct || 0) >= 5;
     const card = document.createElement('div'); card.className = 'q-card';
     setupLongpress(card, () => handleQuestionLongpress(item));
-    _boxAnswerCache[item.id] = item.answer;
+    _boxAnswerCache[item.id] = { text: item.answer, image: item.answerImage || null };
 
     const lvlStr = item.level === -1 ? 'しっかり' : 'LV '+item.level;
     const badgeHTML = `<span class="badge ${isGrad ? 'badge-grad':'badge-level'}">${isGrad ? 'GRADUATE' : lvlStr}</span>`;
     
     const sharedIcon = item.sharedDocId ? `<span style="margin-left:6px; font-size:0.75rem; color:var(--accent);">🌐同期</span>` : '';
+    // ★【0.02.63】問題に画像が添付されていればサムネイル表示
+    const qImgHTML = item.questionImage ? `<img src="${item.questionImage}" alt="問題画像" style="max-width:100%; max-height:120px; border-radius:8px; margin-bottom:8px; display:block;">` : '';
     
     card.innerHTML = `
       <div class="q-card-text">${escapeHtml(item.question)}</div>
+      ${qImgHTML}
       <div style="font-size:0.85rem; color:var(--text2); margin-bottom:8px; cursor:pointer;" data-id="${escapeHtml(item.id)}" data-shown="0" onclick="toggleCardAnswer(this)">
         A: <span style="background:var(--bg4); color:var(--text2); padding:2px 8px; border-radius:6px; border:1px solid var(--border); display:inline-block; font-size:0.75rem;">👆 タップして答えを表示</span>
       </div>
@@ -148,11 +151,14 @@ function renderBox() {
 }
 
 function toggleCardAnswer(el) {
-  const itemId = el.getAttribute('data-id'); const ans = _boxAnswerCache[itemId] || '';
+  const itemId = el.getAttribute('data-id'); const cached = _boxAnswerCache[itemId] || { text: '', image: null };
   const shown = el.getAttribute('data-shown') === '1';
   el.setAttribute('data-shown', shown ? '0' : '1');
   if (shown) { el.innerHTML = 'A: <span style="background:var(--bg4); color:var(--text2); padding:2px 8px; border-radius:6px; border:1px solid var(--border); display:inline-block; font-size:0.75rem;">👆 タップして答えを表示</span>'; } 
-  else { el.innerHTML = 'A: <span style="color:var(--text); font-weight:500;">' + escapeHtml(ans) + '</span><span style="color:var(--text3); font-size:0.7rem; margin-left:8px;">👆 隠す</span>'; }
+  else {
+    const imgHTML = cached.image ? `<img src="${cached.image}" alt="解答画像" style="max-width:100%; max-height:150px; border-radius:8px; margin-top:6px; display:block;">` : '';
+    el.innerHTML = 'A: <span style="color:var(--text); font-weight:500;">' + escapeHtml(cached.text) + '</span><span style="color:var(--text3); font-size:0.7rem; margin-left:8px;">👆 隠す</span>' + imgHTML;
+  }
 }
 
 function handleQuestionLongpress(item) {
@@ -174,13 +180,7 @@ function handleQuestionLongpress(item) {
   });
   
   openContextMenu("カード操作", [
-    { html: '✏️ 編集', action: async () => {
-        const newQ = prompt("問題文を編集:", item.question); if(newQ === null) return;
-        const newA = prompt("答えを編集:", item.answer); if(newA === null) return;
-        item.question = newQ.trim() || item.question; item.answer = newA.trim() || item.answer;
-        if (item.sharedDocId) await updateCardInSharedDoc(item.sharedDocId, item, 'edit');
-        autoMerge(); renderBox();
-      } },
+    { html: '✏️ 編集', action: () => { openCardModal('edit', item); } },
     { type: 'separator' }, ...moveOptions, { type: 'separator' },
     { html: '🗑️ 削除', danger: true, action: async () => { 
         if(!confirm("完全に消去しますか？")) return; 
@@ -206,13 +206,81 @@ function showAddQModal() {
     if (!perm || !perm.canEdit) return alert("🔒 【閲覧専用】\nこの共有カテゴリーは閲覧専用のため、新しい問題を追加できません。");
   }
 
-  const q = prompt("新規追加：問題文"); if(!q || q.trim() === "") return;
-  const a = prompt("新規追加：正解"); if(!a || a.trim() === "") return;
-  const newCard = { id: 'id_' + Math.random().toString(36).slice(2) + Date.now().toString(36), question: q.trim(), answer: a.trim(), category: defaultCat, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 };
-  
-  if (targetSharedDocId) newCard.sharedDocId = targetSharedDocId;
-  db.push(newCard);
-  
-  if (targetSharedDocId) updateCardInSharedDoc(targetSharedDocId, newCard, 'add');
-  autoMerge(); renderBox();
+  openCardModal('add', { category: defaultCat, sharedDocId: targetSharedDocId });
+}
+
+// ================================================================
+// ★【0.02.63】カード追加・編集モーダル（問題文・答え・画像添付に対応）
+// ================================================================
+let _cardModalState = { mode: 'add', item: null, category: '未分類', sharedDocId: null, qImage: null, aImage: null };
+
+function openCardModal(mode, itemOrDefaults) {
+  _cardModalState = {
+    mode,
+    item: mode === 'edit' ? itemOrDefaults : null,
+    category: itemOrDefaults.category || '未分類',
+    sharedDocId: itemOrDefaults.sharedDocId || null,
+    qImage: itemOrDefaults.questionImage || null,
+    aImage: itemOrDefaults.answerImage || null
+  };
+  document.getElementById('cardModalTitle').innerText = mode === 'edit' ? '✏️ カードを編集' : '➕ 新規カード追加';
+  document.getElementById('cardModalCatLabel').innerText = `📁 追加先: ${_cardModalState.category}`;
+  document.getElementById('txtCardQuestion').value = mode === 'edit' ? (itemOrDefaults.question || '') : '';
+  document.getElementById('txtCardAnswer').value = mode === 'edit' ? (itemOrDefaults.answer || '') : '';
+  updateCardImagePreview('question');
+  updateCardImagePreview('answer');
+  document.getElementById('cardModalOverlay').style.display = 'flex';
+}
+
+function closeCardModal() {
+  document.getElementById('cardModalOverlay').style.display = 'none';
+}
+
+function updateCardImagePreview(which) {
+  const isQ = which === 'question';
+  const img = isQ ? _cardModalState.qImage : _cardModalState.aImage;
+  const wrap = document.getElementById(isQ ? 'cardQImageWrap' : 'cardAImageWrap');
+  const imgEl = document.getElementById(isQ ? 'cardQImagePreview' : 'cardAImagePreview');
+  if (img) { wrap.style.display = 'block'; imgEl.src = img; } else { wrap.style.display = 'none'; imgEl.src = ''; }
+}
+
+async function handleCardImageSelect(event, which) {
+  const file = event.target.files[0];
+  event.target.value = ''; // 同じファイルを選び直せるようにリセット
+  if (!file) return;
+  try {
+    const dataUrl = await compressImageToDataURL(file);
+    if (which === 'question') _cardModalState.qImage = dataUrl; else _cardModalState.aImage = dataUrl;
+    updateCardImagePreview(which);
+  } catch (e) { alert('⚠️ 画像の読み込みに失敗しました。'); }
+}
+
+function removeCardImage(which) {
+  if (which === 'question') _cardModalState.qImage = null; else _cardModalState.aImage = null;
+  updateCardImagePreview(which);
+}
+
+async function submitCardModal() {
+  const q = document.getElementById('txtCardQuestion').value.trim();
+  const a = document.getElementById('txtCardAnswer').value.trim();
+  if (!q) { alert('問題文を入力してください。'); document.getElementById('txtCardQuestion').focus(); return; }
+  if (!a) { alert('答えを入力してください。'); document.getElementById('txtCardAnswer').focus(); return; }
+
+  if (_cardModalState.mode === 'edit') {
+    const item = _cardModalState.item;
+    item.question = q; item.answer = a;
+    if (_cardModalState.qImage) item.questionImage = _cardModalState.qImage; else delete item.questionImage;
+    if (_cardModalState.aImage) item.answerImage = _cardModalState.aImage; else delete item.answerImage;
+    if (item.sharedDocId) await updateCardInSharedDoc(item.sharedDocId, item, 'edit');
+    autoMerge(); renderBox();
+  } else {
+    const newCard = { id: 'id_' + Math.random().toString(36).slice(2) + Date.now().toString(36), question: q, answer: a, category: _cardModalState.category, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 };
+    if (_cardModalState.qImage) newCard.questionImage = _cardModalState.qImage;
+    if (_cardModalState.aImage) newCard.answerImage = _cardModalState.aImage;
+    if (_cardModalState.sharedDocId) newCard.sharedDocId = _cardModalState.sharedDocId;
+    db.push(newCard);
+    if (_cardModalState.sharedDocId) updateCardInSharedDoc(_cardModalState.sharedDocId, newCard, 'add');
+    autoMerge(); renderBox();
+  }
+  closeCardModal();
 }

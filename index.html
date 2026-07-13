@@ -362,6 +362,7 @@ body.light-mode .sync-status { background: rgba(255,255,255,0.9); }
         
         <div id="boxDescArea" class="form-group" style="display:none; margin-bottom:15px;">
           <input type="text" id="txtDescAnswer" class="form-control" placeholder="答えを入力してください..." autocomplete="off" style="text-align:center; font-size:1.1rem; height:50px;">
+          <div id="boxDescStructuredArea" style="display:none;"></div>
         </div>
         
         <div id="boxTapArea" style="display:none; margin-bottom:15px;">
@@ -699,6 +700,49 @@ body.light-mode .sync-status { background: rgba(255,255,255,0.9); }
     <div class="form-row">
       <button class="btn btn-secondary" style="flex:1;" onclick="closeBulkAdd()">キャンセル</button>
       <button class="btn" style="flex:1;" onclick="submitBulkAdd()">追加する</button>
+    </div>
+  </div>
+</div>
+
+<!-- ★【0.02.63】カード追加・編集モーダル（画像添付対応） -->
+<div class="ctx-overlay" id="cardModalOverlay" style="display:none;" onclick="closeCardModal()">
+  <div class="menu-card" style="padding:20px; max-width:90%; width:420px; max-height:85vh; overflow-y:auto;" onclick="event.stopPropagation()">
+    <h3 style="color:var(--text); margin-bottom:4px; font-size:1.1rem;" id="cardModalTitle">➕ 新規カード追加</h3>
+    <div id="cardModalCatLabel" style="font-size:0.8rem; color:var(--text3); margin-bottom:15px;">📁 追加先: 未分類</div>
+
+    <div class="form-group">
+      <label style="font-size:0.85rem; color:var(--text2); font-weight:700; display:block; margin-bottom:6px;">❓ 問題文</label>
+      <textarea id="txtCardQuestion" class="form-control" style="height:70px; font-size:0.95rem;" placeholder="問題文を入力..."></textarea>
+      <div id="cardQImageWrap" style="display:none; margin-top:8px;">
+        <img id="cardQImagePreview" style="max-width:100%; max-height:150px; border-radius:8px; display:block; margin-bottom:6px;">
+        <button type="button" class="btn btn-secondary" style="width:auto; padding:6px 12px; font-size:0.75rem;" onclick="removeCardImage('question')">🗑️ 画像を削除</button>
+      </div>
+      <label class="btn btn-secondary" style="margin-top:8px; font-size:0.8rem; padding:9px;">
+        🖼️ 問題に画像を添付
+        <input type="file" accept="image/*" style="display:none;" onchange="handleCardImageSelect(event, 'question')">
+      </label>
+    </div>
+
+    <div class="form-group" style="margin-top:15px;">
+      <label style="font-size:0.85rem; color:var(--text2); font-weight:700; display:block; margin-bottom:6px;">✅ 答え</label>
+      <textarea id="txtCardAnswer" class="form-control" style="height:90px; font-size:0.95rem;" placeholder="答えを入力..."></textarea>
+      <div id="cardAImageWrap" style="display:none; margin-top:8px;">
+        <img id="cardAImagePreview" style="max-width:100%; max-height:150px; border-radius:8px; display:block; margin-bottom:6px;">
+        <button type="button" class="btn btn-secondary" style="width:auto; padding:6px 12px; font-size:0.75rem;" onclick="removeCardImage('answer')">🗑️ 画像を削除</button>
+      </div>
+      <label class="btn btn-secondary" style="margin-top:8px; font-size:0.8rem; padding:9px;">
+        🖼️ 答えに画像を添付
+        <input type="file" accept="image/*" style="display:none;" onchange="handleCardImageSelect(event, 'answer')">
+      </label>
+    </div>
+
+    <div style="font-size:0.72rem; color:var(--text3); margin-top:14px; line-height:1.5; background:var(--bg3); padding:8px 10px; border-radius:8px;">
+      💡 答えを「(他動詞)意味1　意味2/(自動詞)意味3」のように (タグ) + 「/」区切りで書くと、出題時にタグごとの入力欄に分かれます。同じ欄内は全角スペースや「|」区切りでどれか一つ正解にできます。
+    </div>
+
+    <div class="form-row" style="margin-top:18px;">
+      <button class="btn btn-secondary" style="flex:1;" onclick="closeCardModal()">キャンセル</button>
+      <button class="btn" style="flex:1;" onclick="submitCardModal()">保存</button>
     </div>
   </div>
 </div>
