@@ -726,6 +726,16 @@ body.light-mode .sync-status { background: rgba(255,255,255,0.9); }
     <div class="form-group" style="margin-top:15px;">
       <label style="font-size:0.85rem; color:var(--text2); font-weight:700; display:block; margin-bottom:6px;">✅ 答え</label>
       <textarea id="txtCardAnswer" class="form-control" style="height:90px; font-size:0.95rem;" placeholder="答えを入力..."></textarea>
+      <div style="display:flex; flex-wrap:wrap; gap:4px; margin:6px 0;">
+        <button type="button" onclick="insertAtCursor(document.getElementById('txtCardAnswer'), '(他動詞)')" style="font-size:0.7rem; padding:4px 9px; border-radius:12px; border:1px solid var(--border); background:var(--bg4); color:var(--text2);">他動詞</button>
+        <button type="button" onclick="insertAtCursor(document.getElementById('txtCardAnswer'), '(自動詞)')" style="font-size:0.7rem; padding:4px 9px; border-radius:12px; border:1px solid var(--border); background:var(--bg4); color:var(--text2);">自動詞</button>
+        <button type="button" onclick="insertAtCursor(document.getElementById('txtCardAnswer'), '(名詞)')" style="font-size:0.7rem; padding:4px 9px; border-radius:12px; border:1px solid var(--border); background:var(--bg4); color:var(--text2);">名詞</button>
+        <button type="button" onclick="insertAtCursor(document.getElementById('txtCardAnswer'), '(形容詞)')" style="font-size:0.7rem; padding:4px 9px; border-radius:12px; border:1px solid var(--border); background:var(--bg4); color:var(--text2);">形容詞</button>
+        <button type="button" onclick="insertAtCursor(document.getElementById('txtCardAnswer'), '(副詞)')" style="font-size:0.7rem; padding:4px 9px; border-radius:12px; border:1px solid var(--border); background:var(--bg4); color:var(--text2);">副詞</button>
+        <button type="button" onclick="insertAtCursor(document.getElementById('txtCardAnswer'), '(前置詞)')" style="font-size:0.7rem; padding:4px 9px; border-radius:12px; border:1px solid var(--border); background:var(--bg4); color:var(--text2);">前置詞</button>
+        <button type="button" onclick="insertAtCursor(document.getElementById('txtCardAnswer'), '(接続詞)')" style="font-size:0.7rem; padding:4px 9px; border-radius:12px; border:1px solid var(--border); background:var(--bg4); color:var(--text2);">接続詞</button>
+        <button type="button" onclick="insertAtCursor(document.getElementById('txtCardAnswer'), '/')" style="font-size:0.7rem; padding:4px 9px; border-radius:12px; border:1px solid var(--border); background:var(--bg4); color:var(--text2);">／区切り</button>
+      </div>
       <div id="cardAImageWrap" style="display:none; margin-top:8px;">
         <img id="cardAImagePreview" style="max-width:100%; max-height:150px; border-radius:8px; display:block; margin-bottom:6px;">
         <button type="button" class="btn btn-secondary" style="width:auto; padding:6px 12px; font-size:0.75rem;" onclick="removeCardImage('answer')">🗑️ 画像を削除</button>
@@ -743,6 +753,39 @@ body.light-mode .sync-status { background: rgba(255,255,255,0.9); }
     <div class="form-row" style="margin-top:18px;">
       <button class="btn btn-secondary" style="flex:1;" onclick="closeCardModal()">キャンセル</button>
       <button class="btn" style="flex:1;" onclick="submitCardModal()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ★【0.02.64】スキャン取込モーダル（OCR + 見出し語番号でのスマート分割） -->
+<div class="ctx-overlay" id="scanImportOverlay" style="display:none;" onclick="closeScanImport()">
+  <div class="menu-card" style="padding:20px; max-width:92%; width:460px; max-height:88vh; overflow-y:auto;" onclick="event.stopPropagation()">
+    <h3 style="color:var(--text); margin-bottom:4px; font-size:1.1rem;" id="scanImportTitle">📷 スキャン取込</h3>
+    <div style="font-size:0.72rem; color:var(--text3); margin-bottom:14px; line-height:1.5;">
+      単語帳のページを撮影・選択すると文字認識(OCR)を行い、「番号+見出し語」のパターンで自動的に単語ごとへ分割します（鉄壁のような品詞タグ付き多義語カードの形式に最適化）。狭い範囲を撮るほど認識精度が上がります。
+    </div>
+
+    <div id="scanRawArea">
+      <input type="file" accept="image/*" multiple id="scanImportFileInput" class="form-control" style="padding:8px;">
+      <button class="btn" style="margin-top:10px;" id="btnRunScanOcr" onclick="runScanOcr()">🔍 文字認識を実行</button>
+      <div id="scanImportProgress" style="display:none; font-size:0.8rem; color:var(--primary); margin-top:8px; text-align:center;"></div>
+
+      <label style="font-size:0.85rem; color:var(--text2); font-weight:700; display:block; margin-top:16px; margin-bottom:6px;">📝 認識結果（自由に修正できます）</label>
+      <textarea id="txtScanRaw" class="form-control" style="height:180px; font-family:'JetBrains Mono', monospace; font-size:0.78rem;" placeholder="OCR結果がここに表示されます。直接貼り付けや手入力も可能です。"></textarea>
+
+      <div class="form-row" style="margin-top:14px;">
+        <button class="btn btn-secondary" style="flex:1;" onclick="closeScanImport()">キャンセル</button>
+        <button class="btn" style="flex:1;" onclick="scanSplitEntries()">📑 単語ごとに分割</button>
+      </div>
+    </div>
+
+    <div id="scanReviewArea" style="display:none;">
+      <div style="font-size:0.85rem; color:var(--text2); margin-bottom:10px;"><span id="scanReviewCount">0</span>件を検出しました。内容を確認し、不要な項目は削除してください。</div>
+      <div id="scanReviewList"></div>
+      <div class="form-row" style="margin-top:10px;">
+        <button class="btn btn-secondary" style="flex:1;" onclick="scanBackToRaw()">← テキストに戻る</button>
+        <button class="btn" style="flex:1;" onclick="submitScanImport()">🎯 まとめて追加</button>
+      </div>
     </div>
   </div>
 </div>
@@ -773,6 +816,7 @@ body.light-mode .sync-status { background: rgba(255,255,255,0.9); }
 <script src="context-menu.js"></script>
 <script src="batch-add.js"></script>
 <script src="box.js"></script>
+<script src="scan-import.js"></script>
 <script src="quiz.js"></script>
 <script src="stats.js"></script>
 <script src="import-export.js"></script>

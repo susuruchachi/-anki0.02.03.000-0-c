@@ -121,6 +121,10 @@ function handleCategoryLongpress(catName) {
         saveData(true); renderTree();
       } },
     { html: '➕ 問題を一括追加 (Q,A 改行)', action: () => { showBulkAddModal(catName); } },
+    { html: '📷 スキャン取込 (写真でOCR)', action: () => {
+        if (isSharedReadOnly) return alert("🔒 閲覧専用の共有カテゴリーには追加できません。");
+        showScanImportModal(catName);
+      } },
     { type: 'separator' }, ...moveOptions, { type: 'separator' },
     { html: '🔄 成績をリセット (このフォルダーのみ)', action: () => {
         if(!confirm(`⚠️ 「${catName}」とサブフォルダー内の全てのカードの成績（正解数・レベル等）をリセットしますか？\n（問題自体は消えません）`)) return;

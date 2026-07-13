@@ -81,6 +81,72 @@ function formatStructuredAnswerHTML(segments) {
 // Firestoreの1ドキュメント上限（約1MB）とlocalStorageの容量を圧迫しないよう、
 // アップロード画像はcanvasで縮小・JPEG圧縮してからdata URLとして保存する。
 // ================================================================
+// ================================================================
+// ★【0.02.64】スキャン取込（OCR結果の鉄壁形式スマート分割）関連ユーティリティ
+// ================================================================
+
+// OCR結果の余分な空白・改行を軽く整える（過度な加工はしない＝ユーザーの確認前提）
+function cleanOcrBlock(text) {
+  return String(text || '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+// 「行頭の数字（見出し語番号）+ 英単語」を新しい単語エントリーの開始とみなし、
+// OCRテキストを単語ごとのブロックに分割する。派生語（completion等）は行頭に番号が
+// 無いのでエントリーとして分離されず、直前の見出し語のブロックに含まれる。
+// 戻り値: [{question: 見出し語, answer: 残りのブロック(未整形)}, ...]
+function splitOcrIntoEntries(rawText) {
+  const text = String(rawText || '');
+  const lines = text.split(/\r?\n/);
+  // 数字の直後に多少OCRノイズ（記号など）が挟まっても英単語を拾えるように寛容にする
+  const boundaryRe = /^\s*(\d{1,4})[^A-Za-z]{0,15}([A-Za-z][A-Za-z'\-]*(?:\s[A-Za-z][A-Za-z'\-]*){0,3})/;
+  const marks = [];
+  lines.forEach((line, i) => {
+    const m = line.match(boundaryRe);
+    if (m) marks.push({ lineIdx: i, headword: m[2].trim() });
+  });
+  if (marks.length === 0) return [];
+  const entries = [];
+  for (let i = 0; i < marks.length; i++) {
+    const startLine = marks[i].lineIdx;
+    const endLine = i + 1 < marks.length ? marks[i + 1].lineIdx : lines.length;
+    const blockLines = lines.slice(startLine, endLine);
+    const headword = marks[i].headword;
+    const firstLine = blockLines[0];
+    const afterIdx = firstLine.indexOf(headword);
+    const restOfFirstLine = afterIdx !== -1 ? firstLine.slice(afterIdx + headword.length) : '';
+    const restBlock = [restOfFirstLine, ...blockLines.slice(1)].join('\n');
+    entries.push({ question: headword, answer: cleanOcrBlock(restBlock) });
+  }
+  return entries.filter(e => e.question && e.answer);
+}
+
+// テキストエリア/inputのカーソル位置に文字列を挿入する（品詞タグのワンタップ挿入用）
+function insertAtCursor(fieldEl, insertText) {
+  if (!fieldEl) return;
+  const start = fieldEl.selectionStart != null ? fieldEl.selectionStart : fieldEl.value.length;
+  const end = fieldEl.selectionEnd != null ? fieldEl.selectionEnd : fieldEl.value.length;
+  fieldEl.value = fieldEl.value.slice(0, start) + insertText + fieldEl.value.slice(end);
+  const newPos = start + insertText.length;
+  fieldEl.focus();
+  if (fieldEl.setSelectionRange) fieldEl.setSelectionRange(newPos, newPos);
+}
+
+// 品詞タグのワンタップ挿入チップ行を生成する（レビュー一覧など動的生成箇所で使用）
+const TAG_CHIP_LABELS = ['他動詞', '自動詞', '名詞', '形容詞', '副詞', '前置詞', '接続詞', '/'];
+function buildTagChipRow(textareaEl) {
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex; flex-wrap:wrap; gap:4px; margin:6px 0;';
+  TAG_CHIP_LABELS.forEach(tag => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.innerText = tag === '/' ? '／区切り' : tag;
+    chip.style.cssText = 'font-size:0.7rem; padding:4px 9px; border-radius:12px; border:1px solid var(--border); background:var(--bg4); color:var(--text2); cursor:pointer;';
+    chip.onclick = () => { insertAtCursor(textareaEl, tag === '/' ? '/' : `(${tag})`); };
+    row.appendChild(chip);
+  });
+  return row;
+}
+
 function compressImageToDataURL(file, maxDim = 640, quality = 0.6) {
   return new Promise((resolve, reject) => {
     if (!file || !file.type || !file.type.startsWith('image/')) { reject(new Error('画像ファイルではありません')); return; }
