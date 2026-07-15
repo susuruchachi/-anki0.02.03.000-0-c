@@ -116,6 +116,25 @@ function isAnswerCorrect(input, correctAnswer) {
   return norms.includes(inNorm);
 }
 
+// ★【0.02.65】4択・みんはや・文字タップは「1つの答えを選ぶ/組み立てる」形式のため、
+// 品詞タグ付き構造化解答(例: adapt の他動詞/自動詞)を持つカードは、
+// タグ(意味)ごとに独立した単発の問題として連続で出題する。
+// 生成される仮想エントリーは quizPool 内のみに存在し、db には反映されない。
+function expandStructuredForChoiceModes(cards) {
+  const result = [];
+  cards.forEach(card => {
+    const structured = parseStructuredAnswer(card.answer);
+    if (structured) {
+      structured.forEach(seg => {
+        result.push({ ...card, answer: seg.text, _sourceId: card.id, _senseLabel: seg.label });
+      });
+    } else {
+      result.push(card);
+    }
+  });
+  return result;
+}
+
 async function startQuiz(modeType = 'normal') {
   currentCombo = 0; todayCorrectCount = 0;
   if (selectedScopePath.length === 0 && lastQuizScopePath.length > 0) selectedScopePath = [...lastQuizScopePath];
@@ -143,6 +162,10 @@ async function startQuiz(modeType = 'normal') {
           for (let i = subset.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [subset[i], subset[j]] = [subset[j], subset[i]]; }
           quizPool = subset.slice(0, limitCount);
           if (document.getElementById('chkSwapQA').checked) quizPool = quizPool.map(q => ({ ...q, question: q.answer, answer: q.question, questionImage: q.answerImage, answerImage: q.questionImage }));
+          // ★【0.02.65】選択式モードは品詞タグごとに独立した問題として連続出題する
+          if (['choice', 'minhaya', 'tap'].includes(document.getElementById('selQuizMode').value)) {
+            quizPool = expandStructuredForChoiceModes(quizPool);
+          }
           // ★【0.02.63】オンライン対戦は画像を含めずに同期する（Firestoreの1ドキュメント容量上限を超えて対戦が壊れるのを防ぐため）
           quizPool = quizPool.map(q => { const { questionImage, answerImage, ...rest } = q; return rest; });
           
@@ -179,6 +202,10 @@ async function startQuiz(modeType = 'normal') {
   quizPool = subset.slice(0, limitCount); quizIndex = 0;
 
   if (document.getElementById('chkSwapQA').checked) quizPool = quizPool.map(q => ({ ...q, question: q.answer, answer: q.question, questionImage: q.answerImage, answerImage: q.questionImage }));
+  // ★【0.02.65】選択式モードは品詞タグごとに独立した問題として連続出題する
+  if (['choice', 'minhaya', 'tap'].includes(document.getElementById('selQuizMode').value)) {
+    quizPool = expandStructuredForChoiceModes(quizPool);
+  }
   openPage('pgQuizPlayer'); loadQuizQuestion();
 }
 
@@ -199,6 +226,12 @@ function loadQuizQuestion() {
     if (qStructuredSelf) { qDisplay = formatStructuredAnswerHTML(qStructuredSelf); qSpeech = qStructuredSelf.map(s => s.text).join('。'); }
     else if (aStructured) { qDisplay = stripParens(cur.question); qSpeech = qDisplay; }
     qEl.innerHTML = qDisplay;
+    if (cur._senseLabel) {
+      const senseDiv = document.createElement('div');
+      senseDiv.style.cssText = 'font-size:0.8rem; color:var(--primary); font-weight:700; margin-top:8px;';
+      senseDiv.innerText = `🏷️ ${cur._senseLabel}`;
+      qEl.appendChild(senseDiv);
+    }
     if (cur.questionImage) {
       const qImg = document.createElement('img');
       qImg.src = cur.questionImage; qImg.alt = '問題画像';
@@ -217,7 +250,7 @@ function loadQuizQuestion() {
   document.getElementById('txtQuickNote').value = cur.note || '';
 
   if(document.getElementById('chkTTS').checked) {
-    window.speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(qSpeech); u.lang='ja-JP'; window.speechSynthesis.speak(u);
+    speakText(qSpeech);
   }
 
   const mode = document.getElementById('selQuizMode').value;
@@ -243,6 +276,10 @@ function loadQuizQuestion() {
     if(document.getElementById('chkTimeAttack').checked) base *= 0.5;
   }
 
+  // ★【0.02.65】記述式モードで構造化解答の場合、欄の数だけ制限時間を倍にする（実際のカウントダウンにも反映されるようbaseそのものを変更する）
+  if (mode === 'desc' && aStructured) {
+    base *= aStructured.length;
+  }
   quizTimeLimit = base; quizTimeLeft = base;
   stopQuizTimer(); updateTimerUI();
   
@@ -259,10 +296,19 @@ function loadQuizQuestion() {
       return;
     }
     if (speed !== 'expert' && !hintShown && quizTimeLeft < (quizTimeLimit * (speed === 'easy' ? 0.7 : 0.4))) {
-      hintShown = true; const hb = document.getElementById('lblQuizHint');
-      const ans1 = getPrimaryAnswer(cur.answer);
-      hb.innerText = `ヒント: 先頭は「 ${ans1.charAt(0)} 」 ${ans1.length>3?`(全 ${ans1.length} 文字)`:''}`;
-      hb.style.display = 'inline-block';
+      hintShown = true;
+      // ★【0.02.65】記述式モードで解答欄が複数に分かれている場合、欄ごとに1文字目のヒントを出す
+      if (mode === 'desc' && aStructured) {
+        aStructured.forEach((seg, i) => {
+          const hb = document.getElementById('structHint_' + i);
+          if (hb) { hb.innerHTML = `先頭:「${escapeHtml(seg.text.charAt(0))}」`; hb.style.display = 'inline'; }
+        });
+      } else {
+        const hb = document.getElementById('lblQuizHint');
+        const ans1 = getPrimaryAnswer(cur.answer);
+        hb.innerText = `ヒント: 先頭は「 ${ans1.charAt(0)} 」 ${ans1.length>3?`(全 ${ans1.length} 文字)`:''}`;
+        hb.style.display = 'inline-block';
+      }
     }
   }, 100);
 }
@@ -302,9 +348,15 @@ function setupDescAnswerArea(structured) {
     structured.forEach((seg, i) => {
       const row = document.createElement('div');
       row.style.cssText = 'margin-bottom:12px; text-align:left;';
+      const labelRow = document.createElement('div');
+      labelRow.style.cssText = 'display:flex; justify-content:space-between; align-items:baseline; margin-bottom:5px;';
       const label = document.createElement('div');
-      label.style.cssText = 'font-size:0.78rem; color:var(--text2); font-weight:700; margin-bottom:5px;';
+      label.style.cssText = 'font-size:0.78rem; color:var(--text2); font-weight:700;';
       label.innerHTML = `🏷️ ${seg.label || ('解答 ' + (i + 1))}`;
+      const hintSpan = document.createElement('span');
+      hintSpan.id = 'structHint_' + i;
+      hintSpan.style.cssText = 'font-size:0.72rem; color:var(--warn); font-weight:700; display:none;';
+      labelRow.appendChild(label); labelRow.appendChild(hintSpan);
       const input = document.createElement('input');
       input.type = 'text'; input.className = 'form-control'; input.id = 'structAns_' + i;
       input.autocomplete = 'off'; input.placeholder = '答えを入力...';
@@ -314,7 +366,7 @@ function setupDescAnswerArea(structured) {
         const next = document.getElementById('structAns_' + (i + 1));
         if (next) next.focus(); else submitQuizAction();
       };
-      row.appendChild(label); row.appendChild(input);
+      row.appendChild(labelRow); row.appendChild(input);
       structWrap.appendChild(row);
     });
     const first = document.getElementById('structAns_0');
@@ -331,10 +383,11 @@ function buildFourChoices(cur) {
   const correctPrimary = getPrimaryAnswer(cur.answer);
   
   let altCandidates = [];
-  const catAnswers = db.filter(q => q.category === cur.category && getPrimaryAnswer(q.answer) !== correctPrimary).map(q => getPrimaryAnswer(q.answer));
+  // ★【0.02.65】センス分割された仮想エントリーの場合、元カード(_sourceId)自身は候補から除外する
+  const catAnswers = db.filter(q => q.category === cur.category && q.id !== cur._sourceId && getPrimaryAnswer(q.answer) !== correctPrimary).map(q => getPrimaryAnswer(q.answer));
   altCandidates = [...new Set(catAnswers)];
   if(altCandidates.length < 3) {
-    const globalAnswers = db.filter(q => getPrimaryAnswer(q.answer) !== correctPrimary).map(q => getPrimaryAnswer(q.answer));
+    const globalAnswers = db.filter(q => q.id !== cur._sourceId && getPrimaryAnswer(q.answer) !== correctPrimary).map(q => getPrimaryAnswer(q.answer));
     altCandidates = [...new Set([...altCandidates, ...globalAnswers])];
   }
   altCandidates.sort(() => Math.random() - 0.5);
@@ -617,7 +670,8 @@ function evaluateRoundAnswer(isCorrect, head) {
   if (currentStructuredAnswer) {
     fbAnsEl.innerHTML = `<div style="font-weight:700; margin-bottom:6px;">正解:</div>` + formatStructuredAnswerHTML(currentStructuredAnswer);
   } else {
-    fbAnsEl.innerHTML = `正解: ${getPrimaryAnswer(cur.answer)}`;
+    const senseLabelPrefix = cur._senseLabel ? `<span style="color:var(--primary); font-weight:700;">[${cur._senseLabel}]</span> ` : '';
+    fbAnsEl.innerHTML = `正解: ${senseLabelPrefix}${getPrimaryAnswer(cur.answer)}`;
   }
   if (cur.answerImage) {
     const aImg = document.createElement('img');
