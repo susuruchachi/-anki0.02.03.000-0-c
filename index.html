@@ -2,684 +2,827 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>宇宙船シミュレーター v66</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>すするanki</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+<script src="https://unpkg.com/tesseract.js@v2.1.0/dist/tesseract.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <style>
-  html, body {
-    margin: 0;
-    padding: 0;
-    overflow: hidden;
-    background: #000;
-    font-family: 'Segoe UI', system-ui, sans-serif;
-    -webkit-user-select: none;
-    user-select: none;
-  }
-  canvas { display: block; touch-action: none; }
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=JetBrains+Mono:wght@400;700&display=swap');
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color: transparent; touch-action: manipulation; -webkit-touch-callout: none; }
+:root {
+  --bg: #080c14; --bg2: #0f1724; --bg3: #182030; --bg4: #1e2940;
+  --border: #2a3a55; --border2:#3a4f72; --text: #e8edf5; --text2: #8a9bb8; --text3: #5a6e8a;
+  --primary:#4f7cff; --primary2:#3a62e0; --accent: #7c3fff; --success:#22c77a; --danger: #ff4f6a; --warn: #f5a623;
+}
+body.light-mode {
+  --bg: #f0f2f5; --bg2: #ffffff; --bg3: #e4e7ec; --bg4: #d1d5db;
+  --border: #d1d5db; --border2:#9ca3af; --text: #111827; --text2: #4b5563; --text3: #6b7280;
+}
 
-  #hud-root {
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-  }
-  /* #hud-root > * は直下の子要素に一律pointer-events:autoを
-     付ける意図だったが、.hud-touch-controls（全画面inset:0の
-     透明ラッパー）もこの直下の子であるため、CSS詳細度の関係で
-     後述の「.hud-touch-controls { pointer-events: none; }」が
-     このIDセレクタを含むルールに負けて上書きされてしまい、
-     ラッパー自体が画面全体でクリック/タッチを奪っていた
-     （報告のあったBOOST・ドラッグ操作が根本的に効かない原因）。
-     ラッパーだけは対象から明示的に除外する。 */
-  #hud-root > *:not(.hud-touch-controls) { pointer-events: auto; }
+body { background: var(--bg); color: var(--text); font-family: 'Noto Sans JP', sans-serif; overflow: hidden; position: fixed; width: 100%; user-select: none; -webkit-user-select: none; transition: background 0.3s, color 0.3s; }
+input, textarea, select { user-select: auto; -webkit-user-select: auto; font-family: inherit; color: inherit; -webkit-touch-callout: default; }
 
-  .hud-touch-controls {
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-  }
-  .hud-touch-controls > * { pointer-events: auto; }
+.app-container { display: flex; flex-direction: column; height: 100dvh; width: 100vw; position: relative; }
+.screen { flex: 1; display: none; flex-direction: column; overflow-y: auto; padding: 20px; padding-bottom: calc(30px + env(safe-area-inset-bottom)); touch-action: pan-y; overscroll-behavior-y: contain; }
+.screen.active { display: flex; }
 
-  /* v27: 画面右下に小さく薄字でバージョン名を表示する。
-     #hud-rootの外に置き、pointer-events:noneでタッチ操作を
-     一切妨げないようにする（BOOST等のタッチ領域と重ならない
-     右下隅だが、念のため）。 */
-  #version-label {
-    position: fixed;
-    right: 8px;
-    bottom: 4px;
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.28);
-    font-family: 'Segoe UI', system-ui, sans-serif;
-    pointer-events: none;
-    z-index: 9999;
-    user-select: none;
-  }
+/* ★ Markdown 用スタイル */
+.md-content h1 { font-size:1.3rem; border-bottom:1px solid var(--border); padding-bottom:5px; margin-bottom:15px; color:var(--primary); }
+.md-content h2 { font-size:1.15rem; border-bottom:1px solid var(--border); padding-bottom:4px; margin-top:20px; margin-bottom:10px; color:var(--text); }
+.md-content h3 { font-size:1rem; margin-top:15px; margin-bottom:8px; color:var(--text); }
+.md-content ul, .md-content ol { padding-left:20px; margin-bottom:15px; }
+.md-content li { margin-bottom:4px; }
+.md-content p { margin-bottom:15px; line-height:1.6; }
+.md-content table { width:100%; border-collapse:collapse; margin-bottom:15px; }
+.md-content th, .md-content td { border:1px solid var(--border); padding:6px 10px; text-align:left; font-size: 0.85rem;}
+.md-content th { background:var(--bg3); font-weight:bold; }
 
-  .stick-move, .stick-look {
-    position: fixed;
-    bottom: 32px;
-    width: 96px;
-    height: 96px;
-    border-radius: 50%;
-    background: rgba(255,255,255,0.08);
-    border: 1px solid rgba(255,255,255,0.25);
-    touch-action: none;
-  }
-  /* v04: stick-moveは左右+上下ストレイフ専用パッド（前後は
-     throttle-leverに分離）。throttle-lever(56px) + roll-buttons(56px)
-     ぶん右へ寄せる。以前はroll系ボタンとthrottle-leverの位置を
-     連動して調整しておらず、throttle-lever追加時にboth共に
-     left:32pxのまま縦方向で重なるバグがあった（報告：「前後レバーと
-     ロールボタンが重なる」）ため、下部操作系を左から
-     throttle-lever → roll-left/right(縦積み) → stick-move の
-     横並びで明示的にレイアウトし直した */
-  .stick-move { left: 220px; }
-  .stick-look { right: 32px; }
+header { display: flex; align-items: center; justify-content: space-between; padding: 15px 20px; background: var(--bg2); border-bottom: 1px solid var(--border); z-index: 10; }
+.logo-area { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.logo-dot { width: 10px; height: 10px; background: var(--primary); border-radius: 50%; box-shadow: 0 0 10px var(--primary); }
+.logo-text { font-size: 1.1rem; font-weight: 900; letter-spacing: 1px; color: var(--text); }
 
-  /* v04: スロットルレバー（前進後進）。離しても値を保持する
-     「保持型」レバー。stick-move/stick-lookのようなバネ戻り式
-     ジョイスティックとは挙動が異なるため専用のドラッグ処理を
-     02-input.js側に持つ */
-  .throttle-lever {
-    position: fixed;
-    left: 32px;
-    bottom: 32px;
-    width: 56px;
-    height: 172px;
-    border-radius: 10px;
-    background: rgba(255,255,255,0.08);
-    border: 1px solid rgba(255,255,255,0.25);
-    touch-action: none;
-  }
-  .throttle-lever::before {
-    /* 中央=ゼロ推力の目安線 */
-    content: '';
-    position: absolute;
-    left: 4px;
-    right: 4px;
-    top: 50%;
-    height: 1px;
-    background: rgba(255,255,255,0.3);
-    transform: translateY(-0.5px);
-  }
-  .throttle-lever-handle {
-    position: absolute;
-    left: 4px;
-    right: 4px;
-    height: 28px;
-    border-radius: 6px;
-    background: rgba(109,184,255,0.55);
-    border: 1px solid rgba(159,216,255,0.8);
-    top: 50%;
-    transform: translateY(-50%);
-  }
-  .throttle-lever-label {
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: -20px;
-    text-align: center;
-    font-size: 11px;
-    color: #9fd8ff;
-  }
+.hamburger { display: flex; flex-direction: column; justify-content: space-around; width: 22px; height: 18px; background: transparent; border: none; cursor: pointer; padding: 0; z-index: 1002; }
+.hamburger span { width: 100%; height: 2px; background: var(--text); border-radius: 10px; transition: all 0.3s linear; }
 
-  /* v04: throttle-leverの右隣（left:100px〜156px）に縦積み配置。
-     以前はbottom:148pxの横並び前提の位置（left:32px/96px）のままで、
-     throttle-lever(bottom:32px〜204px)と丸ごと重なっていた */
-  .btn-roll-left, .btn-roll-right {
-    position: fixed;
-    left: 100px;
-    width: 56px;
-    height: 40px;
-    border-radius: 8px;
-    background: rgba(255,255,255,0.1);
-    border: 1px solid rgba(255,255,255,0.25);
-    color: #cfe8ff;
-    font-size: 11px;
-    touch-action: none;
-  }
-  .btn-roll-left { bottom: 122px; }
-  .btn-roll-right { bottom: 76px; }
+.side-menu { position: fixed; top: 0; left: -280px; width: 280px; height: 100vh; background: var(--bg2); z-index: 1001; transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 2px 0 15px rgba(0,0,0,0.5); display: flex; flex-direction: column; padding-top: 60px; }
+body.light-mode .side-menu { box-shadow: 2px 0 15px rgba(0,0,0,0.1); }
+.side-menu.open { left: 0; }
 
-  .btn-boost {
-    position: fixed;
-    right: 32px;
-    bottom: 148px;
-    width: 96px;
-    height: 40px;
-    border-radius: 8px;
-    background: rgba(255,140,0,0.18);
-    border: 1px solid rgba(255,160,60,0.45);
-    color: #ffd9a0;
-    font-size: 12px;
-    letter-spacing: 0.1em;
-    touch-action: none;
-  }
+.menu-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.6); z-index: 1000; opacity: 0; pointer-events: none; transition: opacity 0.3s ease; backdrop-filter: blur(2px); }
+.menu-overlay.open { opacity: 1; pointer-events: auto; }
 
-  .hud-debug-panel {
-    position: fixed;
-    top: 12px;
-    left: 12px;
-    padding: 8px 12px;
-    background: rgba(0,0,0,0.4);
-    border: 1px solid rgba(255,255,255,0.15);
-    border-radius: 6px;
-    color: #9fd8ff;
-    font-size: 12px;
-    line-height: 1.6;
-    pointer-events: none;
-  }
+.nav-item { display: flex; align-items: center; gap: 16px; padding: 16px 24px; color: var(--text2); text-decoration: none; font-size: 1rem; font-weight: 700; cursor: pointer; transition: 0.2s; background: none; border: none; outline: none; width: 100%; text-align: left; }
+.nav-item i { font-size: 1.3rem; width: 24px; text-align: center; }
+.nav-item:active { background: var(--bg3); }
+.nav-item.active { color: var(--primary); background: rgba(79,124,255,0.1); border-left: 4px solid var(--primary); padding-left: 20px; }
 
-  /* v42: 設定リンク・進入軸トグル（上段）と航路/航跡トグル（下段）を
-     縦に積むための外側コンテナ。右端揃え（設定・進入軸ボタンの
-     右端と、その下の航路/航跡ボタンの右端を揃える）にすることで
-     「進入軸ボタンの下」という位置関係を作る。 */
-  .hud-top-right-col {
-    position: fixed;
-    top: 12px;
-    right: 12px;
-    left: 12px; /* 折り返し時に右端で詰まらないよう左端まで確保する */
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end; /* 各行を右端に揃える */
-    gap: 8px;
-  }
+h2 { font-size: 1.4rem; font-weight: 700; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; color: var(--text); }
+.card { background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
+.btn { background: var(--primary); color: #fff; border: none; padding: 12px 20px; border-radius: 8px; font-weight: 700; font-size: 0.95rem; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px; transition: 0.2s; width: 100%; text-decoration: none; }
+.btn:active { background: var(--primary2); transform: scale(0.98); }
+.btn-secondary { background: var(--bg4); border: 1px solid var(--border); color: var(--text); }
+.btn-secondary:active { background: var(--bg3); }
+.btn-danger { background: var(--danger); }
+.btn-danger:active { background: #d63e55; }
+.btn-success { background: var(--success); }
+.btn-success:active { background: #1ca363; }
+.btn-accent { background: var(--accent); color:#fff; }
 
-  .hud-top-right-row {
-    display: flex;
-    flex-direction: row-reverse; /* 設定ボタンを右端(従来位置)に保つ */
-    flex-wrap: wrap;
-    justify-content: flex-start; /* row-reverse下でのflex-start=右詰め */
-    gap: 8px;
-    width: 100%;
-  }
+.form-group { margin-bottom: 15px; }
+.form-group label { display: block; font-size: 0.85rem; font-weight: 500; color: var(--text2); margin-bottom: 6px; }
+.form-control { width: 100%; background: var(--bg3); border: 1px solid var(--border); padding: 12px; border-radius: 8px; color: var(--text); font-size: 0.95rem; transition: 0.2s; }
+.form-control:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79,124,255,0.15); }
+.form-row { display: flex; gap: 10px; }
 
-  .hud-settings-link {
-    padding: 8px 14px;
-    background: rgba(0,0,0,0.4);
-    border: 1px solid rgba(255,255,255,0.2);
-    border-radius: 6px;
-    color: #dfefff;
-    font-size: 13px;
-    text-decoration: none;
-    white-space: nowrap;
-  }
+.tree-container { display: flex; flex-direction: column; gap: 8px; }
+.tree-group-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.tree-group-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; background: var(--bg3); cursor: pointer; transition: background 0.2s; }
+.tree-group-header:active { background: var(--bg4); }
+.tree-group-title { display: flex; align-items: center; gap: 10px; font-weight: 700; color: var(--text); font-size: 0.95rem; flex:1; }
+.tree-group-arrow { font-size: 0.8rem; color: var(--text3); transition: transform 0.2s; padding: 5px; }
+.tree-group-card.expanded > .tree-group-header > .tree-group-arrow { transform: rotate(90deg); }
+.tree-group-children { display: none; padding: 0; flex-direction: column; gap: 0; border-top: 1px solid rgba(42,58,85,0.4); }
+.tree-group-card.expanded > .tree-group-children { display: flex; }
+.tree-cat-count { font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--text3); background: var(--bg2); padding: 1px 6px; border-radius: 4px; border: 1px solid var(--border); margin-left: auto; }
 
-  /* v40: 進入軸・目的地ゲートの表示/非表示トグル。
-     v41: 予定航路トグルも同じクラスを使う。
-     v42: 上段（進入軸）・下段（航路/航跡）の2行構成になった
-     （.hud-top-right-col参照、各行はrow-reverse配置で右詰め、
-     狭い画面ではflex-wrapで折り返す）。 */
-  .btn-approach-guides-toggle {
-    padding: 8px 14px;
-    background: rgba(0,0,0,0.4);
-    border: 1px solid rgba(255,170,51,0.4);
-    border-radius: 6px;
-    color: #ffd9a0;
-    font-size: 13px;
-    white-space: nowrap;
-  }
-  .btn-approach-guides-toggle.is-off {
-    border-color: rgba(255,255,255,0.2);
-    color: rgba(255,255,255,0.5);
-  }
+.ctx-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(4,6,10,0.7); backdrop-filter: blur(4px); z-index: 1000; display: none; align-items: center; justify-content: center; padding: 20px; }
+.menu-card { background: var(--bg2); border: 1px solid var(--border2); width: 100%; max-width: 340px; border-radius: 16px; box-shadow: 0 20px 40px rgba(0,0,0,0.5); overflow: hidden; display: flex; flex-direction: column; max-height: 70vh; }
+.menu-header { padding: 14px 16px; background: var(--bg3); border-bottom: 1px solid var(--border); font-size: 0.85rem; font-weight: 700; color: var(--text2); text-overflow: ellipsis; overflow: hidden; white-space: nowrap; text-align: center; }
+.menu-body { overflow-y: auto; flex: 1; padding: 8px; display: flex; flex-direction: column; gap: 4px; touch-action: pan-y; overscroll-behavior-y: contain; }
+.menu-item { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; background: none; border: none; border-radius: 8px; text-align: left; font-size: 0.9rem; font-weight: 500; color: var(--text); cursor: pointer; transition: 0.2s; }
+.menu-item:active { background: var(--bg4); }
+.menu-item.danger { color: var(--danger); }
+.menu-sep { height: 1px; background: var(--border); margin: 6px 8px; }
 
-  .hud-camera-controls {
-    position: fixed;
-    top: 56px;
-    right: 12px;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 8px;
-  }
-  .btn-camera-mode {
-    padding: 8px 14px;
-    background: rgba(0,0,0,0.4);
-    border: 1px solid rgba(255,255,255,0.2);
-    border-radius: 6px;
-    color: #dfefff;
-    font-size: 13px;
-  }
-  .camera-preset-panel {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    gap: 6px;
-    width: 132px;
-  }
-  .camera-preset-panel button {
-    width: 40px;
-    height: 32px;
-    border-radius: 6px;
-    background: rgba(0,0,0,0.4);
-    border: 1px solid rgba(255,255,255,0.2);
-    color: #cfe8ff;
-    font-size: 12px;
-  }
+.list-header { margin-bottom: 15px; font-size: 0.85rem; color: var(--text2); display: flex; justify-content: space-between; align-items: center; }
+.q-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 10px; position: relative; transition: 0.2s; }
+.q-card-text { font-size: 0.95rem; font-weight: 700; margin-bottom: 6px; color: var(--text); }
+.q-card-sub { font-size: 0.8rem; color: var(--text2); display: flex; gap: 10px; align-items: center; margin-top:8px;}
+.badge { font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; padding: 1px 5px; border-radius: 4px; font-weight: 700; }
+.badge-level { background: rgba(79,124,255,0.15); color: var(--primary); border: 1px solid rgba(79,124,255,0.3); }
+.badge-grad { background: rgba(34,199,122,0.15); color: var(--success); border: 1px solid rgba(34,199,122,0.3); }
 
-  .hud-damping-toggle,
-  .hud-retro-damping-toggle {
-    padding: 8px 14px;
-    background: rgba(0,0,0,0.4);
-    border: 1px solid rgba(108,195,255,0.4);
-    border-radius: 6px;
-    color: #9fd8ff;
-    font-size: 12px;
-    text-align: left;
-  }
-  .hud-damping-toggle.is-off,
-  .hud-retro-damping-toggle.is-off {
-    border-color: rgba(255,255,255,0.2);
-    color: rgba(255,255,255,0.5);
-  }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; }
+.panel-stat { background: var(--bg3); border: 1px solid var(--border); border-radius: 10px; padding: 12px; text-align: center; }
+.panel-num { font-family: 'JetBrains Mono', monospace; font-size: 1.4rem; font-weight: 900; color: var(--text); margin-bottom: 2px; }
+.panel-label { font-size: 0.75rem; color: var(--text2); font-weight: 500; }
 
-  /* -----------------------------------------------------------
-     v09: サイドメニュー（横スライドパネル）
-     スマホの狭い横幅でも常設ボタンが並びきらないため、自動制動/
-     自動操船/目的地座標入力をここにまとめて収納する。
-     タブは画面左端中央に常時表示。パネルはタブの右に隠れており、
-     is-openクラスが付くとtransformでスライドインする。
-  ----------------------------------------------------------- */
-  .hud-side-menu {
-    position: fixed;
-    top: 168px;
-    left: 0;
-    display: flex;
-    align-items: flex-start;
-    z-index: 20;
-  }
-  .side-menu-tab {
-    width: 36px;
-    height: 56px;
-    border-radius: 0 8px 8px 0;
-    background: rgba(0,0,0,0.55);
-    border: 1px solid rgba(108,195,255,0.4);
-    border-left: none;
-    color: #9fd8ff;
-    font-size: 16px;
-    flex-shrink: 0;
-  }
-  .side-menu-panel {
-    width: 220px;
-    max-height: min(50vh, 300px);
-    overflow-y: auto;
-    padding: 14px;
-    margin-left: -1px;
-    background: rgba(0,0,0,0.55);
-    border: 1px solid rgba(108,195,255,0.4);
-    border-radius: 0 10px 10px 0;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    transform: translateX(-100%);
-    transition: transform 0.2s ease;
-    pointer-events: none;
-  }
-  .hud-side-menu.is-open .side-menu-panel {
-    transform: translateX(0);
-    pointer-events: auto;
-  }
-  .side-menu-section-title {
-    color: rgba(159,216,255,0.6);
-    font-size: 11px;
-    letter-spacing: 0.05em;
-    margin-top: 6px;
-  }
-  .side-menu-section-title:first-child {
-    margin-top: 0;
-  }
-  .side-menu-panel button {
-    padding: 8px 12px;
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(108,195,255,0.4);
-    border-radius: 6px;
-    color: #9fd8ff;
-    font-size: 12px;
-    text-align: left;
-  }
-  .side-menu-panel .btn-docking-toggle.is-on {
-    border-color: #6cc3ff;
-    background: rgba(108,195,255,0.18);
-    color: #dfefff;
-  }
-  .side-menu-panel .btn-docking-toggle.is-disabled {
-    border-color: rgba(255,255,255,0.15);
-    color: rgba(255,255,255,0.35);
-  }
-  .docking-coord-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .docking-coord-row label {
-    width: 14px;
-    color: #9fd8ff;
-    font-size: 12px;
-  }
-  .docking-coord-row input {
-    flex: 1;
-    min-width: 0;
-    padding: 6px 8px;
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(108,195,255,0.4);
-    border-radius: 6px;
-    color: #dfefff;
-    font-size: 12px;
-  }
+.quiz-container { flex: 1; display: flex; flex-direction: column; justify-content: space-between; position:relative; }
+.quiz-header-status { display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; margin-bottom: 15px; }
+.timer-bar-bg { width: 100%; height: 6px; background: var(--bg3); border-radius: 3px; overflow: hidden; margin-bottom: 20px; border: 1px solid var(--border); }
+.timer-bar-fill { width: 100%; height: 100%; background: linear-gradient(90deg, var(--primary), var(--accent)); transition: width 0.1s linear; }
+.timer-bar-fill.warning { background: var(--danger); }
+
+.combo-display { position: absolute; top: 30%; left: 50%; transform: translate(-50%, -50%) scale(0); font-size: 3rem; font-weight: 900; color: var(--warn); text-shadow: 0 4px 15px rgba(245,166,35,0.6); pointer-events: none; z-index: 50; opacity: 0; }
+.combo-display.pop { animation: comboPop 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+@keyframes comboPop { 0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0; } 50% { transform: translate(-50%, -50%) scale(1.2); opacity: 1; } 100% { transform: translate(-50%, -50%) scale(1); opacity: 0; } }
+
+.question-display-box { background: var(--bg2); border: 1px solid var(--border2); border-radius: 14px; padding: 30px 20px; text-align: center; margin-bottom: 20px; position: relative; box-shadow: 0 8px 24px rgba(0,0,0,0.3); min-height: 140px; display: flex; align-items: center; justify-content: center; flex-direction: column; }
+.q-text { font-size: 1.25rem; font-weight: 700; color: var(--text); line-height: 1.5; word-break: break-all; }
+.hint-text { font-size: 0.85rem; color: var(--warn); margin-top: 10px; font-weight: 500; background: rgba(245,166,35,0.1); padding: 4px 12px; border-radius: 20px; border: 1px solid rgba(245,166,35,0.2); animation: pulse 1.5s infinite; }
+
+.feedback-area { margin-top: 15px; padding: 12px; border-radius: 8px; text-align: center; font-weight: 700; font-size: 1rem; display: none; flex-direction: column; gap: 8px; }
+.feedback-area.correct { display: flex; background: rgba(34,199,122,0.15); color: var(--success); border: 1px solid rgba(34,199,122,0.3); }
+.feedback-area.incorrect { display: flex; background: rgba(255,79,106,0.15); color: var(--danger); border: 1px solid rgba(255,79,106,0.3); }
+.feedback-ans { font-size: 0.85rem; color: var(--text); font-weight: 400; margin-top: 2px; }
+
+.choice-grid { display: grid; grid-template-columns: 1fr; gap: 10px; margin-bottom: 15px; }
+.choice-btn { background: var(--bg3); border: 1px solid var(--border); padding: 14px 16px; border-radius: 10px; text-align: left; font-size: 0.95rem; font-weight: 500; cursor: pointer; transition: 0.2s; display: flex; align-items: center; gap: 10px; color: var(--text); }
+.choice-btn:active:not(:disabled) { background: var(--bg4); border-color: var(--primary); }
+.choice-idx { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; background: var(--bg4); color: var(--text2); width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; border-radius: 50%; border: 1px solid var(--border); }
+
+.achieve-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; cursor: pointer; transition: 0.2s; }
+.achieve-row:active { background: var(--bg4); }
+.achieve-label { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; font-weight: 500; }
+.achieve-count { font-family: 'JetBrains Mono', monospace; font-size: 0.95rem; font-weight: 700; color: var(--text); }
+
+.setting-box { border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 15px; background: rgba(24,32,48,0.4); }
+body.light-mode .setting-box { background: rgba(240,242,245,0.4); }
+.setting-box-title { font-size: 0.8rem; font-weight: 700; color: var(--text2); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+
+.heatmap-grid { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px; justify-content: center; }
+.heatmap-cell { width: 14px; height: 14px; border-radius: 3px; background: var(--bg4); }
+.heatmap-cell[data-level="1"] { background: #9be9a8; }
+.heatmap-cell[data-level="2"] { background: #40c463; }
+.heatmap-cell[data-level="3"] { background: #30a14e; }
+.heatmap-cell[data-level="4"] { background: #216e39; }
+
+@keyframes pulse { 0% { opacity: 0.8; } 50% { opacity: 1; } 100% { opacity: 0.8; } }
+.sync-status { position: fixed; top: 10px; right: 15px; background: rgba(30, 41, 64, 0.9); backdrop-filter: blur(5px); border: 1px solid var(--border); color: var(--text2); font-size: 0.75rem; font-weight: 700; padding: 6px 12px; border-radius: 20px; z-index: 1000; transition: all 0.3s ease; box-shadow: 0 4px 10px rgba(0,0,0,0.3); pointer-events: none; }
+body.light-mode .sync-status { background: rgba(255,255,255,0.9); }
+.sync-status.saving { color: var(--warn); border-color: var(--warn); }
+.sync-status.success { color: var(--success); border-color: var(--success); }
+.sync-status.error { color: var(--danger); border-color: var(--danger); }
+.sync-status.hidden { opacity: 0; transform: translateY(-20px); }
+.update-banner-title { font-weight: bold; color: var(--primary); display:flex; align-items:center; }
+
+/* 漢文・古典用の縦書きコンテナ */
+.kanbun-container {
+  writing-mode: vertical-rl; /* 縦書き・右から左へ */
+  font-family: 'Noto Serif JP', 'S行書', serif;
+  font-size: 1.8rem;
+  line-height: 2.5;
+  height: 250px; /* 画面に収まる高さに調整 */
+  margin: 0 auto;
+  padding: 10px;
+}
+
+/* 返り点（レ点、一二三点など）の配置調整 */
+.kaeriten {
+  font-size: 0.65rem;
+  vertical-align: sub;
+  margin-left: -0.2em;
+  margin-right: 0.1em;
+  color: var(--warn);
+}
+
+/* 問題・解答文内の画像がはみ出さないようにする */
+#lblQuizQuestion img, #feedbackAnswerText img, #selfAnswerDisplay img, .kanbun-container img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+
 </style>
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+<script src="version-info.js"></script>
+<script>
+  document.title = "すするanki " + (typeof APP_VERSION !== 'undefined' ? APP_VERSION : '');
+</script>
+
+<!-- KaTeXのCSSとJavaScriptをCDNから読み込む -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
+
 </head>
 <body>
 
-<div id="hud-root"></div>
-<div id="version-label"></div>
+<div class="app-container">
+  <div id="cloudSyncStatus" class="sync-status hidden">☁️ 待機中</div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/MTLLoader.js"></script>
+  <header>
+    <div style="display:flex; align-items:center; gap:16px;">
+      <button class="hamburger" onclick="openMenu()">
+        <span></span><span></span><span></span>
+      </button>
+      <div class="logo-area" onclick="openPage('pgHome')">
+        <div class="logo-dot"></div>
+        <div class="logo-text">すするanki</div>
+      </div>
+    </div>
+    <div style="display:flex; gap:10px; align-items:center;">
+      <button class="btn btn-secondary" style="padding: 4px 8px; width:auto; font-size:0.8rem;" onclick="toggleLightMode()">🌓</button>
+    </div>
+  </header>
 
-<script src="01-state-and-config.js"></script>
-<script src="02-input.js"></script>
-<script src="03-thruster-solver.js"></script>
-<script src="04-flight-physics.js"></script>
-<script src="05-ship-controller.js"></script>
-<script src="06-hud.js"></script>
-<script src="07-engine-fx.js"></script>
-<script src="08-camera.js"></script>
-<script src="10-docking-platform.js"></script>
-<script src="11-approach-visualizer.js"></script>
+  <div id="menuOverlay" class="menu-overlay" onclick="closeMenu()"></div>
+  <nav id="sideMenu" class="side-menu">
+    <div style="padding: 0 24px 20px 24px; border-bottom: 1px solid var(--border); margin-bottom: 10px;">
+      <div class="logo-text" style="font-size:1.3rem;">すするanki</div>
+      <div class="version-badge" id="appVersionBadge" style="display:inline-block; margin-top:6px; font-size:0.8rem;"></div>
+    </div>
+    <button class="nav-item active" id="navHome" onclick="openPage('pgHome')"><i>🏠</i>ホーム・クイズ</button>
+    <button class="nav-item" id="navTree" onclick="openPage('pgTree')"><i>📁</i>構造エクスプローラー</button>
+    <button class="nav-item" id="navBox" onclick="openPage('pgBox')"><i>📝</i>問題カード箱</button>
+    <button class="nav-item" id="navOnlineMatch" onclick="openPage('pgOnlineMatch')"><i>⚔️</i>オンライン対戦</button>
+    <button class="nav-item" id="navStats" onclick="openPage('pgStats')"><i>📊</i>実績・学習状況</button>
+    <button class="nav-item" id="navBackup" onclick="openPage('pgBackup')"><i>💾</i>管理・設定</button>
+  </nav>
+
+  <div id="pgHome" class="screen active">
+    <h2>🏠 クイズに挑戦</h2>
+    <div class="card" style="display:flex; gap:10px;">
+      <button class="btn btn-accent" style="flex:1;" onclick="startQuiz('tokkun')">🔥 集中特訓<br><span style="font-size:0.65rem;">(苦手・しっかりのみ)</span></button>
+      <button class="btn btn-success" style="flex:1;" onclick="startQuiz('review')">♻️ ランダム復習<br><span style="font-size:0.65rem;">(卒業済みから出題)</span></button>
+    </div>
+
+    <div class="card">
+      <div class="setting-box-title">⚙️ クイズ設定</div>
+      <div class="form-group" id="scopeGroup">
+        <label>🎯 出題範囲（ドリルダウン選択）</label>
+        <div id="scopeSelectors" style="display:flex; flex-direction:column; gap:8px;"></div>
+      </div>
+      <div class="form-group">
+        <label>🗂️ 出題モード</label>
+        <select id="selQuizMode" class="form-control">
+          <option value="desc">📝 記述式入力モード</option>
+          <option value="choice">🎴 4択択一モード</option>
+          <option value="minhaya">⚡ みんはや形式 (1文字ずつ4択)</option>
+          <option value="tap">👆 文字タップモード (Duolingo風)</option>
+          <option value="self">🧠 自己申告モード (Anki風)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>⚡ 挑戦難易度 (制限時間/ヒント速度が一括適用)</label>
+        <select id="selQuizSpeed" class="form-control">
+          <option value="easy">🌱 やさしい (時間長め/ヒント最速)</option>
+          <option value="normal" selected>☕ 普通 (標準バランス)</option>
+          <option value="hard">🔥 難しい (時間厳格/ヒント遅め)</option>
+          <option value="expert">💀 すごい (超高速/ヒントなし)</option>
+        </select>
+      </div>
+      
+      <div class="form-group" style="display:flex; align-items:center; gap:8px; margin-top:10px;">
+        <input type="checkbox" id="chkTTS" style="width:16px; height:16px; accent-color:var(--primary);">
+        <label for="chkTTS" style="margin-bottom:0; cursor:pointer;">🗣️ 問題文を音声で読み上げる</label>
+      </div>
+      <div class="form-group" style="display:flex; align-items:center; gap:8px; margin-top:5px;">
+        <input type="checkbox" id="chkTimeAttack" style="width:16px; height:16px; accent-color:var(--danger);">
+        <label for="chkTimeAttack" style="margin-bottom:0; cursor:pointer;">⏱️ タイムアタック (制限時間半分)</label>
+      </div>
+      <div class="form-group" style="display:flex; align-items:center; gap:8px; margin-top:5px;">
+        <input type="checkbox" id="chkIncludeGrad" style="width:16px; height:16px; accent-color:var(--primary);">
+        <label for="chkIncludeGrad" style="margin-bottom:0; cursor:pointer;">🎓 卒業済みのカードも出題に含める</label>
+      </div>
+      <div class="form-group" style="display:flex; align-items:center; gap:8px; margin-top:5px;">
+        <input type="checkbox" id="chkSwapQA" style="width:16px; height:16px; accent-color:var(--accent);">
+        <label for="chkSwapQA" style="margin-bottom:0; cursor:pointer;">🔄 問題と答えを入れ替えて出題</label>
+      </div>
+      <div class="form-row" style="margin-top:15px;">
+        <div style="flex:1;"><label style="display:block; font-size:0.75rem; color:var(--text2); margin-bottom:4px;">出題数</label><input type="number" id="numQCount" class="form-control" value="10" min="1"></div>
+      </div>
+    </div>
+    <button class="btn" onclick="startQuiz('normal')">🚀 通常クイズスタート</button>
+    <div class="form-row" style="margin-top:15px;">
+      <button class="btn btn-secondary" style="flex:1;" onclick="openPage('pgTutorial')">📖 使い方ガイド</button>
+      <button class="btn btn-secondary" style="flex:1;" onclick="openPage('pgUpdates'); loadUpdates();">📢 お知らせ履歴</button>
+    </div>
+  </div>
+
+  <div id="pgUpdates" class="screen">
+    <h2>📢 お知らせ・アプデ履歴</h2>
+    <div id="updatesListArea" style="display:flex; flex-direction:column; gap:10px;">
+      <p style="text-align:center; color:var(--text3); font-size:0.9rem;">読み込み中...</p>
+    </div>
+    <button class="btn btn-secondary" style="margin-top:15px;" onclick="openPage('pgHome')">🏠 ホームに戻る</button>
+  </div>
+  
+  <div id="pgTutorial" class="screen">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+      <h2>📖 使い方ガイド</h2>
+      <button class="btn btn-secondary" style="width:auto; padding:6px 12px; font-size:0.85rem;" onclick="openPage('pgHome')">戻る</button>
+    </div>
+    <div class="card md-content" id="tutorialContent" style="font-size:0.85rem; padding:20px;">
+      <p style="text-align:center; color:var(--text3);">ガイドを読み込み中...</p>
+    </div>
+  </div>
+
+  <div id="pgTree" class="screen">
+    <h2>📁 構造エクスプローラー</h2>
+    <div class="form-group form-row" style="margin-bottom:20px;">
+      <input type="text" id="txtNewRoot" class="form-control" placeholder="新しい大元のフォルダーを作成...">
+      <button class="btn" style="width:auto; padding:0 16px;" onclick="addNewRootCategory()">作成</button>
+    </div>
+    <div class="tree-container" id="treeRoot"></div>
+  </div>
+
+  <div id="pgBox" class="screen">
+    <h2 id="boxTitle">📝 問題カード箱</h2>
+    <button class="btn btn-secondary" style="width:100%; margin-bottom:15px; padding:10px;" onclick="openPage('pgPublicCategories')">🌐 公開カテゴリーを見る</button>
+    <div class="form-group form-row" style="margin-bottom: 15px;">
+      <input type="text" id="txtSearchBox" class="form-control" placeholder="検索..." oninput="renderBox()">
+      <button class="btn btn-secondary" style="width:auto; padding:0 16px; white-space:nowrap;" onclick="showAllCards()">全表示</button>
+    </div>
+    <div class="list-header"><span id="lblBoxCount">0件</span><button class="btn btn-secondary" style="width:auto; padding:4px 10px; font-size:0.8rem; height:30px;" onclick="showAddQModal()">➕ 新規追加</button></div>
+    <div id="boxList"></div>
+  </div>
+
+  <div id="pgQuizPlayer" class="screen">
+    <div class="quiz-container">
+      <div id="comboDisplay" class="combo-display">2 COMBO!</div>
+      
+      <div>
+        <div class="quiz-header-status">
+          <span id="lblQuizProgress" style="font-family:'JetBrains Mono',monospace; font-weight:700;">Q 1/10</span>
+          <span id="lblQuizTimerText" style="font-family:'JetBrains Mono',monospace; font-weight:700; color:var(--primary);">--.-s</span>
+        </div>
+        <div class="timer-bar-bg"><div id="barTimerFill" class="timer-bar-fill"></div></div>
+        
+        <div class="question-display-box">
+          <div id="lblQuizQuestion" class="q-text">Loading...</div>
+          <div id="lblQuizHint" class="hint-text" style="display:none;"></div>
+        </div>
+
+        <div id="quizFeedback" class="feedback-area">
+          <div id="feedbackResultText">正解！</div>
+          <div id="feedbackAnswerText" class="feedback-ans"></div>
+          <div style="margin-top:10px; text-align:left;">
+            <label style="font-size:0.75rem; color:var(--text2);">📝 クイックメモ (語呂合わせ等)</label>
+            <input type="text" id="txtQuickNote" class="form-control" style="padding:6px; font-size:0.85rem;" placeholder="メモを追加..." onchange="saveQuickNote(this.value)">
+          </div>
+        </div>
+
+        <div id="boxChoiceArea" class="choice-grid" style="display:none;"></div>
+        
+        <div id="boxDescArea" class="form-group" style="display:none; margin-bottom:15px;">
+          <input type="text" id="txtDescAnswer" class="form-control" placeholder="答えを入力してください..." autocomplete="off" style="text-align:center; font-size:1.1rem; height:50px;">
+          <div id="boxDescStructuredArea" style="display:none;"></div>
+        </div>
+        
+        <div id="boxTapArea" style="display:none; margin-bottom:15px;">
+          <div id="tapInputArea" style="min-height:50px; background:var(--bg3); border:1px solid var(--border); border-radius:8px; display:flex; align-items:center; justify-content:center; gap:5px; flex-wrap:wrap; padding:10px; margin-bottom:15px;" onclick="removeLastTap()"></div>
+          <div id="tapChoiceArea" style="display:flex; flex-wrap:wrap; justify-content:center; gap:8px;"></div>
+        </div>
+
+        <div id="boxMinhayaArea" style="display:none; margin-bottom:15px;"></div>
+        
+        <div id="boxSelfArea" style="display:none; margin-bottom:15px; text-align:center;">
+          <button id="btnShowAnswer" class="btn btn-secondary" onclick="showSelfAnswer()" style="width:100%;">👀 答えを見る</button>
+          <div id="selfJudgeArea" style="display:none; margin-top:15px;">
+            <div style="font-size:1.1rem; font-weight:bold; margin-bottom:15px; color:var(--text);" id="selfAnswerDisplay"></div>
+            <div class="form-row">
+              <button class="btn btn-danger" onclick="submitSelfMode('miss')">❌ ミス</button>
+              <button class="btn btn-secondary" onclick="submitSelfMode('good')">△ 普通</button>
+              <button class="btn btn-success" onclick="submitSelfMode('perfect')">⭕ 完璧</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-row" style="margin-top:15px;">
+        <button id="btnQuizPass" class="btn btn-secondary" style="flex:1;" onclick="passQuizQuestion()">🏳️ パス</button>
+        <button id="btnQuizAction" class="btn" style="flex:2;" onclick="submitQuizAction()">確定する</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="pgStats" class="screen">
+    <h2>📊 習熟実績と学習状況</h2>
+    
+    <div class="card">
+      <div class="setting-box-title">🔥 学習ヒートマップ (過去30日)</div>
+      <div id="heatmapContainer" class="heatmap-grid"></div>
+    </div>
+
+    <div class="card">
+      <div class="setting-box-title">🥧 ランク分布グラフ</div>
+      <div style="width: 100%; max-width: 250px; margin: 0 auto;">
+        <canvas id="rankPieChart"></canvas>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="panel-stat"><div class="panel-num" id="statTotal">0</div><div class="panel-label">総カード数</div></div>
+      <div class="panel-stat"><div class="panel-num" id="statGradRatio">0%</div><div class="panel-label">卒業達成率</div></div>
+    </div>
+    <div class="card" style="padding:10px;">
+      <div class="achieve-row" onclick="filterBoxByStatus('grad')"><div class="achieve-label"><span style="color:var(--success);">🎓</span> 卒業 (超安定)</div><div class="achieve-count" id="cntGrad">0</div></div>
+      <div class="achieve-row" onclick="filterBoxByStatus('master')"><div class="achieve-label"><span style="color:var(--primary);">⚡</span> 得意</div><div class="achieve-count" id="cntMaster">0</div></div>
+      <div class="achieve-row" onclick="filterBoxByStatus('normal')"><div class="achieve-label">☕ 普通</div><div class="achieve-count" id="cntNormal">0</div></div>
+      <div class="achieve-row" onclick="filterBoxByStatus('weak')"><div class="achieve-label"><span style="color:var(--warn);">⚠️</span> 苦手</div><div class="achieve-count" id="cntWeak">0</div></div>
+      <div class="achieve-row" onclick="filterBoxByStatus('shikkari')"><div class="achieve-label"><span style="color:var(--danger);">🧱</span> しっかり</div><div class="achieve-count" id="cntShikkari">0</div></div>
+      <div class="achieve-row" onclick="filterBoxByStatus('unseen')"><div class="achieve-label"><span style="color:var(--text3);">💤</span> 未着手</div><div class="achieve-count" id="cntUnseen">0</div></div>
+    </div>
+  </div>
+
+  <div id="pgBackup" class="screen">
+    <h2>💾 管理・クラウド同期</h2>
+    <div class="card">
+      <div class="setting-box-title">☁️ Google同期</div>
+      <div id="fbLoginState" style="margin-bottom:10px; font-size:0.85rem; color:var(--warn); font-weight:bold;">未ログイン</div>
+      <button class="btn btn-secondary" id="btnFbLogin" onclick="firebaseLogin()">🔑 ログイン</button>
+      <button class="btn btn-secondary" id="btnFbLogout" style="display:none;" onclick="firebaseLogout()">🚪 ログアウト</button>
+      <button class="btn btn-success" style="margin-top:10px;" onclick="syncToCloud(false)">☁️ クラウドと手動マージ同期</button>
+    </div>
+
+    <div id="updatePostArea" class="card" style="border-color: var(--accent); display: none;">
+      <div class="setting-box-title" style="color: var(--accent);">📢 管理者: お知らせ投稿</div>
+      <div class="form-group">
+        <label>タイトル</label>
+        <input type="text" id="txtUpdTitle" class="form-control" placeholder="例: バグ修正とUI改善">
+      </div>
+      <div class="form-group">
+        <label>バージョン</label>
+        <input type="text" id="txtUpdVersion" class="form-control">
+      </div>
+      <div class="form-group">
+        <label>アップデート内容</label>
+        <textarea id="txtUpdContent" class="form-control" style="height:120px; font-size:0.85rem;" placeholder="アップデート内容をここに入力..."></textarea>
+      </div>
+      <button class="btn btn-accent" onclick="postUpdate()">🚀 お知らせを配信する</button>
+      <hr style="border:0; border-top:1px solid var(--border); margin:15px 0;">
+      <div class="setting-box-title" style="color: var(--accent);">📥 ユーザーからのバグ報告・要望一覧</div>
+      <button class="btn btn-secondary" style="margin-bottom:10px; padding:6px 12px; font-size:0.8rem; width:auto;" onclick="loadUserReports()">🔄 更新</button>
+      <div id="adminReportsList" style="display:flex; flex-direction:column; gap:10px; max-height:400px; overflow-y:auto; padding:5px;"></div>
+      <hr style="border:0; border-top:1px solid var(--border); margin:15px 0;">
+      <div class="setting-box-title" style="color: var(--accent);">📥 バグ報告・要望 CSVインポート</div>
+      <div class="form-row">
+        <button class="btn btn-secondary" onclick="document.getElementById('fileReportCSV').click()">エクセル/CSVを選択してインポート</button>
+        <input type="file" id="fileReportCSV" accept=".csv, text/csv" style="display:none;" onchange="importReportCSV(event)">
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="setting-box-title">💡 バグ報告・機能の要望</div>
+      <textarea id="txtUserReport" class="form-control" style="height:80px; font-size:0.85rem; margin-bottom:10px;" placeholder="アプリのバグや「こんな機能が欲しい！」など、ご自由に送信してください。"></textarea>
+      <button class="btn btn-secondary" onclick="submitUserReport()">送信する</button>
+    </div>
+    
+    <div class="card">
+      <div class="setting-box-title">👥 ソーシャル・フレンド機能</div>
+      <button class="btn btn-accent" onclick="openPage('pgFriends'); loadAppFriends(); loadDailyRanking();">🏆 ランキング・チャットを開く</button>
+      <div style="margin-top:10px;">
+        <label style="font-size:0.75rem; color:var(--text2);">あなたのUID:</label>
+        <input type="text" id="txtMyUid" class="form-control" readonly style="margin-bottom:5px;">
+        <button class="btn btn-secondary" style="padding:8px; font-size:0.8rem;" onclick="copyMyUid()">📋 コピー</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="setting-box-title">📊 成績共有設定</div>
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+        <input type="checkbox" id="chkShareStats" style="width:18px; height:18px; accent-color:var(--primary);" onchange="toggleShareStats()">
+        <label for="chkShareStats" style="margin-bottom:0; cursor:pointer; flex:1;">成績をフレンドと共有する</label>
+      </div>
+      <div style="font-size:0.8rem; color:var(--text3); background:var(--bg3); padding:10px; border-radius:6px; border:1px solid var(--border);">
+        📝 有効にすると、カテゴリーごとの成績（正解数・成績率）がフレンドと共有されます。フレンドはグラフで成績を比較できます。
+      </div>
+      <button class="btn btn-secondary" style="margin-top:10px; width:100%;" onclick="openPage('pgCompareStats')">📊 フレンド成績比較</button>
+    </div>
+
+    <div class="setting-box">
+      <div class="setting-box-title">📦 JSON / CSV バックアップ</div>
+      <div class="form-row" style="margin-bottom:10px;">
+        <button class="btn btn-secondary" onclick="exportJSON()">JSON出力</button>
+        <button class="btn btn-secondary" onclick="document.getElementById('fileJSON').click()">JSON入力</button>
+        <input type="file" id="fileJSON" accept=".json" style="display:none;" onchange="importJSON(event)">
+      </div>
+      <div class="form-row">
+        <button class="btn btn-secondary" onclick="exportCSV()">CSV出力</button>
+        <button class="btn btn-secondary" onclick="document.getElementById('fileCSV').click()">CSV入力</button>
+        <input type="file" id="fileCSV" accept=".csv, text/csv" style="display:none;" onchange="importCSV(event)">
+      </div>
+    </div>
+    <button class="btn btn-secondary" style="margin-top:10px;" onclick="resetScores()">🔄 成績をリセット（問題は保持）</button>
+    <button class="btn btn-danger" style="margin-top:15px;" onclick="factoryReset()">🚨 全データを初期化</button>
+  </div>
+
+  <div id="pgFriends" class="screen">
+    <h2>🏆 ランキング・フレンド</h2>
+    <div id="friendsListArea" style="flex:1; display:flex; flex-direction:column;">
+      
+      <div class="card" style="margin-bottom:15px; border-color:var(--warn);">
+        <div class="setting-box-title" style="color:var(--warn);">👑 今日の正解数ランキング</div>
+        <div id="rankingList" style="font-size:0.9rem; display:flex; flex-direction:column; gap:8px;">(読み込み中...)</div>
+        <button class="btn btn-secondary" style="margin-top:10px; font-size:0.75rem; padding:6px;" onclick="loadDailyRanking()">🔄 更新</button>
+      </div>
+
+      <div class="card" style="margin-bottom:15px;">
+        <div class="setting-box-title">🤝 フレンド追加</div>
+        <div class="form-row">
+          <input type="text" id="txtAddFriendUid" class="form-control" placeholder="友達のUIDを入力">
+          <button class="btn btn-accent" style="width:auto; padding:0 15px;" onclick="addAppFriend()">追加</button>
+        </div>
+      </div>
+
+      <h3 style="font-size: 1.1rem; font-weight: 700; margin: 10px 0; color: var(--text);">📜 フレンド一覧</h3>
+      <div id="appFriendsList" style="flex:1; overflow-y:auto;"></div>
+      <button class="btn btn-secondary" style="margin-top:15px;" onclick="openPage('pgBackup')">戻る</button>
+    </div>
+
+    <div id="chatArea" style="display:none; flex-direction:column; height: 100%;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <h3 id="chatWithTitle" style="font-size:1.1rem; font-weight:bold; color:var(--text);">Chat</h3>
+        <button class="btn btn-secondary" style="width:auto; padding:4px 10px; font-size:0.8rem;" onclick="closeChat()">一覧に戻る</button>
+      </div>
+      <div id="chatMessages" style="flex:1; overflow-y:auto; background:var(--bg2); border:1px solid var(--border); border-radius:8px; padding:15px; display:flex; flex-direction:column; gap:10px; margin-bottom:10px;"></div>
+      <div class="form-row">
+        <input type="text" id="txtChatInput" class="form-control" placeholder="メッセージ..." onkeypress="if(event.key === 'Enter') sendChatMessage()">
+        <button class="btn" style="width:auto; padding:0 15px;" onclick="sendChatMessage()">送信</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="pgShared" class="screen">
+    <h2 id="sharedTitle">🌐 共有カテゴリー</h2>
+    <div class="card" style="margin-bottom: 15px;">
+      <div style="font-size:0.85rem; color:var(--text2); margin-bottom: 10px;">作成者: <span id="sharedOwnerName" style="color:var(--text); font-weight:bold;">--</span></div>
+      <button class="btn btn-success" onclick="importCurrentShared()">📥 購読してインポート</button>
+      <button class="btn btn-secondary" style="margin-top:10px;" onclick="exitSharedMode()">🏠 閉じてホームに戻る</button>
+    </div>
+
+    <div class="card" id="sharedOwnerPanel" style="display:none; border-color: var(--accent);">
+      <div class="setting-box-title" style="color: var(--accent);">👑 共同編集者の設定 (許可された人は編集できます)</div>
+      <div class="form-row" style="margin-bottom: 8px;">
+        <select id="selFriendToAdd" class="form-control" style="flex:1;">
+          <option value="">フレンドから選択...</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <input type="text" id="txtNewFriendUid" class="form-control" placeholder="またはUIDを直接入力">
+        <button class="btn btn-accent" style="width:auto; padding:0 15px;" onclick="addFriendToShared()">追加</button>
+      </div>
+      <div id="sharedFriendsList" style="margin-top: 10px; display:flex; flex-direction:column; gap:5px;"></div>
+    </div>
+
+    <div class="card" id="sharedViewerPanel" style="display:none; border-color: var(--text3);">
+      <div style="font-size:0.85rem; color:var(--text2); text-align:center;">
+        🔒 あなたはこのカテゴリーの作成者ではないため、共同編集者の設定はできません。
+      </div>
+    </div>
+
+    <div class="card" id="sharedEditorPanel" style="display:none; border-color: var(--primary);">
+      <div class="setting-box-title" style="color: var(--primary);">📝 共同編集: 新しい問題の追加</div>
+      <div class="form-group">
+        <label>フォルダー</label>
+        <select id="selSharedCategory" class="form-control" style="margin-bottom:10px;"></select>
+      </div>
+      <div class="form-group"><input type="text" id="txtSharedNewQ" class="form-control" placeholder="問題文"></div>
+      <div class="form-group"><input type="text" id="txtSharedNewA" class="form-control" placeholder="答え"></div>
+      <button class="btn" onclick="addCardToShared()">➕ クラウドに直接追加する</button>
+    </div>
+
+    <h3 style="font-size:1.1rem; font-weight:700; margin:20px 0 10px 0; color:var(--text);">🗂️ 収録カード一覧 (<span id="sharedCardCount">0</span>)</h3>
+    <div id="sharedCardsList"></div>
+  </div>
+
+
+  <div id="pgOnlineMatch" class="screen">
+    <h2>⚔️ オンライン対戦</h2>
+    <p style="color:var(--text2); margin-bottom:15px; font-size:0.9rem;">他のユーザーとリアルタイムで対戦して、スコアを競い合います。</p>
+
+    <div class="card" style="background:linear-gradient(135deg, var(--bg3) 0%, var(--bg4) 100%); border-color:var(--accent);">
+      <div style="display:flex; gap:10px; margin-bottom:15px;">
+        <button class="btn btn-accent" style="flex:1;" onclick="startOnlineMatching()">
+          <i style="margin-right:8px;">🎲</i>ランダムマッチ
+        </button>
+        <button class="btn btn-secondary" style="flex:1;" onclick="createQuickMatch()">
+          <i style="margin-right:8px;">🔑</i>合言葉で対戦
+        </button>
+      </div>
+    </div>
+
+    <h3 style="margin:20px 0 10px 0; color:var(--text);">📋 カテゴリー選択</h3>
+    <div id="onlineMatchCategorySelect" style="margin-bottom:15px;">
+      <p style="color:var(--text2); font-size:0.85rem;">出題カテゴリー：</p>
+      <div id="onlineMatchScopeSelectors" style="display:flex; flex-direction:column; gap:10px; margin-bottom:8px;"></div>
+      <div id="onlineWaitingCountBadge" style="font-size:0.82rem; color:var(--text3); min-height:1.2em; padding:2px 0 8px 2px;"></div>
+    </div>
+
+    <h3 style="margin:20px 0 10px 0; color:var(--text);">⚙️ 対戦設定</h3>
+    <div class="form-group" style="margin-bottom:10px;">
+      <label style="font-size:0.8rem; color:var(--text2);">形式</label>
+      <select id="onlineMatchFormat" class="form-control">
+        <option value="choice">🎴 4択択一モード</option>
+        <option value="desc">📝 記述式入力モード</option>
+        <option value="minhaya">⚡ みんはや形式 (1文字ずつ4択)</option>
+        <option value="tap">👆 文字タップモード (Duolingo風)</option>
+        <option value="self">🧠 自己申告モード (Anki風)</option>
+      </select>
+    </div>
+    <div class="form-group" style="display:flex; gap:10px; flex-wrap:wrap;">
+      <div style="flex:1; min-width:150px;">
+        <label style="font-size:0.8rem; color:var(--text2);">問題数</label>
+        <input type="number" id="onlineMatchQuestionCount" class="form-control" value="10" min="5" max="50">
+      </div>
+      <div style="flex:1; min-width:150px;">
+        <label style="font-size:0.8rem; color:var(--text2);">制限時間（秒）</label>
+        <input type="number" id="onlineMatchTimeLimit" class="form-control" value="15" min="5" max="60">
+      </div>
+    </div>
+
+    <div style="margin:20px 0; padding:15px; background:var(--bg3); border-radius:8px; border-left:4px solid var(--primary);">
+      <p style="color:var(--text); font-weight:500; margin-bottom:8px;">💡 対戦の流れ</p>
+      <ol style="color:var(--text2); font-size:0.85rem; padding-left:20px; line-height:1.6;">
+        <li>カテゴリーと設定を選択</li>
+        <li>「ランダム」か「合言葉」を選択</li>
+        <li>相手が見つかるまで待機</li>
+        <li>同時にクイズ開始（リアルタイム）</li>
+        <li>成績比較・ランキング更新</li>
+      </ol>
+    </div>
+
+    <div id="onlineMatchInfo" style="display:none; margin-top:20px; padding:15px; background:var(--bg3); border-radius:8px; border-left:4px solid var(--success); color:var(--text);">
+      <p id="onlineMatchInfoText"></p>
+    </div>
+
+    <button class="btn btn-secondary" style="margin-top:12px; width:100%;" onclick="openPage('pgMatchHistory'); renderMatchHistory();">📋 対戦履歴を見る</button>
+    <button class="btn btn-secondary" style="margin-top:10px; width:100%;" onclick="openPage('pgStats')">戻る</button>
+  </div>
+
+  <div id="pgMatchHistory" class="screen">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+      <h2>📋 対戦履歴</h2>
+      <button class="btn btn-secondary" style="width:auto; padding:8px 14px;" onclick="openPage('pgOnlineMatch')">戻る</button>
+    </div>
+    <div id="matchHistoryArea">
+      <div style="text-align:center; color:var(--text3); padding:30px 0;">対戦履歴がありません</div>
+    </div>
+  </div>
+
+  <div id="pgPublicCategories" class="screen">
+    <h2>🌐 公開カテゴリー一覧</h2>
+    <div style="display:flex; gap:10px; margin-bottom:15px;">
+      <input type="text" id="searchPublicCategories" class="form-control" placeholder="カテゴリー検索..." oninput="filterPublicCategories()">
+      <button class="btn btn-secondary" style="width:auto; padding:12px 20px;" onclick="openPage('pgBox')">戻る</button>
+    </div>
+    <div id="myPublicCategoriesSection" style="display:none; margin-bottom:20px;">
+      <div class="card" style="border-color:var(--accent);">
+        <div class="setting-box-title" style="color:var(--accent);">📤 自分が公開中のカテゴリー</div>
+        <div id="myPublicCategoriesList"><div style="text-align:center; color:var(--text3); font-size:0.85rem;">読み込み中...</div></div>
+      </div>
+    </div>
+    <div id="publicCategoriesList"></div>
+  </div>
+
+  <div id="pgCompareStats" class="screen">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+      <h2>📊 フレンド成績比較</h2>
+      <button class="btn btn-secondary" style="width:auto; padding:8px 14px;" onclick="openPage('pgBackup')">戻る</button>
+    </div>
+    
+    <div class="card">
+      <div style="font-size:0.85rem; color:var(--text2); margin-bottom:10px;">フレンドを選択してください</div>
+      <select id="selCompareCategory" class="form-control" style="margin-bottom:10px;" onchange="renderCompareStats()">
+        <option value="">🌐 全カテゴリー</option>
+      </select>
+      <select id="selCompareFriend" class="form-control" onchange="renderCompareStats()">
+        <option value="">フレンドを選択...</option>
+      </select>
+    </div>
+
+    <div id="compareStatsArea">
+      <div style="text-align:center; color:var(--text3); padding:40px;">フレンドを選択して成績を比較してください</div>
+    </div>
+  </div>
+</div>
+
+<div class="ctx-overlay" id="bulkAddOverlay" style="display:none;" onclick="closeBulkAdd()">
+  <div class="menu-card" style="padding:20px; max-width:90%; width:400px;" onclick="event.stopPropagation()">
+    <h3 style="color:var(--text); margin-bottom:10px; font-size:1.1rem;" id="bulkAddTitle">一括追加</h3>
+    <textarea id="txtBulkAdd" class="form-control" style="height:150px; margin-bottom:15px; font-family:'JetBrains Mono', monospace; font-size:0.85rem;" placeholder="【入力方法1】問題,答え (カンマ区切り)&#10;【入力方法2】問題と答えを交互に改行"></textarea>
+    <div class="form-row">
+      <button class="btn btn-secondary" style="flex:1;" onclick="closeBulkAdd()">キャンセル</button>
+      <button class="btn" style="flex:1;" onclick="submitBulkAdd()">追加する</button>
+    </div>
+  </div>
+</div>
+
+<!-- ★【0.02.63】カード追加・編集モーダル（画像添付対応） -->
+<div class="ctx-overlay" id="cardModalOverlay" style="display:none;" onclick="closeCardModal()">
+  <div class="menu-card" style="padding:20px; max-width:90%; width:420px; max-height:85vh; overflow-y:auto;" onclick="event.stopPropagation()">
+    <h3 style="color:var(--text); margin-bottom:4px; font-size:1.1rem;" id="cardModalTitle">➕ 新規カード追加</h3>
+    <div id="cardModalCatLabel" style="font-size:0.8rem; color:var(--text3); margin-bottom:15px;">📁 追加先: 未分類</div>
+
+    <div class="form-group">
+      <label style="font-size:0.85rem; color:var(--text2); font-weight:700; display:block; margin-bottom:6px;">❓ 問題文</label>
+      <textarea id="txtCardQuestion" class="form-control" style="height:70px; font-size:0.95rem;" placeholder="問題文を入力..."></textarea>
+      <div id="cardQImageWrap" style="display:none; margin-top:8px;">
+        <img id="cardQImagePreview" style="max-width:100%; max-height:150px; border-radius:8px; display:block; margin-bottom:6px;">
+        <button type="button" class="btn btn-secondary" style="width:auto; padding:6px 12px; font-size:0.75rem;" onclick="removeCardImage('question')">🗑️ 画像を削除</button>
+      </div>
+      <label class="btn btn-secondary" style="margin-top:8px; font-size:0.8rem; padding:9px;">
+        🖼️ 問題に画像を添付
+        <input type="file" accept="image/*" style="display:none;" onchange="handleCardImageSelect(event, 'question')">
+      </label>
+    </div>
+
+    <div class="form-group" style="margin-top:15px;">
+      <label style="font-size:0.85rem; color:var(--text2); font-weight:700; display:block; margin-bottom:6px;">✅ 答え</label>
+      <textarea id="txtCardAnswer" class="form-control" style="height:90px; font-size:0.95rem;" placeholder="答えを入力..."></textarea>
+      <div style="display:flex; flex-wrap:wrap; gap:4px; margin:6px 0;">
+        <button type="button" onclick="insertAtCursor(document.getElementById('txtCardAnswer'), '(他動詞)')" style="font-size:0.7rem; padding:4px 9px; border-radius:12px; border:1px solid var(--border); background:var(--bg4); color:var(--text2);">他動詞</button>
+        <button type="button" onclick="insertAtCursor(document.getElementById('txtCardAnswer'), '(自動詞)')" style="font-size:0.7rem; padding:4px 9px; border-radius:12px; border:1px solid var(--border); background:var(--bg4); color:var(--text2);">自動詞</button>
+        <button type="button" onclick="insertAtCursor(document.getElementById('txtCardAnswer'), '(名詞)')" style="font-size:0.7rem; padding:4px 9px; border-radius:12px; border:1px solid var(--border); background:var(--bg4); color:var(--text2);">名詞</button>
+        <button type="button" onclick="insertAtCursor(document.getElementById('txtCardAnswer'), '(形容詞)')" style="font-size:0.7rem; padding:4px 9px; border-radius:12px; border:1px solid var(--border); background:var(--bg4); color:var(--text2);">形容詞</button>
+        <button type="button" onclick="insertAtCursor(document.getElementById('txtCardAnswer'), '(副詞)')" style="font-size:0.7rem; padding:4px 9px; border-radius:12px; border:1px solid var(--border); background:var(--bg4); color:var(--text2);">副詞</button>
+        <button type="button" onclick="insertAtCursor(document.getElementById('txtCardAnswer'), '(前置詞)')" style="font-size:0.7rem; padding:4px 9px; border-radius:12px; border:1px solid var(--border); background:var(--bg4); color:var(--text2);">前置詞</button>
+        <button type="button" onclick="insertAtCursor(document.getElementById('txtCardAnswer'), '(接続詞)')" style="font-size:0.7rem; padding:4px 9px; border-radius:12px; border:1px solid var(--border); background:var(--bg4); color:var(--text2);">接続詞</button>
+        <button type="button" onclick="insertAtCursor(document.getElementById('txtCardAnswer'), '/')" style="font-size:0.7rem; padding:4px 9px; border-radius:12px; border:1px solid var(--border); background:var(--bg4); color:var(--text2);">／区切り</button>
+      </div>
+      <div id="cardAImageWrap" style="display:none; margin-top:8px;">
+        <img id="cardAImagePreview" style="max-width:100%; max-height:150px; border-radius:8px; display:block; margin-bottom:6px;">
+        <button type="button" class="btn btn-secondary" style="width:auto; padding:6px 12px; font-size:0.75rem;" onclick="removeCardImage('answer')">🗑️ 画像を削除</button>
+      </div>
+      <label class="btn btn-secondary" style="margin-top:8px; font-size:0.8rem; padding:9px;">
+        🖼️ 答えに画像を添付
+        <input type="file" accept="image/*" style="display:none;" onchange="handleCardImageSelect(event, 'answer')">
+      </label>
+    </div>
+
+    <div style="font-size:0.72rem; color:var(--text3); margin-top:14px; line-height:1.5; background:var(--bg3); padding:8px 10px; border-radius:8px;">
+      💡 答えを「(他動詞)意味1　意味2/(自動詞)意味3」のように (タグ) + 「/」区切りで書くと、出題時にタグごとの入力欄に分かれます。同じ欄内は全角スペースや「|」区切りでどれか一つ正解にできます。
+    </div>
+
+    <div class="form-row" style="margin-top:18px;">
+      <button class="btn btn-secondary" style="flex:1;" onclick="closeCardModal()">キャンセル</button>
+      <button class="btn" style="flex:1;" onclick="submitCardModal()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ★【0.02.64】スキャン取込モーダル（OCR + 見出し語番号でのスマート分割） -->
+<div class="ctx-overlay" id="scanImportOverlay" style="display:none;" onclick="closeScanImport()">
+  <div class="menu-card" style="padding:20px; max-width:92%; width:460px; max-height:88vh; overflow-y:auto;" onclick="event.stopPropagation()">
+    <h3 style="color:var(--text); margin-bottom:4px; font-size:1.1rem;" id="scanImportTitle">📷 スキャン取込</h3>
+    <div style="font-size:0.72rem; color:var(--text3); margin-bottom:14px; line-height:1.5;">
+      単語帳のページを撮影・選択すると文字認識(OCR)を行い、「番号+見出し語」のパターンで自動的に単語ごとへ分割します（鉄壁のような品詞タグ付き多義語カードの形式に最適化）。狭い範囲を撮るほど認識精度が上がります。
+    </div>
+
+    <div id="scanRawArea">
+      <input type="file" accept="image/*" multiple id="scanImportFileInput" class="form-control" style="padding:8px;">
+      <button class="btn" style="margin-top:10px;" id="btnRunScanOcr" onclick="runScanOcr()">🔍 文字認識を実行</button>
+      <div id="scanImportProgress" style="display:none; font-size:0.8rem; color:var(--primary); margin-top:8px; text-align:center;"></div>
+
+      <label style="font-size:0.85rem; color:var(--text2); font-weight:700; display:block; margin-top:16px; margin-bottom:6px;">📝 認識結果（自由に修正できます）</label>
+      <textarea id="txtScanRaw" class="form-control" style="height:180px; font-family:'JetBrains Mono', monospace; font-size:0.78rem;" placeholder="OCR結果がここに表示されます。直接貼り付けや手入力も可能です。"></textarea>
+
+      <div class="form-row" style="margin-top:14px;">
+        <button class="btn btn-secondary" style="flex:1;" onclick="closeScanImport()">キャンセル</button>
+        <button class="btn" style="flex:1;" onclick="scanSplitEntries()">📑 単語ごとに分割</button>
+      </div>
+    </div>
+
+    <div id="scanReviewArea" style="display:none;">
+      <div style="font-size:0.85rem; color:var(--text2); margin-bottom:10px;"><span id="scanReviewCount">0</span>件を検出しました。内容を確認し、不要な項目は削除してください。</div>
+      <div id="scanReviewList"></div>
+      <div class="form-row" style="margin-top:10px;">
+        <button class="btn btn-secondary" style="flex:1;" onclick="scanBackToRaw()">← テキストに戻る</button>
+        <button class="btn" style="flex:1;" onclick="submitScanImport()">🎯 まとめて追加</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="ctx-overlay" id="ctxOverlay" onclick="closeContextMenu()">
+  <div class="menu-card" id="ctxCard" onclick="event.stopPropagation()">
+    <div class="menu-header" id="ctxHeader">メニュー</div>
+    <div class="menu-body" id="ctxBody"></div>
+  </div>
+</div>
 
 <script>
-// =============================================================
-// メインエントリポイント
-// =============================================================
-
-let renderer, scene, camera;
-let clock;
-
-function initScene() {
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x000005);
-
-  camera = new THREE.PerspectiveCamera(
-    60, window.innerWidth / window.innerHeight, 0.1, 100000
-  );
-
-  renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  document.body.appendChild(renderer.domElement);
-
-  // 簡易的な星空（背景の目印。本格的なワープ演出は後続バージョンで拡張）
-  const starGeo = new THREE.BufferGeometry();
-  const starCount = 4000;
-  const positions = new Float32Array(starCount * 3);
-  for (let i = 0; i < starCount; i++) {
-    positions[i * 3 + 0] = (Math.random() - 0.5) * 20000;
-    positions[i * 3 + 1] = (Math.random() - 0.5) * 20000;
-    positions[i * 3 + 2] = (Math.random() - 0.5) * 20000;
-  }
-  starGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 1.2 });
-  scene.add(new THREE.Points(starGeo, starMat));
-
-  const ambient = new THREE.AmbientLight(0x334455, 0.6);
-  scene.add(ambient);
-  const sun = new THREE.DirectionalLight(0xffffff, 1.2);
-  sun.position.set(500, 300, 200);
-  scene.add(sun);
-
-  window.addEventListener('resize', onResize);
-}
-
-function onResize() {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-}
-
-// v01時点では仮の箱メッシュ。実艦モデル(GLB/OBJ)は艦船建造画面
-// (ship-builder.html)で保存されていればそちらに差し替える
-function createPlaceholderShipMesh(classKey) {
-  const sizeByClass = {
-    rocket: { x: 2, y: 2, z: 8 },
-    cruiser: { x: 12, y: 8, z: 60 },
-    battleship: { x: 24, y: 18, z: 140 },
-  };
-  const s = sizeByClass[classKey] ?? sizeByClass.rocket;
-  const geo = new THREE.BoxGeometry(s.x, s.y, s.z);
-  const mat = new THREE.MeshStandardMaterial({ color: 0x6688aa, metalness: 0.4, roughness: 0.5 });
-  return new THREE.Mesh(geo, mat);
-}
-
-// -------------------------------------------------------------
-// 保存済みモデル(spaceSimShipModel:<classKey>)の読み込みと差し替え
-//
-// spawnPlayerShip()はThree.jsオブジェクトを同期的に要求する一方、
-// GLB/OBJの読み込みは非同期になるため、艦の「見た目のルート」は
-// 常にTHREE.Group（shipVisualRoot）とし、
-//   shipVisualRoot
-//     └ placeholderMesh（起動直後は表示、モデル読み込み完了で除去）
-//     └ modelCorrectionGroup（ship-builder.htmlと同じ役割。
-//         保存された回転/スケール/位置オフセットをここに適用し、
-//         その子として実際に読み込んだモデルを追加する）
-// という2段構成にする。ShipController._syncMesh()はshipVisualRoot
-// のquaternion/positionを毎フレーム直接上書きするだけなので、
-// 内部構造をこの後から差し替えても物理・操作系には影響しない。
-// -------------------------------------------------------------
-function createShipVisualRoot(classKey) {
-  const root = new THREE.Group();
-  const placeholder = createPlaceholderShipMesh(classKey);
-  root.add(placeholder);
-
-  const correction = new THREE.Group();
-  root.add(correction);
-
-  root.userData.placeholderMesh = placeholder;
-  root.userData.correctionGroup = correction;
-  return root;
-}
-
-// v61: 第3引数shipは、モデル読み込み完了後に接舷面(dockingFace)情報を
-// 反映するために渡す（省略時=保存モデルが無い等は従来通りdockingFaceは
-// nullのまま）。読み込み自体は非同期のため、initGame()側でship生成
-// （ShipController.spawnPlayerShip）を済ませてからこの関数を呼ぶ順序に
-// 変更している。
-async function loadSavedShipModelInto(root, classKey, ship) {
-  const saved = await loadShipModelData(classKey);
-  if (!saved) return; // 保存が無ければ箱のまま
-
-  const toRad = (d) => (d * Math.PI) / 180;
-  const applyAdjust = (obj) => {
-    obj.rotation.set(
-      toRad(saved.adjust.rotationDeg.x),
-      toRad(saved.adjust.rotationDeg.y),
-      toRad(saved.adjust.rotationDeg.z)
-    );
-    obj.scale.setScalar(saved.adjust.scale);
-    obj.position.set(saved.adjust.offset.x, saved.adjust.offset.y, saved.adjust.offset.z);
-  };
-
-  const onLoaded = (loadedObject) => {
-    // 読み込みが成功した時点で初めて箱を消す。読み込み失敗時は
-    // 箱のまま操縦できる状態を維持し、無操作の艦にならないようにする
-    const placeholder = root.userData.placeholderMesh;
-    if (placeholder) {
-      root.remove(placeholder);
-    }
-    root.userData.correctionGroup.add(loadedObject);
-    applyAdjust(root.userData.correctionGroup);
-
-    // v61: 接舷面(dockingFace)が保存されていれば艦の状態へ反映する。
-    // バウンディングボックスは補正後(rotation/scale/offset適用後)の
-    // correctionGroupから計算する（ship-builder.html側の6面選択・
-    // 自動フィットと基準を一致させるため）。
-    if (saved.dockingFace) {
-      ship.dockingFace = saved.dockingFace;
-      const box = new THREE.Box3().setFromObject(root.userData.correctionGroup);
-      if (!box.isEmpty()) {
-        const size = new THREE.Vector3();
-        box.getSize(size);
-        ship.dockingFaceBoxHalfExtents = { x: size.x / 2, y: size.y / 2, z: size.z / 2 };
-      }
-    } else {
-      ship.dockingFace = null;
-    }
-  };
-
-  try {
-    if (saved.format === 'glb') {
-      fetch(saved.glbDataUrl)
-        .then((r) => r.arrayBuffer())
-        .then((buf) => {
-          const manager = new THREE.LoadingManager();
-          const loader = new THREE.GLTFLoader(manager);
-          loader.textureLoader = new THREE.TextureLoader(manager);
-          loader.parse(buf, '', (gltf) => onLoaded(gltf.scene), (err) => {
-            console.warn(`艦モデル(${classKey})のGLB読み込みに失敗しました。仮メッシュのままにします。`, err);
-          });
-        })
-        .catch((err) => console.warn(`艦モデル(${classKey})のGLB読み込みに失敗しました。仮メッシュのままにします。`, err));
-    } else if (saved.format === 'obj') {
-      const finish = (materials) => {
-        const objLoader = new THREE.OBJLoader();
-        if (materials) {
-          materials.preload();
-          objLoader.setMaterials(materials);
-        }
-        const objGroup = objLoader.parse(saved.objText);
-        onLoaded(objGroup);
-      };
-
-      if (!saved.mtlText) {
-        finish(null);
-      } else {
-        const texMap = saved.textures || {};
-        const manager = new THREE.LoadingManager();
-        manager.setURLModifier((url) => {
-          const baseName = url.split('/').pop().split('\\').pop();
-          return texMap[baseName] || url;
-        });
-        const mtlLoader = new THREE.MTLLoader(manager);
-        const materials = mtlLoader.parse(saved.mtlText, '');
-        finish(materials);
-      }
-    }
-  } catch (err) {
-    console.warn(`艦モデル(${classKey})の読み込みに失敗しました。仮メッシュのままにします。`, err);
-  }
-}
-
-function initGame() {
-  const params = new URLSearchParams(location.search);
-  const persisted = loadPersistedSettings();
-
-  // 優先順位: URLパラメータ（settings.htmlの「開始」ボタンから明示指定）
-  // → localStorage（前回の設定）→ コード内デフォルト
-  const requestedClass = params.get('class') || persisted.shipClass || 'rocket';
-  // 保存値・URLパラメータどちらも不正な艦種キーの可能性があるため、
-  // 存在確認の上でフォールバックする（createShipState()の例外を防ぐ）
-  const shipClass = ShipClassPresets[requestedClass] ? requestedClass : 'rocket';
-
-  const mesh = createShipVisualRoot(shipClass);
-  scene.add(mesh);
-
-  // v61: 接舷面(dockingFace)情報をshipへ反映するため、モデル読み込みを
-  // 開始する前にship自体を生成しておく（生成順を入れ替え）。
-  const ship = ShipController.spawnPlayerShip(shipClass, mesh, { x: 0, y: 0, z: 0 });
-  loadSavedShipModelInto(mesh, shipClass, ship);
-
-  const capParam = params.get('speedCapMode');
-  const effectiveCapMode =
-    (capParam === SpeedCapMode.HARD_CAP || capParam === SpeedCapMode.SOFT_GLOW)
-      ? capParam
-      : persisted.speedCapMode; // null であればship側デフォルトに従う（getEffectiveSpeedCapMode参照）
-  if (effectiveCapMode) {
-    State.settings.speedCapModeOverride = effectiveCapMode;
-  }
-
-  const debugHudParam = params.get('debugHud');
-  State.settings.showDebugHud =
-    debugHudParam !== null ? debugHudParam === '1' : persisted.showDebugHud;
-
-  // cameraMode / autoDampingEnabled / retroDampingEnabled は
-  // settings.htmlを経由せず、ゲーム内のHUDボタンで直接切り替える運用
-  // （切り替えた瞬間にsavePersistedSettings()で保存され、次回起動時に
-  // ここで復元される）
-  State.settings.cameraMode = persisted.cameraMode ?? 'chase';
-  State.settings.autoDampingEnabled = persisted.autoDampingEnabled ?? true;
-  // v10: 並進制動（逆噴射用SRC）専用トグル。自動姿勢制動とは独立に
-  // 永続化・復元する。
-  State.settings.retroDampingEnabled = persisted.retroDampingEnabled ?? true;
-  // v40: 進入軸・目的地ゲートの可視化表示/非表示。cameraMode等と
-  // 同じくゲーム内HUDのトグルボタンで直接切り替え、その場で永続化する運用。
-  State.settings.showApproachGuides = persisted.showApproachGuides ?? true;
-  // v41: 予定航路の線の表示/非表示。showApproachGuidesとは別トグル。
-  State.settings.showRouteLine = persisted.showRouteLine ?? true;
-  // v08: RCS最大出力の主機推力に対する上限比率。settings.htmlのみで
-  // 変更する運用（ゲーム内HUDには専用UIを設けない）。
-  State.settings.rcsThrustCapRatio = persisted.rcsThrustCapRatio ?? 1.0;
-
-  // v08: 入港（オートドッキング）目的地の復元。settings.htmlを
-  // 経由せず、HUDの「ここを目的地として保存」ボタンで設定・
-  // localStorageへ永続化される（cameraMode等と同じ運用）。
-  State.dockingTarget = loadDockingTarget();
-
-  // このセッションで確定した設定をlocalStorageへ書き戻す。
-  // これにより、settings.htmlを次に開いたときも「前回選んだ内容」が
-  // 初期選択状態として反映される（以前は毎回コード内デフォルトに
-  // リセットされていた）。
-  savePersistedSettings({
-    shipClass,
-    speedCapMode: effectiveCapMode ?? null,
-    showDebugHud: State.settings.showDebugHud,
-    cameraMode: State.settings.cameraMode,
-    autoDampingEnabled: State.settings.autoDampingEnabled,
-    retroDampingEnabled: State.settings.retroDampingEnabled,
-    rcsThrustCapRatio: State.settings.rcsThrustCapRatio,
-    showApproachGuides: State.settings.showApproachGuides,
-    showRouteLine: State.settings.showRouteLine,
+  document.addEventListener('DOMContentLoaded', () => {
+    const badge = document.getElementById('appVersionBadge');
+    if (badge && typeof APP_VERSION !== 'undefined') badge.innerText = APP_VERSION;
+    const updVer = document.getElementById('txtUpdVersion');
+    if (updVer && typeof APP_VERSION !== 'undefined') updVer.value = APP_VERSION;
   });
-
-  const hudRoot = document.getElementById('hud-root');
-  // 呼び出し順が重要: HUD.init()が先にタッチスティック用のDOM要素
-  // （.stick-move / .stick-look等）を生成しないと、InputSystem.init()の
-  // querySelectorが要素を見つけられずタッチ入力が一切バインドされない
-  // （バグとして報告：「タッチ操作が効かない」）
-  HUD.init(hudRoot);
-  InputSystem.init(hudRoot);
-  EngineFx.init(scene);
-  CameraSystem.init(renderer.domElement);
-  DockingPlatform.init(scene);
-  ApproachVisualizer.init(scene);
-}
-
-function animate() {
-  requestAnimationFrame(animate);
-  const dt = Math.min(clock.getDelta(), 0.05); // タブ切り替え等の大ジャンプ対策
-
-  ShipController.update(dt);
-  EngineFx.update(dt);
-  CameraSystem.update(camera);
-  DockingPlatform.update();
-  ApproachVisualizer.update();
-
-  HUD.update();
-  renderer.render(scene, camera);
-}
-
-initScene();
-initGame();
-clock = new THREE.Clock();
-
-// v27: 右下バージョン表示。GAME_VERSION定数（01-state-and-config.js）を
-// そのままテキストに反映するだけなので、他の画面（settings.html等）
-// でも同じ要素id・定数を使えば流用できる。
-const versionLabelEl = document.getElementById('version-label');
-if (versionLabelEl) versionLabelEl.textContent = GAME_VERSION;
-
-animate();
 </script>
+
+<script src="config.js"></script>
+<script src="utils.js"></script>
+<script src="storage.js"></script>
+<script src="updates.js"></script>
+<script src="auth.js"></script>
+<script src="pages.js"></script>
+<script src="tree.js"></script>
+<script src="context-menu.js"></script>
+<script src="batch-add.js"></script>
+<script src="box.js"></script>
+<script src="scan-import.js"></script>
+<script src="quiz.js"></script>
+<script src="stats.js"></script>
+<script src="import-export.js"></script>
+<script src="social.js"></script>
+<script src="shared.js"></script>
+<script src="main.js"></script>
 
 </body>
 </html>
