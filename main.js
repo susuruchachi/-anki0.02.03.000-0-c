@@ -3,6 +3,7 @@
 window.onload = function() {
   loadData(); ensureSystemSanity(); autoMerge();
   buildQuizScopeDropdown(); 
+  if (typeof updateHomeSummary === 'function') updateHomeSummary(); // ★【0.03.00】
   if(localStorage.getItem('theme_light')==='true') toggleLightMode(true);
   
   // 成績共有設定をUIに反映

@@ -139,7 +139,7 @@ function renderBox() {
     const qImgHTML = item.questionImage ? `<img src="${item.questionImage}" alt="問題画像" style="max-width:100%; max-height:120px; border-radius:8px; margin-bottom:8px; display:block;">` : '';
     
     card.innerHTML = `
-      <div class="q-card-text">${escapeHtml(item.question)}</div>
+      <div class="q-card-text">${renderRichText(item.question, { escape: true, kanbunRows: 10 })}</div>
       ${qImgHTML}
       <div style="font-size:0.85rem; color:var(--text2); margin-bottom:8px; cursor:pointer;" data-id="${escapeHtml(item.id)}" data-shown="0" onclick="toggleCardAnswer(this)">
         A: <span style="background:var(--bg4); color:var(--text2); padding:2px 8px; border-radius:6px; border:1px solid var(--border); display:inline-block; font-size:0.75rem;">👆 タップして答えを表示</span>
@@ -147,6 +147,8 @@ function renderBox() {
       <div class="q-card-sub">${badgeHTML}<span>正: ${item.correct} / 誤: ${item.incorrect}</span><span style="font-size:0.75rem; color:var(--text3);">📂 ${escapeHtml(item.category)}${sharedIcon}</span></div>
     `;
     container.appendChild(card);
+    // ★【0.03.00】構造式・漢文・数式を描画
+    hydrateRich(card.querySelector('.q-card-text'), { chemScale: 1.1 });
   });
 }
 
@@ -157,7 +159,8 @@ function toggleCardAnswer(el) {
   if (shown) { el.innerHTML = 'A: <span style="background:var(--bg4); color:var(--text2); padding:2px 8px; border-radius:6px; border:1px solid var(--border); display:inline-block; font-size:0.75rem;">👆 タップして答えを表示</span>'; } 
   else {
     const imgHTML = cached.image ? `<img src="${cached.image}" alt="解答画像" style="max-width:100%; max-height:150px; border-radius:8px; margin-top:6px; display:block;">` : '';
-    el.innerHTML = 'A: <span style="color:var(--text); font-weight:500;">' + escapeHtml(cached.text) + '</span><span style="color:var(--text3); font-size:0.7rem; margin-left:8px;">👆 隠す</span>' + imgHTML;
+    el.innerHTML = 'A: <span style="color:var(--text); font-weight:500;">' + renderRichText(cached.text, { escape: true, kanbunRows: 10 }) + '</span><span style="color:var(--text3); font-size:0.7rem; margin-left:8px;">👆 隠す</span>' + imgHTML;
+    hydrateRich(el, { chemScale: 1.1 });
   }
 }
 
@@ -230,6 +233,7 @@ function openCardModal(mode, itemOrDefaults) {
   updateCardImagePreview('question');
   updateCardImagePreview('answer');
   document.getElementById('cardModalOverlay').style.display = 'flex';
+  updateCardPreview();
 }
 
 function closeCardModal() {

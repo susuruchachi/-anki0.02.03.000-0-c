@@ -23,7 +23,9 @@ function toggleLightMode(forceOn = false) {
 // 文字列中の (…) を丸ごと除去する（ネストなし前提）。出題文からタグ注記を隠すために使う。
 function stripParens(text) {
   if (!text) return text;
-  return String(text).replace(/\s*\([^()]*\)\s*/g, ' ').replace(/\s+/g, ' ').trim();
+  // ★【0.03.00】漢文の送り仮名 (…) や構造式は消さないよう、埋め込みブロックをマスクしてから除去する
+  const mk = maskRichBlocks(text);
+  return mk.restore(mk.masked.replace(/\s*\([^()]*\)\s*/g, ' ').replace(/\s+/g, ' ').trim());
 }
 
 // answerText が「/区切り全パートが先頭に(タグ)を持つ」構造化解答かどうかを判定し、
@@ -32,7 +34,8 @@ function stripParens(text) {
 // ・ラベルはタグ内のテキストをそのまま連結したもの（自動整形はしない＝カードの書き方がそのまま反映される）
 function parseStructuredAnswer(answerText) {
   if (!answerText) return null;
-  const rawSegments = String(answerText).split('/');
+  const mk = maskRichBlocks(answerText);
+  const rawSegments = mk.masked.split('/').map(mk.restore);
   if (rawSegments.length < 2) return null;
   const segTagRe = /^\s*((?:\([^()]*\)\s*)+)([\s\S]*)$/;
   const result = [];
@@ -59,7 +62,8 @@ function normalizeStructuredToken(str) {
   return s;
 }
 function isStructuredSegmentCorrect(input, correctText) {
-  const candidates = String(correctText).split(/[\u3000,、/|]+/).map(s => s.trim()).filter(s => s !== '');
+  const mk = maskRichBlocks(correctText);
+  const candidates = mk.masked.split(/[\u3000,、/|]+/).map(s => mk.restore(s).trim()).filter(s => s !== '');
   if (candidates.length === 0) return false;
   const inNorm = normalizeStructuredToken(input);
   if (inNorm === '') return false;
@@ -72,7 +76,7 @@ function isStructuredSegmentCorrect(input, correctText) {
 function formatStructuredAnswerHTML(segments) {
   return segments.map(seg => {
     const labelPart = seg.label ? `<div style="font-size:0.75rem; color:var(--primary); font-weight:700; margin-bottom:1px;">🏷️ ${seg.label}</div>` : '';
-    return `<div style="margin-bottom:8px; text-align:left;">${labelPart}<div>${seg.text}</div></div>`;
+    return `<div style="margin-bottom:8px; text-align:left;">${labelPart}<div>${renderRichText(seg.text)}</div></div>`;
   }).join('');
 }
 

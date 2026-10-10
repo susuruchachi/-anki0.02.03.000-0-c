@@ -25,7 +25,7 @@ body { background: var(--bg); color: var(--text); font-family: 'Noto Sans JP', s
 input, textarea, select { user-select: auto; -webkit-user-select: auto; font-family: inherit; color: inherit; -webkit-touch-callout: default; }
 
 .app-container { display: flex; flex-direction: column; height: 100dvh; width: 100vw; position: relative; }
-.screen { flex: 1; display: none; flex-direction: column; overflow-y: auto; padding: 20px; padding-bottom: calc(30px + env(safe-area-inset-bottom)); touch-action: pan-y; overscroll-behavior-y: contain; }
+.screen { flex: 1; display: none; flex-direction: column; overflow-y: auto; padding: 20px; padding-bottom: 30px; touch-action: pan-y; overscroll-behavior-y: contain; }
 .screen.active { display: flex; }
 
 /* ★ Markdown 用スタイル */
@@ -159,32 +159,88 @@ body.light-mode .sync-status { background: rgba(255,255,255,0.9); }
 .sync-status.hidden { opacity: 0; transform: translateY(-20px); }
 .update-banner-title { font-weight: bold; color: var(--primary); display:flex; align-items:center; }
 
-/* 漢文・古典用の縦書きコンテナ */
-.kanbun-container {
-  writing-mode: vertical-rl; /* 縦書き・右から左へ */
-  font-family: 'Noto Serif JP', 'S行書', serif;
-  font-size: 1.8rem;
-  line-height: 2.5;
-  height: 250px; /* 画面に収まる高さに調整 */
-  margin: 0 auto;
-  padding: 10px;
-}
-
-/* 返り点（レ点、一二三点など）の配置調整 */
-.kaeriten {
-  font-size: 0.65rem;
-  vertical-align: sub;
-  margin-left: -0.2em;
-  margin-right: 0.1em;
-  color: var(--warn);
-}
-
 /* 問題・解答文内の画像がはみ出さないようにする */
-#lblQuizQuestion img, #feedbackAnswerText img, #selfAnswerDisplay img, .kanbun-container img {
+#lblQuizQuestion img, #feedbackAnswerText img, #selfAnswerDisplay img {
   max-width: 100%;
   height: auto;
   border-radius: 4px;
 }
+
+/* ★【0.03.00】共通の小物 */
+.chip { font-size: 0.75rem; padding: 5px 10px; border-radius: 14px; border: 1px solid var(--border); background: var(--bg4); color: var(--text2); cursor: pointer; font-family: inherit; font-weight: 500; line-height: 1.2; }
+.chip:active { transform: scale(0.96); }
+.chip.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+.chip-strong { color: var(--text); background: var(--bg3); }
+.chip-kaeri { font-family: 'Noto Serif JP', serif; font-weight: 700; min-width: 34px; }
+.chip-row { display: flex; flex-wrap: wrap; gap: 5px; margin: 6px 0; }
+.hint-small { font-size: 0.75rem; color: var(--text3); line-height: 1.5; }
+.section-label { font-size: 0.85rem; color: var(--text2); font-weight: 700; display: block; margin-bottom: 6px; }
+.toggle-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.toggle-pill { display: flex; align-items: center; gap: 8px; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg3); font-size: 0.8rem; color: var(--text2); cursor: pointer; line-height: 1.3; }
+.toggle-pill input { width: 16px; height: 16px; accent-color: var(--primary); flex-shrink: 0; }
+.toggle-pill:has(input:checked) { border-color: var(--primary); color: var(--text); background: rgba(79,124,255,0.12); }
+.home-summary { display: flex; gap: 8px; margin-bottom: 15px; }
+.home-summary-item { flex: 1; background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 6px; text-align: center; cursor: pointer; }
+.home-summary-num { font-family: 'JetBrains Mono', monospace; font-size: 1.15rem; font-weight: 900; color: var(--text); }
+.home-summary-label { font-size: 0.68rem; color: var(--text2); margin-top: 2px; }
+.home-sub-btn { flex-direction: column; gap: 2px; line-height: 1.25; }
+.btn-start { padding: 16px 20px; font-size: 1.05rem; border-radius: 12px; box-shadow: 0 6px 18px rgba(79,124,255,0.35); margin-bottom: 12px; }
+details.card > summary { cursor: pointer; list-style: none; font-size: 0.8rem; font-weight: 700; color: var(--text2); }
+details.card > summary::-webkit-details-marker { display: none; }
+details.card > summary::after { content: '▸'; float: right; transition: transform 0.2s; }
+details.card[open] > summary::after { transform: rotate(90deg); }
+details.card[open] > summary { margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+.danger-zone { border-color: rgba(255,79,106,0.45); }
+.danger-zone .setting-box-title { color: var(--danger); }
+
+/* ★【0.03.00】下部ナビゲーション */
+.bottom-nav { display: flex; background: var(--bg2); border-top: 1px solid var(--border); padding-bottom: env(safe-area-inset-bottom); z-index: 20; flex-shrink: 0; }
+.bnav-item { flex: 1; background: none; border: none; color: var(--text3); display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 7px 0 6px; font-size: 0.62rem; font-weight: 700; cursor: pointer; font-family: inherit; }
+.bnav-item i { font-style: normal; font-size: 1.2rem; line-height: 1.1; filter: grayscale(0.7); opacity: 0.75; }
+.bnav-item.active { color: var(--primary); }
+.bnav-item.active i { filter: none; opacity: 1; }
+body.in-quiz .bottom-nav { display: none; }
+body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom)); }
+
+/* ★【0.03.00】構造式 */
+.chem-struct { display: inline-block; vertical-align: middle; max-width: 100%; margin: 4px 2px; }
+.chem-svg { max-width: 100%; height: auto; display: block; color: var(--text); }
+.chem-err { font-size: 0.75rem; color: var(--danger); }
+
+/* ★【0.03.00】漢文（縦書き・返り点・送り仮名） */
+.kb { writing-mode: vertical-rl; display: inline-block; font-family: 'Noto Serif JP', 'Hiragino Mincho ProN', 'Yu Mincho', serif; line-height: 2.6; text-align: start; max-width: 100%; overflow-x: auto; overflow-y: hidden; vertical-align: middle; font-weight: 500; padding: 0.2em 0.3em; margin: 4px 0; }
+.kb-g { display: inline-block; writing-mode: horizontal-tb; width: 1em; line-height: 1; vertical-align: middle; }
+.kb-c { display: block; position: relative; width: 1em; }
+.kb-ch { display: block; width: 1em; height: 1em; text-align: center; line-height: 1; }
+.kb-ch.kb-oki { opacity: 0.55; }
+.kb-furi, .kb-okuri, .kb-kaeri { position: absolute; writing-mode: vertical-rl; font-size: 0.55em; line-height: 1; white-space: nowrap; font-weight: 700; font-family: 'Noto Sans JP', sans-serif; }
+.kb-furi { left: 100%; margin-left: 0.1em; color: var(--text2); }
+.kb-okuri { left: 100%; margin-left: 0.1em; color: var(--primary); }
+.kb-kaeri { right: 100%; margin-right: 0.1em; color: var(--warn); }
+#lblQuizQuestion .kb { font-size: 1.35em; }
+.q-card .kb { font-size: 1.15rem; }
+
+/* ★【0.03.00】エディタ */
+.editor-card { padding: 18px; max-width: 94%; width: 460px; max-height: 90vh; overflow-y: auto; }
+.editor-card > * { flex-shrink: 0; } /* menu-card は縦flexなので、中身が潰れて重ならないようにする */
+.editor-preview { min-height: 90px; background: var(--bg3); border: 1px dashed var(--border2); border-radius: 10px; padding: 10px; display: flex; align-items: center; justify-content: center; overflow-x: auto; text-align: center; }
+.field-toolbar { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.field-toolbar .chip { font-size: 0.75rem; padding: 6px 10px; }
+.kb-tiles { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; background: var(--bg3); border-radius: 10px; min-height: 56px; }
+.kb-tile { position: relative; width: 44px; height: 50px; border: 1px solid var(--border); background: var(--bg2); border-radius: 8px; cursor: pointer; color: var(--text); font-family: 'Noto Serif JP', serif; }
+.kb-tile.active { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(79,124,255,0.35); }
+.kb-tile.oki .kb-tile-ch { opacity: 0.5; }
+.kb-tile-ch { font-size: 1.3rem; font-weight: 700; }
+.kb-tile-okuri { position: absolute; right: 2px; bottom: 2px; font-size: 0.55rem; color: var(--primary); font-family: 'Noto Sans JP', sans-serif; font-weight: 700; }
+.kb-tile-kaeri { position: absolute; left: 3px; bottom: 2px; font-size: 0.6rem; color: var(--warn); font-weight: 700; }
+.kb-tile-furi { position: absolute; right: 2px; top: 1px; font-size: 0.5rem; color: var(--text2); font-family: 'Noto Sans JP', sans-serif; }
+.kb-unit-panel { border: 1px solid var(--border); border-radius: 10px; padding: 10px; margin-top: 10px; background: var(--bg2); }
+.kb-sel-char { font-family: 'Noto Serif JP', serif; font-size: 1.6rem; font-weight: 700; color: var(--primary); }
+.kakikudashi { font-size: 0.9rem; color: var(--text); background: var(--bg3); border-radius: 8px; padding: 8px 10px; margin-top: 6px; min-height: 1.5em; user-select: text; -webkit-user-select: text; }
+.card-preview { margin-top: 12px; border: 1px dashed var(--border2); border-radius: 10px; padding: 10px; background: var(--bg3); }
+.card-preview-row { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 6px; font-size: 0.9rem; }
+.card-preview-row > b { color: var(--text3); font-size: 0.75rem; min-width: 1.5em; padding-top: 3px; }
+.card-preview-row > div { flex: 1; overflow-x: auto; }
 
 </style>
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
@@ -198,6 +254,8 @@ body.light-mode .sync-status { background: rgba(255,255,255,0.9); }
 <!-- KaTeXのCSSとJavaScriptをCDNから読み込む -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+<!-- ★【0.03.00】化学式・反応式（$\ce{H2O}$）用の mhchem 拡張 -->
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/mhchem.min.js"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
 
 </head>
@@ -232,23 +290,29 @@ body.light-mode .sync-status { background: rgba(255,255,255,0.9); }
     <button class="nav-item" id="navBox" onclick="openPage('pgBox')"><i>📝</i>問題カード箱</button>
     <button class="nav-item" id="navOnlineMatch" onclick="openPage('pgOnlineMatch')"><i>⚔️</i>オンライン対戦</button>
     <button class="nav-item" id="navStats" onclick="openPage('pgStats')"><i>📊</i>実績・学習状況</button>
-    <button class="nav-item" id="navBackup" onclick="openPage('pgBackup')"><i>💾</i>管理・設定</button>
+    <button class="nav-item" id="navBackup" onclick="openPage('pgBackup')"><i>⚙️</i>管理・設定</button>
+    <div style="height:1px; background:var(--border); margin:10px 24px;"></div>
+    <button class="nav-item" onclick="openPage('pgTutorial')"><i>📖</i>使い方ガイド</button>
+    <button class="nav-item" onclick="openPage('pgUpdates'); loadUpdates();"><i>📢</i>お知らせ</button>
   </nav>
 
   <div id="pgHome" class="screen active">
     <h2>🏠 クイズに挑戦</h2>
-    <div class="card" style="display:flex; gap:10px;">
-      <button class="btn btn-accent" style="flex:1;" onclick="startQuiz('tokkun')">🔥 集中特訓<br><span style="font-size:0.65rem;">(苦手・しっかりのみ)</span></button>
-      <button class="btn btn-success" style="flex:1;" onclick="startQuiz('review')">♻️ ランダム復習<br><span style="font-size:0.65rem;">(卒業済みから出題)</span></button>
+
+    <!-- ★【0.03.00】学習状況のひと目サマリー（タップでカード箱を絞り込み） -->
+    <div class="home-summary">
+      <div class="home-summary-item" onclick="showAllCards(); openPage('pgBox');"><div class="home-summary-num" id="homeSumTotal">0</div><div class="home-summary-label">📝 カード</div></div>
+      <div class="home-summary-item" onclick="filterBoxByStatus('weak')"><div class="home-summary-num" id="homeSumWeak" style="color:var(--warn);">0</div><div class="home-summary-label">⚠️ 苦手</div></div>
+      <div class="home-summary-item" onclick="filterBoxByStatus('unseen')"><div class="home-summary-num" id="homeSumUnseen">0</div><div class="home-summary-label">💤 未着手</div></div>
+      <div class="home-summary-item" onclick="filterBoxByStatus('grad')"><div class="home-summary-num" id="homeSumGrad" style="color:var(--success);">0</div><div class="home-summary-label">🎓 卒業</div></div>
     </div>
 
     <div class="card">
-      <div class="setting-box-title">⚙️ クイズ設定</div>
       <div class="form-group" id="scopeGroup">
-        <label>🎯 出題範囲（ドリルダウン選択）</label>
+        <label>🎯 出題範囲</label>
         <div id="scopeSelectors" style="display:flex; flex-direction:column; gap:8px;"></div>
       </div>
-      <div class="form-group">
+      <div class="form-group" style="margin-bottom:0;">
         <label>🗂️ 出題モード</label>
         <select id="selQuizMode" class="form-control">
           <option value="desc">📝 記述式入力モード</option>
@@ -258,40 +322,43 @@ body.light-mode .sync-status { background: rgba(255,255,255,0.9); }
           <option value="self">🧠 自己申告モード (Anki風)</option>
         </select>
       </div>
-      <div class="form-group">
-        <label>⚡ 挑戦難易度 (制限時間/ヒント速度が一括適用)</label>
-        <select id="selQuizSpeed" class="form-control">
-          <option value="easy">🌱 やさしい (時間長め/ヒント最速)</option>
-          <option value="normal" selected>☕ 普通 (標準バランス)</option>
-          <option value="hard">🔥 難しい (時間厳格/ヒント遅め)</option>
-          <option value="expert">💀 すごい (超高速/ヒントなし)</option>
-        </select>
-      </div>
-      
-      <div class="form-group" style="display:flex; align-items:center; gap:8px; margin-top:10px;">
-        <input type="checkbox" id="chkTTS" style="width:16px; height:16px; accent-color:var(--primary);">
-        <label for="chkTTS" style="margin-bottom:0; cursor:pointer;">🗣️ 問題文を音声で読み上げる</label>
-      </div>
-      <div class="form-group" style="display:flex; align-items:center; gap:8px; margin-top:5px;">
-        <input type="checkbox" id="chkTimeAttack" style="width:16px; height:16px; accent-color:var(--danger);">
-        <label for="chkTimeAttack" style="margin-bottom:0; cursor:pointer;">⏱️ タイムアタック (制限時間半分)</label>
-      </div>
-      <div class="form-group" style="display:flex; align-items:center; gap:8px; margin-top:5px;">
-        <input type="checkbox" id="chkIncludeGrad" style="width:16px; height:16px; accent-color:var(--primary);">
-        <label for="chkIncludeGrad" style="margin-bottom:0; cursor:pointer;">🎓 卒業済みのカードも出題に含める</label>
-      </div>
-      <div class="form-group" style="display:flex; align-items:center; gap:8px; margin-top:5px;">
-        <input type="checkbox" id="chkSwapQA" style="width:16px; height:16px; accent-color:var(--accent);">
-        <label for="chkSwapQA" style="margin-bottom:0; cursor:pointer;">🔄 問題と答えを入れ替えて出題</label>
-      </div>
-      <div class="form-row" style="margin-top:15px;">
-        <div style="flex:1;"><label style="display:block; font-size:0.75rem; color:var(--text2); margin-bottom:4px;">出題数</label><input type="number" id="numQCount" class="form-control" value="10" min="1"></div>
-      </div>
     </div>
-    <button class="btn" onclick="startQuiz('normal')">🚀 通常クイズスタート</button>
-    <div class="form-row" style="margin-top:15px;">
+
+    <button class="btn btn-start" onclick="startQuiz('normal')">🚀 クイズスタート</button>
+    <div class="form-row" style="margin-bottom:15px;">
+      <button class="btn btn-accent home-sub-btn" style="flex:1;" onclick="startQuiz('tokkun')">🔥 集中特訓<span style="font-size:0.65rem; font-weight:500;">苦手・しっかりのみ</span></button>
+      <button class="btn btn-success home-sub-btn" style="flex:1;" onclick="startQuiz('review')">♻️ ランダム復習<span style="font-size:0.65rem; font-weight:500;">卒業済みから出題</span></button>
+    </div>
+
+    <details class="card" id="homeDetailSettings">
+      <summary>⚙️ 詳細設定（難易度・出題数・オプション）</summary>
+      <div class="form-row" style="margin-bottom:12px;">
+        <div style="flex:2;">
+          <label class="section-label" style="font-weight:500;">⚡ 難易度</label>
+          <select id="selQuizSpeed" class="form-control">
+            <option value="easy">🌱 やさしい</option>
+            <option value="normal" selected>☕ 普通</option>
+            <option value="hard">🔥 難しい</option>
+            <option value="expert">💀 すごい</option>
+          </select>
+        </div>
+        <div style="flex:1;">
+          <label class="section-label" style="font-weight:500;">🔢 出題数</label>
+          <input type="number" id="numQCount" class="form-control" value="10" min="1">
+        </div>
+      </div>
+      <div class="hint-small" style="margin:-4px 0 12px;">難易度は制限時間とヒントの出る速さに一括で反映されます。</div>
+      <div class="toggle-grid">
+        <label class="toggle-pill"><input type="checkbox" id="chkTTS">🗣️ 問題を読み上げ</label>
+        <label class="toggle-pill"><input type="checkbox" id="chkTimeAttack">⏱️ タイムアタック</label>
+        <label class="toggle-pill"><input type="checkbox" id="chkIncludeGrad">🎓 卒業済みも出題</label>
+        <label class="toggle-pill"><input type="checkbox" id="chkSwapQA">🔄 問題と答えを入替</label>
+      </div>
+    </details>
+
+    <div class="form-row">
       <button class="btn btn-secondary" style="flex:1;" onclick="openPage('pgTutorial')">📖 使い方ガイド</button>
-      <button class="btn btn-secondary" style="flex:1;" onclick="openPage('pgUpdates'); loadUpdates();">📢 お知らせ履歴</button>
+      <button class="btn btn-secondary" style="flex:1;" onclick="openPage('pgUpdates'); loadUpdates();">📢 お知らせ</button>
     </div>
   </div>
 
@@ -324,12 +391,17 @@ body.light-mode .sync-status { background: rgba(255,255,255,0.9); }
 
   <div id="pgBox" class="screen">
     <h2 id="boxTitle">📝 問題カード箱</h2>
-    <button class="btn btn-secondary" style="width:100%; margin-bottom:15px; padding:10px;" onclick="openPage('pgPublicCategories')">🌐 公開カテゴリーを見る</button>
-    <div class="form-group form-row" style="margin-bottom: 15px;">
-      <input type="text" id="txtSearchBox" class="form-control" placeholder="検索..." oninput="renderBox()">
+    <div class="form-group form-row" style="margin-bottom: 12px;">
+      <input type="text" id="txtSearchBox" class="form-control" placeholder="🔍 問題・答えを検索..." oninput="renderBox()">
       <button class="btn btn-secondary" style="width:auto; padding:0 16px; white-space:nowrap;" onclick="showAllCards()">全表示</button>
     </div>
-    <div class="list-header"><span id="lblBoxCount">0件</span><button class="btn btn-secondary" style="width:auto; padding:4px 10px; font-size:0.8rem; height:30px;" onclick="showAddQModal()">➕ 新規追加</button></div>
+    <div class="list-header">
+      <span id="lblBoxCount">0件</span>
+      <div style="display:flex; gap:6px;">
+        <button class="btn btn-secondary" style="width:auto; padding:6px 10px; font-size:0.8rem;" onclick="openPage('pgPublicCategories')">🌐 公開カテゴリー</button>
+        <button class="btn" style="width:auto; padding:6px 12px; font-size:0.8rem;" onclick="showAddQModal()">➕ 新規追加</button>
+      </div>
+    </div>
     <div id="boxList"></div>
   </div>
 
@@ -339,6 +411,7 @@ body.light-mode .sync-status { background: rgba(255,255,255,0.9); }
       
       <div>
         <div class="quiz-header-status">
+          <button id="btnQuizQuit" class="chip" onclick="quitQuiz()">✕ 中断</button>
           <span id="lblQuizProgress" style="font-family:'JetBrains Mono',monospace; font-weight:700;">Q 1/10</span>
           <span id="lblQuizTimerText" style="font-family:'JetBrains Mono',monospace; font-weight:700; color:var(--primary);">--.-s</span>
         </div>
@@ -422,13 +495,63 @@ body.light-mode .sync-status { background: rgba(255,255,255,0.9); }
   </div>
 
   <div id="pgBackup" class="screen">
-    <h2>💾 管理・クラウド同期</h2>
+    <h2>⚙️ 管理・設定</h2>
     <div class="card">
-      <div class="setting-box-title">☁️ Google同期</div>
+      <div class="setting-box-title">☁️ アカウントとクラウド同期</div>
       <div id="fbLoginState" style="margin-bottom:10px; font-size:0.85rem; color:var(--warn); font-weight:bold;">未ログイン</div>
-      <button class="btn btn-secondary" id="btnFbLogin" onclick="firebaseLogin()">🔑 ログイン</button>
-      <button class="btn btn-secondary" id="btnFbLogout" style="display:none;" onclick="firebaseLogout()">🚪 ログアウト</button>
-      <button class="btn btn-success" style="margin-top:10px;" onclick="syncToCloud(false)">☁️ クラウドと手動マージ同期</button>
+      <div class="form-row">
+        <button class="btn btn-secondary" id="btnFbLogin" onclick="firebaseLogin()">🔑 ログイン</button>
+        <button class="btn btn-secondary" id="btnFbLogout" style="display:none;" onclick="firebaseLogout()">🚪 ログアウト</button>
+        <button class="btn btn-success" onclick="syncToCloud(false)">☁️ 手動同期</button>
+      </div>
+      <div class="hint-small" style="margin-top:8px;">ログイン中はカードの追加・編集のたびに自動で同期されます。</div>
+    </div>
+
+    <div class="card">
+      <div class="setting-box-title">🎨 表示</div>
+      <button class="btn btn-secondary" onclick="toggleLightMode()">🌓 ダーク / ライト を切り替え</button>
+    </div>
+
+    <div class="card">
+      <div class="setting-box-title">📦 バックアップ（JSON / CSV）</div>
+      <div class="form-row" style="margin-bottom:10px;">
+        <button class="btn btn-secondary" onclick="exportJSON()">📤 JSON出力</button>
+        <button class="btn btn-secondary" onclick="document.getElementById('fileJSON').click()">📥 JSON入力</button>
+        <input type="file" id="fileJSON" accept=".json" style="display:none;" onchange="importJSON(event)">
+      </div>
+      <div class="form-row">
+        <button class="btn btn-secondary" onclick="exportCSV()">📤 CSV出力</button>
+        <button class="btn btn-secondary" onclick="document.getElementById('fileCSV').click()">📥 CSV入力</button>
+        <input type="file" id="fileCSV" accept=".csv, text/csv" style="display:none;" onchange="importCSV(event)">
+      </div>
+      <div class="hint-small" style="margin-top:8px;">JSONは学習記録・画像も含む完全バックアップ、CSVはカードのみです。構造式・漢文はテキストなのでどちらにも含まれます。</div>
+    </div>
+
+    <div class="card">
+      <div class="setting-box-title">👥 フレンド・ランキング</div>
+      <button class="btn btn-accent" onclick="openPage('pgFriends'); loadAppFriends(); loadDailyRanking();">🏆 ランキング・チャットを開く</button>
+      <div style="margin-top:12px;">
+        <label class="section-label" style="font-weight:500;">あなたのUID</label>
+        <div class="form-row">
+          <input type="text" id="txtMyUid" class="form-control" readonly>
+          <button class="btn btn-secondary" style="width:auto; padding:0 14px; font-size:0.8rem;" onclick="copyMyUid()">📋 コピー</button>
+        </div>
+      </div>
+      <label class="toggle-pill" style="margin-top:12px;"><input type="checkbox" id="chkShareStats" onchange="toggleShareStats()">📊 成績をフレンドと共有する</label>
+      <div class="hint-small" style="margin-top:6px;">有効にすると、カテゴリーごとの成績（正解数・成績率）がフレンドと共有され、ランキングにも表示されます。</div>
+      <button class="btn btn-secondary" style="margin-top:10px;" onclick="openPage('pgCompareStats')">📊 フレンドと成績を比較</button>
+    </div>
+
+    <div class="card">
+      <div class="setting-box-title">💡 バグ報告・機能の要望</div>
+      <textarea id="txtUserReport" class="form-control" style="height:80px; font-size:0.85rem; margin-bottom:10px;" placeholder="アプリのバグや「こんな機能が欲しい！」など、ご自由に送信してください。"></textarea>
+      <button class="btn btn-secondary" onclick="submitUserReport()">送信する</button>
+    </div>
+
+    <div class="card danger-zone">
+      <div class="setting-box-title">⚠️ 危険な操作</div>
+      <button class="btn btn-secondary" onclick="resetScores()">🔄 成績をリセット（問題は保持）</button>
+      <button class="btn btn-danger" style="margin-top:10px;" onclick="factoryReset()">🚨 全データを初期化</button>
     </div>
 
     <div id="updatePostArea" class="card" style="border-color: var(--accent); display: none;">
@@ -458,49 +581,7 @@ body.light-mode .sync-status { background: rgba(255,255,255,0.9); }
       </div>
     </div>
 
-    <div class="card">
-      <div class="setting-box-title">💡 バグ報告・機能の要望</div>
-      <textarea id="txtUserReport" class="form-control" style="height:80px; font-size:0.85rem; margin-bottom:10px;" placeholder="アプリのバグや「こんな機能が欲しい！」など、ご自由に送信してください。"></textarea>
-      <button class="btn btn-secondary" onclick="submitUserReport()">送信する</button>
-    </div>
-    
-    <div class="card">
-      <div class="setting-box-title">👥 ソーシャル・フレンド機能</div>
-      <button class="btn btn-accent" onclick="openPage('pgFriends'); loadAppFriends(); loadDailyRanking();">🏆 ランキング・チャットを開く</button>
-      <div style="margin-top:10px;">
-        <label style="font-size:0.75rem; color:var(--text2);">あなたのUID:</label>
-        <input type="text" id="txtMyUid" class="form-control" readonly style="margin-bottom:5px;">
-        <button class="btn btn-secondary" style="padding:8px; font-size:0.8rem;" onclick="copyMyUid()">📋 コピー</button>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="setting-box-title">📊 成績共有設定</div>
-      <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
-        <input type="checkbox" id="chkShareStats" style="width:18px; height:18px; accent-color:var(--primary);" onchange="toggleShareStats()">
-        <label for="chkShareStats" style="margin-bottom:0; cursor:pointer; flex:1;">成績をフレンドと共有する</label>
-      </div>
-      <div style="font-size:0.8rem; color:var(--text3); background:var(--bg3); padding:10px; border-radius:6px; border:1px solid var(--border);">
-        📝 有効にすると、カテゴリーごとの成績（正解数・成績率）がフレンドと共有されます。フレンドはグラフで成績を比較できます。
-      </div>
-      <button class="btn btn-secondary" style="margin-top:10px; width:100%;" onclick="openPage('pgCompareStats')">📊 フレンド成績比較</button>
-    </div>
-
-    <div class="setting-box">
-      <div class="setting-box-title">📦 JSON / CSV バックアップ</div>
-      <div class="form-row" style="margin-bottom:10px;">
-        <button class="btn btn-secondary" onclick="exportJSON()">JSON出力</button>
-        <button class="btn btn-secondary" onclick="document.getElementById('fileJSON').click()">JSON入力</button>
-        <input type="file" id="fileJSON" accept=".json" style="display:none;" onchange="importJSON(event)">
-      </div>
-      <div class="form-row">
-        <button class="btn btn-secondary" onclick="exportCSV()">CSV出力</button>
-        <button class="btn btn-secondary" onclick="document.getElementById('fileCSV').click()">CSV入力</button>
-        <input type="file" id="fileCSV" accept=".csv, text/csv" style="display:none;" onchange="importCSV(event)">
-      </div>
-    </div>
-    <button class="btn btn-secondary" style="margin-top:10px;" onclick="resetScores()">🔄 成績をリセット（問題は保持）</button>
-    <button class="btn btn-danger" style="margin-top:15px;" onclick="factoryReset()">🚨 全データを初期化</button>
+    <div style="text-align:center; font-size:0.75rem; color:var(--text3); margin-top:5px;">すするanki <span id="settingsVersionLabel"></span></div>
   </div>
 
   <div id="pgFriends" class="screen">
@@ -691,6 +772,16 @@ body.light-mode .sync-status { background: rgba(255,255,255,0.9); }
       <div style="text-align:center; color:var(--text3); padding:40px;">フレンドを選択して成績を比較してください</div>
     </div>
   </div>
+
+  <!-- ★【0.03.00】下部ナビゲーション（クイズ中は非表示） -->
+  <nav class="bottom-nav" id="bottomNav">
+    <button class="bnav-item active" data-page="pgHome" onclick="openPage('pgHome')"><i>🏠</i>ホーム</button>
+    <button class="bnav-item" data-page="pgTree" onclick="openPage('pgTree')"><i>📁</i>フォルダー</button>
+    <button class="bnav-item" data-page="pgBox" onclick="openPage('pgBox')"><i>📝</i>カード</button>
+    <button class="bnav-item" data-page="pgOnlineMatch" onclick="openPage('pgOnlineMatch')"><i>⚔️</i>対戦</button>
+    <button class="bnav-item" data-page="pgStats" onclick="openPage('pgStats')"><i>📊</i>実績</button>
+    <button class="bnav-item" data-page="pgBackup" onclick="openPage('pgBackup')"><i>⚙️</i>設定</button>
+  </nav>
 </div>
 
 <div class="ctx-overlay" id="bulkAddOverlay" style="display:none;" onclick="closeBulkAdd()">
@@ -704,55 +795,175 @@ body.light-mode .sync-status { background: rgba(255,255,255,0.9); }
   </div>
 </div>
 
-<!-- ★【0.02.63】カード追加・編集モーダル（画像添付対応） -->
+<!-- ★【0.02.63】カード追加・編集モーダル（画像添付対応）／★【0.03.00】構造式・漢文・数式エディタとプレビューに対応 -->
 <div class="ctx-overlay" id="cardModalOverlay" style="display:none;" onclick="closeCardModal()">
-  <div class="menu-card" style="padding:20px; max-width:90%; width:420px; max-height:85vh; overflow-y:auto;" onclick="event.stopPropagation()">
+  <div class="menu-card editor-card" onclick="event.stopPropagation()">
     <h3 style="color:var(--text); margin-bottom:4px; font-size:1.1rem;" id="cardModalTitle">➕ 新規カード追加</h3>
     <div id="cardModalCatLabel" style="font-size:0.8rem; color:var(--text3); margin-bottom:15px;">📁 追加先: 未分類</div>
 
     <div class="form-group">
-      <label style="font-size:0.85rem; color:var(--text2); font-weight:700; display:block; margin-bottom:6px;">❓ 問題文</label>
-      <textarea id="txtCardQuestion" class="form-control" style="height:70px; font-size:0.95rem;" placeholder="問題文を入力..."></textarea>
+      <label class="section-label">❓ 問題文</label>
+      <textarea id="txtCardQuestion" class="form-control" style="height:70px; font-size:0.95rem;" placeholder="問題文を入力..." oninput="scheduleCardPreview()"></textarea>
+      <div class="field-toolbar">
+        <button type="button" class="chip" onclick="openChemEditor('txtCardQuestion')">🧪 構造式</button>
+        <button type="button" class="chip" onclick="openKanbunEditor('txtCardQuestion')">📜 漢文</button>
+        <button type="button" class="chip" onclick="openFormulaEditor('txtCardQuestion')">∑ 数式・化学式</button>
+        <label class="chip">🖼️ 画像<input type="file" accept="image/*" style="display:none;" onchange="handleCardImageSelect(event, 'question')"></label>
+      </div>
       <div id="cardQImageWrap" style="display:none; margin-top:8px;">
         <img id="cardQImagePreview" style="max-width:100%; max-height:150px; border-radius:8px; display:block; margin-bottom:6px;">
-        <button type="button" class="btn btn-secondary" style="width:auto; padding:6px 12px; font-size:0.75rem;" onclick="removeCardImage('question')">🗑️ 画像を削除</button>
+        <button type="button" class="chip" onclick="removeCardImage('question')">🗑️ 画像を削除</button>
       </div>
-      <label class="btn btn-secondary" style="margin-top:8px; font-size:0.8rem; padding:9px;">
-        🖼️ 問題に画像を添付
-        <input type="file" accept="image/*" style="display:none;" onchange="handleCardImageSelect(event, 'question')">
-      </label>
     </div>
 
     <div class="form-group" style="margin-top:15px;">
-      <label style="font-size:0.85rem; color:var(--text2); font-weight:700; display:block; margin-bottom:6px;">✅ 答え</label>
-      <textarea id="txtCardAnswer" class="form-control" style="height:90px; font-size:0.95rem;" placeholder="答えを入力..."></textarea>
-      <div style="display:flex; flex-wrap:wrap; gap:4px; margin:6px 0;">
-        <button type="button" onclick="insertAtCursor(document.getElementById('txtCardAnswer'), '(他動詞)')" style="font-size:0.7rem; padding:4px 9px; border-radius:12px; border:1px solid var(--border); background:var(--bg4); color:var(--text2);">他動詞</button>
-        <button type="button" onclick="insertAtCursor(document.getElementById('txtCardAnswer'), '(自動詞)')" style="font-size:0.7rem; padding:4px 9px; border-radius:12px; border:1px solid var(--border); background:var(--bg4); color:var(--text2);">自動詞</button>
-        <button type="button" onclick="insertAtCursor(document.getElementById('txtCardAnswer'), '(名詞)')" style="font-size:0.7rem; padding:4px 9px; border-radius:12px; border:1px solid var(--border); background:var(--bg4); color:var(--text2);">名詞</button>
-        <button type="button" onclick="insertAtCursor(document.getElementById('txtCardAnswer'), '(形容詞)')" style="font-size:0.7rem; padding:4px 9px; border-radius:12px; border:1px solid var(--border); background:var(--bg4); color:var(--text2);">形容詞</button>
-        <button type="button" onclick="insertAtCursor(document.getElementById('txtCardAnswer'), '(副詞)')" style="font-size:0.7rem; padding:4px 9px; border-radius:12px; border:1px solid var(--border); background:var(--bg4); color:var(--text2);">副詞</button>
-        <button type="button" onclick="insertAtCursor(document.getElementById('txtCardAnswer'), '(前置詞)')" style="font-size:0.7rem; padding:4px 9px; border-radius:12px; border:1px solid var(--border); background:var(--bg4); color:var(--text2);">前置詞</button>
-        <button type="button" onclick="insertAtCursor(document.getElementById('txtCardAnswer'), '(接続詞)')" style="font-size:0.7rem; padding:4px 9px; border-radius:12px; border:1px solid var(--border); background:var(--bg4); color:var(--text2);">接続詞</button>
-        <button type="button" onclick="insertAtCursor(document.getElementById('txtCardAnswer'), '/')" style="font-size:0.7rem; padding:4px 9px; border-radius:12px; border:1px solid var(--border); background:var(--bg4); color:var(--text2);">／区切り</button>
+      <label class="section-label">✅ 答え</label>
+      <textarea id="txtCardAnswer" class="form-control" style="height:80px; font-size:0.95rem;" placeholder="答えを入力..." oninput="scheduleCardPreview()"></textarea>
+      <div class="field-toolbar">
+        <button type="button" class="chip" onclick="openChemEditor('txtCardAnswer')">🧪 構造式</button>
+        <button type="button" class="chip" onclick="openKanbunEditor('txtCardAnswer')">📜 漢文</button>
+        <button type="button" class="chip" onclick="openFormulaEditor('txtCardAnswer')">∑ 数式・化学式</button>
+        <label class="chip">🖼️ 画像<input type="file" accept="image/*" style="display:none;" onchange="handleCardImageSelect(event, 'answer')"></label>
+      </div>
+      <div class="chip-row">
+        <button type="button" class="chip" onclick="insertAtCursor(document.getElementById('txtCardAnswer'), '(他動詞)'); scheduleCardPreview();">他動詞</button>
+        <button type="button" class="chip" onclick="insertAtCursor(document.getElementById('txtCardAnswer'), '(自動詞)'); scheduleCardPreview();">自動詞</button>
+        <button type="button" class="chip" onclick="insertAtCursor(document.getElementById('txtCardAnswer'), '(名詞)'); scheduleCardPreview();">名詞</button>
+        <button type="button" class="chip" onclick="insertAtCursor(document.getElementById('txtCardAnswer'), '(形容詞)'); scheduleCardPreview();">形容詞</button>
+        <button type="button" class="chip" onclick="insertAtCursor(document.getElementById('txtCardAnswer'), '(副詞)'); scheduleCardPreview();">副詞</button>
+        <button type="button" class="chip" onclick="insertAtCursor(document.getElementById('txtCardAnswer'), '(前置詞)'); scheduleCardPreview();">前置詞</button>
+        <button type="button" class="chip" onclick="insertAtCursor(document.getElementById('txtCardAnswer'), '(接続詞)'); scheduleCardPreview();">接続詞</button>
+        <button type="button" class="chip" onclick="insertAtCursor(document.getElementById('txtCardAnswer'), '/'); scheduleCardPreview();">／区切り</button>
       </div>
       <div id="cardAImageWrap" style="display:none; margin-top:8px;">
         <img id="cardAImagePreview" style="max-width:100%; max-height:150px; border-radius:8px; display:block; margin-bottom:6px;">
-        <button type="button" class="btn btn-secondary" style="width:auto; padding:6px 12px; font-size:0.75rem;" onclick="removeCardImage('answer')">🗑️ 画像を削除</button>
+        <button type="button" class="chip" onclick="removeCardImage('answer')">🗑️ 画像を削除</button>
       </div>
-      <label class="btn btn-secondary" style="margin-top:8px; font-size:0.8rem; padding:9px;">
-        🖼️ 答えに画像を添付
-        <input type="file" accept="image/*" style="display:none;" onchange="handleCardImageSelect(event, 'answer')">
-      </label>
     </div>
 
-    <div style="font-size:0.72rem; color:var(--text3); margin-top:14px; line-height:1.5; background:var(--bg3); padding:8px 10px; border-radius:8px;">
-      💡 答えを「(他動詞)意味1　意味2/(自動詞)意味3」のように (タグ) + 「/」区切りで書くと、出題時にタグごとの入力欄に分かれます。同じ欄内は全角スペースや「|」区切りでどれか一つ正解にできます。
+    <div id="cardPreviewWrap" class="card-preview" style="display:none;">
+      <div class="hint-small" style="margin-bottom:6px; font-weight:700;">👀 プレビュー</div>
+      <div class="card-preview-row"><b>Q</b><div id="cardPreviewQ"></div></div>
+      <div class="card-preview-row"><b>A</b><div id="cardPreviewA"></div></div>
     </div>
 
-    <div class="form-row" style="margin-top:18px;">
+    <details style="margin-top:12px;">
+      <summary class="hint-small" style="cursor:pointer;">💡 書き方のヒント</summary>
+      <div class="hint-small" style="margin-top:6px; background:var(--bg3); padding:8px 10px; border-radius:8px;">
+        ・「/」区切りで複数の正解を登録できます（例: 東京/Tokyo）。<br>
+        ・答えを「(他動詞)意味1　意味2/(自動詞)意味3」のように (タグ)+「/」区切りで書くと、出題時にタグごとの入力欄に分かれます。<br>
+        ・🧪構造式・📜漢文・∑数式は、ボタンからエディタを開いて入力できます。挿入済みの部分にカーソルを置いて開くと編集できます。
+      </div>
+    </details>
+
+    <div class="form-row" style="margin-top:16px;">
       <button class="btn btn-secondary" style="flex:1;" onclick="closeCardModal()">キャンセル</button>
-      <button class="btn" style="flex:1;" onclick="submitCardModal()">保存</button>
+      <button class="btn" style="flex:1;" onclick="submitCardModal()">💾 保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ★【0.03.00】構造式エディタ -->
+<div class="ctx-overlay" id="chemEditorOverlay" style="display:none; z-index:1100;" onclick="closeChemEditor()">
+  <div class="menu-card editor-card" onclick="event.stopPropagation()">
+    <h3 style="color:var(--text); margin-bottom:12px; font-size:1.1rem;" id="chemEditorTitle">🧪 構造式を挿入</h3>
+
+    <label class="section-label">① 化合物名から選ぶ</label>
+    <div class="form-row">
+      <input type="text" id="txtChemSearch" class="form-control" placeholder="例: ベンゼン / サリチル酸 / aspirin" oninput="renderChemSearchResults(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault(); searchChemOnPubChem();}">
+      <button type="button" class="btn btn-secondary" style="width:auto; padding:0 12px; font-size:0.8rem; white-space:nowrap;" onclick="searchChemOnPubChem()">🌐 PubChem</button>
+    </div>
+    <div id="chemSearchStatus" class="hint-small" style="margin-top:4px;"></div>
+    <div id="chemSearchResults" class="chip-row" style="max-height:120px; overflow-y:auto;"></div>
+
+    <label class="section-label" style="margin-top:12px;">② 構造を直接書く（SMILES記法）</label>
+    <input type="text" id="txtChemSmiles" class="form-control" style="font-family:'JetBrains Mono', monospace;" placeholder="例: CCO（エタノール）" autocapitalize="off" autocomplete="off" spellcheck="false" oninput="scheduleChemPreview()">
+    <div id="chemFragmentChips" class="chip-row"></div>
+    <details>
+      <summary class="hint-small" style="cursor:pointer;">SMILESの書き方（かんたん）</summary>
+      <div class="hint-small" style="margin-top:6px; background:var(--bg3); padding:8px 10px; border-radius:8px;">
+        ・原子を並べると単結合でつながります（C, O, N, Cl …。水素は自動で補われます）<br>
+        ・<b>=</b> 二重結合、<b>#</b> 三重結合　例: C=C（エチレン）<br>
+        ・<b>( )</b> で枝分かれ　例: CC(C)C（2-メチルプロパン）<br>
+        ・同じ数字で環を閉じる　例: C1CCCCC1（シクロヘキサン）<br>
+        ・<b>/ \</b> でシス・トランス　例: C/C=C\C（シス）、C/C=C/C（トランス）
+      </div>
+    </details>
+
+    <label class="section-label" style="margin-top:12px;">👀 プレビュー</label>
+    <div id="chemPreview" class="editor-preview"></div>
+
+    <div class="form-row" style="margin-top:16px;">
+      <button class="btn btn-secondary" style="flex:1;" onclick="closeChemEditor()">キャンセル</button>
+      <button class="btn" style="flex:1;" onclick="submitChemEditor()">✅ 挿入</button>
+    </div>
+  </div>
+</div>
+
+<!-- ★【0.03.00】漢文エディタ -->
+<div class="ctx-overlay" id="kanbunEditorOverlay" style="display:none; z-index:1100;" onclick="closeKanbunEditor()">
+  <div class="menu-card editor-card" onclick="event.stopPropagation()">
+    <h3 style="color:var(--text); margin-bottom:12px; font-size:1.1rem;" id="kanbunEditorTitle">📜 漢文を挿入</h3>
+
+    <label class="section-label">① 白文（漢字の本文）を入力</label>
+    <input type="text" id="txtKanbunPlain" class="form-control" style="font-family:'Noto Serif JP', serif; font-size:1.1rem;" placeholder="例: 学而時習之" oninput="onKanbunPlainInput()">
+
+    <label class="section-label" style="margin-top:12px;">② 字をタップして返り点・送り仮名を付ける</label>
+    <div id="kanbunTiles" class="kb-tiles"></div>
+
+    <div id="kanbunUnitPanel" class="kb-unit-panel" style="display:none;">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+        <button type="button" class="chip" onclick="moveKanbunSel(-1)">◀ 前の字</button>
+        <span class="kb-sel-char" id="kanbunSelChar"></span>
+        <button type="button" class="chip" onclick="moveKanbunSel(1)">次の字 ▶</button>
+      </div>
+      <div class="hint-small">返り点</div>
+      <div id="kanbunKaeriButtons" class="chip-row"></div>
+      <div class="form-row" style="margin-top:6px;">
+        <div style="flex:1;">
+          <div class="hint-small">送り仮名（ひらがな入力でOK）</div>
+          <input type="text" id="txtKanbunOkuri" class="form-control" style="padding:8px;" placeholder="例: ビテ" oninput="onKanbunFieldInput('okuri')">
+        </div>
+        <div style="flex:1;">
+          <div class="hint-small">読み（ふりがな）</div>
+          <input type="text" id="txtKanbunFuri" class="form-control" style="padding:8px;" placeholder="例: まな" oninput="onKanbunFieldInput('furi')">
+        </div>
+      </div>
+      <div class="toggle-grid" style="margin-top:8px;">
+        <label class="toggle-pill"><input type="checkbox" id="chkKanbunOki" onchange="onKanbunFieldInput('oki')">置き字（読まない）</label>
+        <label class="toggle-pill"><input type="checkbox" id="chkKanbunKana" onchange="onKanbunFieldInput('kana')">書き下しでは読みをひらがなで</label>
+      </div>
+    </div>
+
+    <label class="section-label" style="margin-top:12px;">👀 プレビュー</label>
+    <div id="kanbunPreview" class="editor-preview" style="font-size:1.3rem;"></div>
+    <div class="hint-small" style="margin-top:8px;">書き下し文（自動生成・再読文字などは手直ししてください）</div>
+    <div id="kanbunKakikudashi" class="kakikudashi"></div>
+    <label id="kanbunToAnswerRow" class="toggle-pill" style="margin-top:8px;"><input type="checkbox" id="chkKanbunToAnswer">書き下し文を「答え」に入れる</label>
+
+    <div class="form-row" style="margin-top:16px;">
+      <button class="btn btn-secondary" style="flex:1;" onclick="closeKanbunEditor()">キャンセル</button>
+      <button class="btn" style="flex:1;" onclick="submitKanbunEditor()">✅ 挿入</button>
+    </div>
+  </div>
+</div>
+
+<!-- ★【0.03.00】数式・化学式エディタ -->
+<div class="ctx-overlay" id="formulaEditorOverlay" style="display:none; z-index:1100;" onclick="closeFormulaEditor()">
+  <div class="menu-card editor-card" onclick="event.stopPropagation()">
+    <h3 style="color:var(--text); margin-bottom:12px; font-size:1.1rem;">∑ 数式・化学式を挿入</h3>
+    <div class="toggle-grid" style="margin-bottom:10px;">
+      <label class="toggle-pill"><input type="radio" name="formulaKind" value="ce" checked onchange="updateFormulaPreview()">⚗️ 化学式・反応式</label>
+      <label class="toggle-pill"><input type="radio" name="formulaKind" value="math" onchange="updateFormulaPreview()">📐 数式 (LaTeX)</label>
+    </div>
+    <input type="text" id="txtFormulaInput" class="form-control" style="font-family:'JetBrains Mono', monospace;" placeholder="例: 2H2 + O2 -> 2H2O" autocapitalize="off" autocomplete="off" spellcheck="false" oninput="updateFormulaPreview()">
+    <div id="formulaSampleChips" class="chip-row"></div>
+    <div class="hint-small">化学式は数字が自動で下付きに、「^2+」で電荷、「->」「&lt;=&gt;」で矢印になります。</div>
+    <label class="section-label" style="margin-top:12px;">👀 プレビュー</label>
+    <div id="formulaPreview" class="editor-preview" style="font-size:1.2rem;"></div>
+    <div class="form-row" style="margin-top:16px;">
+      <button class="btn btn-secondary" style="flex:1;" onclick="closeFormulaEditor()">キャンセル</button>
+      <button class="btn" style="flex:1;" onclick="submitFormulaEditor()">✅ 挿入</button>
     </div>
   </div>
 </div>
@@ -801,6 +1012,8 @@ body.light-mode .sync-status { background: rgba(255,255,255,0.9); }
   document.addEventListener('DOMContentLoaded', () => {
     const badge = document.getElementById('appVersionBadge');
     if (badge && typeof APP_VERSION !== 'undefined') badge.innerText = APP_VERSION;
+    const setVer = document.getElementById('settingsVersionLabel');
+    if (setVer && typeof APP_VERSION !== 'undefined') setVer.innerText = 'v' + APP_VERSION;
     const updVer = document.getElementById('txtUpdVersion');
     if (updVer && typeof APP_VERSION !== 'undefined') updVer.value = APP_VERSION;
   });
@@ -808,6 +1021,8 @@ body.light-mode .sync-status { background: rgba(255,255,255,0.9); }
 
 <script src="config.js"></script>
 <script src="utils.js"></script>
+<script src="rich-content.js"></script>
+<script src="rich-editors.js"></script>
 <script src="storage.js"></script>
 <script src="updates.js"></script>
 <script src="auth.js"></script>

@@ -733,7 +733,7 @@ function renderOnlineQuestion(timeLimit) {
       <div id="onlineTimerBar" style="background:var(--accent); height:100%; width:100%; transition: width 1s linear;"></div>
     </div>
     <div style="flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center; background:var(--bg2); border:1px solid var(--border); border-radius:12px; padding:24px; min-height:140px; margin-bottom:20px; text-align:center;">
-      <div style="font-size:1.15rem; font-weight:bold; word-break:break-all; white-space:pre-wrap;">${escapeHtml(q.question)}</div>
+      <div id="onlineQuestionText" style="font-size:1.15rem; font-weight:bold; word-break:break-all; white-space:pre-wrap;">${renderRichText(q.question, { escape: true, kanbunRows: 12 })}</div>
     </div>
   `;
   
@@ -746,9 +746,10 @@ function renderOnlineQuestion(timeLimit) {
     choices.sort(() => Math.random() - 0.5);
     gameView.innerHTML = headerHtml + `
       <div style="display:grid; grid-template-columns:1fr; gap:10px; margin-bottom:20px;">
-        ${choices.map((c, i) => `<button class="btn btn-secondary online-choice-btn" style="justify-content:center; padding:12px; font-size:0.9rem; text-align:center; word-break:break-all;" id="onlineChoiceBtn_${i}">${escapeHtml(c)}</button>`).join('')}
+        ${choices.map((c, i) => `<button class="btn btn-secondary online-choice-btn" style="justify-content:center; padding:12px; font-size:0.9rem; text-align:center; word-break:break-all;" id="onlineChoiceBtn_${i}">${renderRichText(c, { escape: true, kanbunRows: 8 })}</button>`).join('')}
       </div>
     `;
+    hydrateRich(gameView, { chemScale: 1.1 });
     choices.forEach((c, i) => {
       const btn = document.getElementById('onlineChoiceBtn_' + i);
       if (btn) btn.onclick = () => submitOnlineAnswer(c, correctPrimary);
@@ -796,6 +797,8 @@ function renderOnlineQuestion(timeLimit) {
       </div>
     `;
   }
+  // ★【0.03.00】問題文の構造式・漢文・数式を描画（4択はボタン側も描画済み）
+  if (fmt !== 'choice') hydrateRich(document.getElementById('onlineQuestionText'), { chemScale: 1.4 });
   
   clearInterval(matchTimer);
   if (fmt !== 'self') {
@@ -970,7 +973,7 @@ window.showOnlineSelfAnswer = function() {
   const ansEl = document.getElementById('onlineSelfAnswerDisplay');
   const judgeEl = document.getElementById('onlineSelfJudge');
   const showBtn = document.getElementById('onlineSelfShowBtn');
-  if (ansEl) { ansEl.style.display = 'block'; ansEl.innerText = 'A: ' + ((typeof getPrimaryAnswer === 'function') ? getPrimaryAnswer(q.answer) : q.answer.split(/[/|]/)[0].trim()); }
+  if (ansEl) { ansEl.style.display = 'block'; setRichContent(ansEl, 'A: ' + getPrimaryAnswer(q.answer), { escape: true, chemScale: 1.3 }); }
   if (judgeEl) { judgeEl.style.display = 'flex'; }
   if (showBtn) showBtn.style.display = 'none';
 }

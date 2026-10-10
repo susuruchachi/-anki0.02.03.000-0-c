@@ -13,6 +13,16 @@ function closeMenu() {
 
 function openPage(pageId) { executePageTransition(pageId, false); }
 
+// ★【0.03.00】ホーム画面上部の学習状況サマリー
+function updateHomeSummary() {
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.innerText = v; };
+  const isGrad = q => q.level >= 5 && (q.level5Correct || 0) >= 5;
+  set('homeSumTotal', db.length);
+  set('homeSumWeak', db.filter(q => !isGrad(q) && ((q.level === 0 && (q.correct + q.incorrect) > 0) || q.level === -1)).length);
+  set('homeSumUnseen', db.filter(q => q.correct === 0 && q.incorrect === 0 && q.level >= 0).length);
+  set('homeSumGrad', db.filter(isGrad).length);
+}
+
 async function fetchAndRenderTutorial() {
   const container = document.getElementById('tutorialContent');
   if (!container || container.getAttribute('data-loaded') === 'true') return; 
@@ -71,11 +81,16 @@ function executePageTransition(pageId, isBackAction) {
 
   document.querySelectorAll('.screen').forEach(s => { s.classList.remove('active'); s.style.display='none'; });
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  // ★【0.03.00】下部ナビの選択状態と、クイズ中の表示切り替え
+  const navOwner = { pgUpdates: 'pgHome', pgTutorial: 'pgHome', pgPublicCategories: 'pgBox', pgShared: 'pgBox', pgMatchHistory: 'pgOnlineMatch', pgFriends: 'pgBackup', pgCompareStats: 'pgBackup' };
+  const navPage = navOwner[pageId] || pageId;
+  document.querySelectorAll('.bnav-item').forEach(b => b.classList.toggle('active', b.dataset.page === navPage));
+  document.body.classList.toggle('in-quiz', pageId === 'pgQuizPlayer');
 
   const tgt = document.getElementById(pageId);
   if(tgt) { tgt.style.display='flex'; tgt.classList.add('active'); }
 
-  if(pageId==='pgHome') { const el = document.getElementById('navHome'); if(el) el.classList.add('active'); buildQuizScopeDropdown(); }
+  if(pageId==='pgHome') { const el = document.getElementById('navHome'); if(el) el.classList.add('active'); buildQuizScopeDropdown(); updateHomeSummary(); }
   if(pageId==='pgTree') { const el = document.getElementById('navTree'); if(el) el.classList.add('active'); renderTree(); }
   if(pageId==='pgBox') { const el = document.getElementById('navBox'); if(el) el.classList.add('active'); renderBox(); }
   if(pageId==='pgStats') { const el = document.getElementById('navStats'); if(el) el.classList.add('active'); renderStatsAndCharts(); }
