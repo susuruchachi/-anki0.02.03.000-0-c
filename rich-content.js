@@ -232,7 +232,8 @@ const CHEM_THEME = {
 // SMILES を svg 要素に描画する。成功なら true を返す Promise。
 function drawSmilesInto(svg, smiles, scale = 1.4) {
   return ensureSmilesDrawer().then(() => new Promise((resolve) => {
-    const drawer = new SmilesDrawer.SvgDrawer({ width: 300, height: 300, terminalCarbons: true, compactDrawing: true, padding: 10, themes: { anki: CHEM_THEME } });
+    const drawer = new SmilesDrawer.SvgDrawer({ width: 300, height: 300, terminalCarbons: true, compactDrawing: false, padding: 10, themes: { anki: CHEM_THEME } });
+    labelNonBenzeneCarbons(drawer);
     SmilesDrawer.parse(String(smiles).trim(), (tree) => {
       try {
         drawer.draw(tree, svg, 'anki', null, false);
@@ -241,6 +242,38 @@ function drawSmilesInto(svg, smiles, scale = 1.4) {
       } catch (e) { resolve(false); }
     }, () => resolve(false));
   }));
+}
+
+// 高校化学の表記に合わせ、ベンゼン環（芳香環）以外の炭素はすべて C / CH / CH2 / CH3 と書く。
+// SmilesDrawer は標準では炭素を省略した骨格式（折れ線）で描くので、頂点を描く直前に
+// 「ベンゼン環に属さない炭素」へ drawExplicit を立てて元素記号と水素の数を表示させる。
+function labelNonBenzeneCarbons(drawer) {
+  const origDrawVertices = drawer.drawVertices.bind(drawer);
+  drawer.drawVertices = function (debug) {
+    try {
+      const pre = this.preprocessor, graph = pre.graph, vertices = graph.vertices;
+      const isC = (v) => v.value.element === 'C';
+      const isDouble = (a, b) => { const e = graph.getEdge(a, b); return !!e && e.bondType === '='; };
+      // 炭素だけの六員環を候補にし、全員が（候補環の炭素と）二重結合を持っていればベンゼン環とみなす
+      // （ナフタレンなど縮合環のケクレ構造で、片方の環に二重結合が2本しかない場合にも対応するため）
+      const candidates = (pre.rings || []).filter(r => r.members.length === 6 && r.members.every(id => isC(vertices[id])));
+      const inCandidate = new Set();
+      candidates.forEach(r => r.members.forEach(id => inCandidate.add(id)));
+      const benzene = new Set();
+      candidates.forEach(r => {
+        const aromatic = r.members.every(id => {
+          const v = vertices[id];
+          if (v.value.isPartOfAromaticRing) return true; // 小文字(c1ccccc1)で書かれた芳香環
+          return v.neighbours.some(n => inCandidate.has(n) && isDouble(id, n));
+        });
+        if (aromatic) r.members.forEach(id => benzene.add(id));
+      });
+      vertices.forEach(v => {
+        if (isC(v) && !benzene.has(v.id) && !v.value.isPartOfAromaticRing) v.value.drawExplicit = true;
+      });
+    } catch (e) { /* 失敗しても通常の骨格式で描く */ }
+    return origDrawVertices(debug);
+  };
 }
 
 // ライブラリが付ける正方形の viewBox を、実際の描画範囲ぴったりに詰め直す
