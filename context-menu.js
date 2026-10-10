@@ -121,7 +121,7 @@ function handleCategoryLongpress(catName) {
         saveData(true); renderTree();
       } },
     { html: '➕ 問題を一括追加 (Q,A 改行)', action: () => { showBulkAddModal(catName); } },
-    { html: '📷 スキャン取込 (写真でOCR)', action: () => {
+    { html: '📚 単語帳取込 (写真・PDF・AI変換)', action: () => {
         if (isSharedReadOnly) return alert("🔒 閲覧専用の共有カテゴリーには追加できません。");
         showScanImportModal(catName);
       } },

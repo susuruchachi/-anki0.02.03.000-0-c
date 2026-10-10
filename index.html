@@ -410,6 +410,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
       <span id="lblBoxCount">0件</span>
       <div style="display:flex; gap:6px;">
         <button class="btn btn-secondary" style="width:auto; padding:6px 10px; font-size:0.8rem;" onclick="openPage('pgPublicCategories')">🌐 公開カテゴリー</button>
+        <button class="btn btn-secondary" style="width:auto; padding:6px 10px; font-size:0.8rem;" onclick="showScanImportFromBox()">📚 取込</button>
         <button class="btn" style="width:auto; padding:6px 12px; font-size:0.8rem;" onclick="showAddQModal()">➕ 新規追加</button>
       </div>
     </div>
@@ -979,30 +980,50 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
   </div>
 </div>
 
-<!-- ★【0.02.64】スキャン取込モーダル（OCR + 見出し語番号でのスマート分割） -->
+<!-- ★【0.02.64】スキャン取込モーダル／★【0.03.01】📚 単語帳取込（写真・PDFの文字認識、AI変換結果の貼り付け、鉄壁形式の自動整形） -->
 <div class="ctx-overlay" id="scanImportOverlay" style="display:none;" onclick="closeScanImport()">
-  <div class="menu-card" style="padding:20px; max-width:92%; width:460px; max-height:88vh; overflow-y:auto;" onclick="event.stopPropagation()">
-    <h3 style="color:var(--text); margin-bottom:4px; font-size:1.1rem;" id="scanImportTitle">📷 スキャン取込</h3>
-    <div style="font-size:0.72rem; color:var(--text3); margin-bottom:14px; line-height:1.5;">
-      単語帳のページを撮影・選択すると文字認識(OCR)を行い、「番号+見出し語」のパターンで自動的に単語ごとへ分割します（鉄壁のような品詞タグ付き多義語カードの形式に最適化）。狭い範囲を撮るほど認識精度が上がります。
-    </div>
+  <div class="menu-card editor-card" onclick="event.stopPropagation()">
+    <h3 style="color:var(--text); margin-bottom:4px; font-size:1.1rem;" id="scanImportTitle">📚 単語帳取込</h3>
+    <div class="hint-small" style="margin-bottom:12px;">単語帳の写真・PDFや、AIで変換したテキストから、まとめてカードを作ります。取り込む前に一覧で確認・修正できます。</div>
 
     <div id="scanRawArea">
-      <input type="file" accept="image/*" multiple id="scanImportFileInput" class="form-control" style="padding:8px;">
-      <button class="btn" style="margin-top:10px;" id="btnRunScanOcr" onclick="runScanOcr()">🔍 文字認識を実行</button>
-      <div id="scanImportProgress" style="display:none; font-size:0.8rem; color:var(--primary); margin-top:8px; text-align:center;"></div>
+      <details class="card" style="padding:12px; margin-bottom:10px;" open>
+        <summary>🤖 おすすめ：AIに変換してもらう（いちばん正確）</summary>
+        <div class="hint-small" style="line-height:1.7;">
+          ① 下のボタンでプロンプトをコピー<br>
+          ② Claude などのAIに、単語帳の写真やPDFと一緒にプロンプトを送る<br>
+          ③ 返ってきた結果を下の「テキスト」欄に貼り付けて「📑 カード候補を作る」
+        </div>
+        <button class="btn btn-secondary" style="margin-top:8px; font-size:0.85rem; padding:9px;" onclick="copyVocabAiPrompt()">📋 変換用プロンプトをコピー</button>
+      </details>
 
-      <label style="font-size:0.85rem; color:var(--text2); font-weight:700; display:block; margin-top:16px; margin-bottom:6px;">📝 認識結果（自由に修正できます）</label>
-      <textarea id="txtScanRaw" class="form-control" style="height:180px; font-family:'JetBrains Mono', monospace; font-size:0.78rem;" placeholder="OCR結果がここに表示されます。直接貼り付けや手入力も可能です。"></textarea>
+      <details class="card" style="padding:12px; margin-bottom:10px;">
+        <summary>📷 写真・PDFを文字認識(OCR)する</summary>
+        <div class="hint-small" style="margin-bottom:8px;">ブラウザ内で文字認識します。精度は写真の鮮明さで変わるので、認識結果を必ず確認してください。狭い範囲を撮るほど精度が上がります。</div>
+        <input type="file" accept="image/*,application/pdf" multiple id="scanImportFileInput" class="form-control" style="padding:8px;">
+        <button class="btn" style="margin-top:10px;" id="btnRunScanOcr" onclick="runScanOcr()">🔍 文字認識を実行</button>
+        <div id="scanImportProgress" style="display:none; font-size:0.8rem; color:var(--primary); margin-top:8px; text-align:center;"></div>
+      </details>
+
+      <label class="section-label" style="margin-top:6px;">📝 テキスト（貼り付け・手入力・OCR結果。自由に修正できます）</label>
+      <textarea id="txtScanRaw" class="form-control" style="height:170px; font-family:'JetBrains Mono', monospace; font-size:0.78rem;" placeholder="例）AIの変換結果&#10;rational	(形容詞)合理的な　理性的な&#10;reason	(名詞①)理由　根拠/(名詞②)理性/(自動詞)論理的に考える"></textarea>
+      <div class="form-row" style="margin-top:8px; align-items:center;">
+        <label class="hint-small" style="white-space:nowrap;">読み取り方</label>
+        <select id="selScanFormat" class="form-control" style="padding:8px; font-size:0.85rem;">
+          <option value="auto">自動判定</option>
+          <option value="delimited">1行1語（見出し語 タブ/カンマ 答え）</option>
+          <option value="teppeki">単語帳形式（番号＋見出し語・□派生語・品詞マーク）</option>
+        </select>
+      </div>
 
       <div class="form-row" style="margin-top:14px;">
         <button class="btn btn-secondary" style="flex:1;" onclick="closeScanImport()">キャンセル</button>
-        <button class="btn" style="flex:1;" onclick="scanSplitEntries()">📑 単語ごとに分割</button>
+        <button class="btn" style="flex:1;" onclick="scanSplitEntries()">📑 カード候補を作る</button>
       </div>
     </div>
 
     <div id="scanReviewArea" style="display:none;">
-      <div style="font-size:0.85rem; color:var(--text2); margin-bottom:10px;"><span id="scanReviewCount">0</span>件を検出しました。内容を確認し、不要な項目は削除してください。</div>
+      <div style="font-size:0.85rem; color:var(--text2); margin-bottom:10px;"><span id="scanReviewCount">0</span>件のカード候補があります。内容を確認し、不要な項目は除外してください。</div>
       <div id="scanReviewList"></div>
       <div class="form-row" style="margin-top:10px;">
         <button class="btn btn-secondary" style="flex:1;" onclick="scanBackToRaw()">← テキストに戻る</button>

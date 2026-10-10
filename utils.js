@@ -30,13 +30,21 @@ function stripParens(text) {
 
 // answerText が「/区切り全パートが先頭に(タグ)を持つ」構造化解答かどうかを判定し、
 // 該当すれば [{label, text}, ...] を返す。該当しなければ null（＝今まで通りの単一解答として扱う）。
-// ・2パート未満（「/」が無い）場合は対象外（数式の "(a+b)^2" 等の誤検知防止のため）
+// ・2パート未満（「/」が無い）場合は、先頭のタグが品詞名（名詞・他動詞・熟語 など）のときだけ対象にする
+//   （数式の "(a+b)^2" 等の誤検知防止のため。★【0.03.01】単語帳取込の「(形容詞)合理的な　理性的な」のような1品詞のカード用）
 // ・ラベルはタグ内のテキストをそのまま連結したもの（自動整形はしない＝カードの書き方がそのまま反映される）
+const KNOWN_POS_TAGS = ['名詞', '動詞', '他動詞', '自動詞', '形容詞', '副詞', '前置詞', '接続詞', '代名詞', '助動詞', '間投詞', '熟語', '句', '成句'];
+function isKnownPosTag(label) {
+  return KNOWN_POS_TAGS.includes(String(label || '').replace(/[①-⑳0-9０-９]/g, '').trim());
+}
 function parseStructuredAnswer(answerText) {
   if (!answerText) return null;
   const mk = maskRichBlocks(answerText);
   const rawSegments = mk.masked.split('/').map(mk.restore);
-  if (rawSegments.length < 2) return null;
+  if (rawSegments.length < 2) {
+    const single = String(rawSegments[0] || '').match(/^\s*\(([^()]*)\)/);
+    if (!single || !isKnownPosTag(single[1])) return null;
+  }
   const segTagRe = /^\s*((?:\([^()]*\)\s*)+)([\s\S]*)$/;
   const result = [];
   for (const raw of rawSegments) {
@@ -54,12 +62,24 @@ function parseStructuredAnswer(answerText) {
 
 // 構造化解答セグメント内の正解文字列を「全角スペース/読点/「/」/「|」区切りのどれか一つで正解」として判定する。
 // （通常の normalizeAnswer は空白区切りを「すべて必須」として扱うため、辞書的な言い換え列挙の採点には使えない）
+// ★【0.03.01】「（～を）意識している」「～を（…と）みなす」のような単語帳の訳語でも採点できるよう、
+// カッコ内の補足・「～」「…」は無視して比べる
 function normalizeStructuredToken(str) {
   if (!str) return '';
   let s = String(str).replace(/[Ａ-Ｚａ-ｚ０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)).toLowerCase().trim();
   s = s.replace(/擦/g, 'こす');
+  s = s.replace(/\([^()]*\)|（[^（）]*）/g, '');
+  s = s.replace(/[～〜~…]|\.\.\./g, '');
   s = s.replace(/\s+/g, '');
   return s;
+}
+// 「～を考慮する」なら「考慮する」「を考慮する」のどちらで答えても正解にする
+function structuredTokenForms(str) {
+  const base = String(str || '').replace(/\([^()]*\)|（[^（）]*）/g, '').trim();
+  const forms = [normalizeStructuredToken(str)];
+  const m = base.match(/^[～〜~]\s*[をにのとがへでやも]/);
+  if (m) forms.push(normalizeStructuredToken(base.slice(m[0].length)));
+  return forms.filter(f => f !== '');
 }
 function isStructuredSegmentCorrect(input, correctText) {
   const mk = maskRichBlocks(correctText);
@@ -67,7 +87,7 @@ function isStructuredSegmentCorrect(input, correctText) {
   if (candidates.length === 0) return false;
   const inNorm = normalizeStructuredToken(input);
   if (inNorm === '') return false;
-  return candidates.some(c => normalizeStructuredToken(c) === inNorm);
+  return candidates.some(c => structuredTokenForms(c).includes(inNorm));
 }
 
 // 構造化解答を表示用HTML（ラベル：本文、を1行ずつ）に整形する。
@@ -123,6 +143,124 @@ function splitOcrIntoEntries(rawText) {
   }
   return entries.filter(e => e.question && e.answer);
 }
+
+// ================================================================
+// ★【0.03.01】📚 単語帳取込：テキスト → カード候補への変換
+// ・取込形式（1行1語「見出し語<TAB>答え」または「見出し語,答え」）… AIに変換してもらった結果などをそのまま読み込む
+// ・鉄壁形式（番号＋見出し語／□派生語、品詞マーク付きの訳語）… OCR結果を品詞タグ付きの答えに整形する
+// ================================================================
+const VOCAB_POS_MARKS = { '名': '名詞', '動': '動詞', '他': '他動詞', '自': '自動詞', '形': '形容詞', '副': '副詞', '前': '前置詞', '接': '接続詞', '句': '熟語', '熟': '熟語' };
+
+// 品詞マーク（[形]【名】(他) や、後ろに空白・①・～ が続く 形 名 他 …）で訳語を区切り、
+// 「(形容詞)訳1　訳2/(名詞①)…/(名詞②)…」の構造化解答にする。マークが見つからなければ訳語を並べるだけ。
+function convertVocabMeanings(block) {
+  const lines = String(block || '').split(/\r?\n/)
+    .map(l => l.replace(/\[[^\]\u3040-\u30ff\u4e00-\u9fff]*\]/g, ' ')   // 発音記号 [rǽʃənl]
+               .replace(/\s*[★☆▶►◆◇※].*$/, '')                          // 行の途中からの解説・例文・熟語
+               .trim())
+    .filter(l => l !== '');
+  const kept = lines.filter(l => {
+    if (/^[▶►▷>★☆◆◇●「『※]/.test(l)) return false;           // 例文・解説・熟語・コラム
+    if (/→\s*p\.?\s*\d+/i.test(l)) return false;               // 他ページ参照の関連語
+    if (/^\[[^\]]*\]$/.test(l)) return false;                   // 発音記号だけの行
+    const ascii = (l.match(/[A-Za-z]/g) || []).length;
+    if (ascii > 12 && ascii / l.length > 0.5) return false;       // 英文（例文）
+    return true;
+  });
+  let text = kept.join(' ').replace(/\([^()]*[A-Za-z][^()]*\)/g, '').replace(/\(=[^)]*\)/g, '');
+  const markRe = /(?:[\[【［(（]\s*([名動他自形副前接句熟])\s*[\]】］)）]|(?:^|[\s,，、;；])([名動他自形副前接句熟])(?=[\s①-⑳～〜(（]))\s*/g;
+  const parts = [];
+  let m, last = null;
+  while ((m = markRe.exec(text)) !== null) {
+    if (last) last.body = text.slice(last.end, m.index);
+    last = { pos: VOCAB_POS_MARKS[m[1] || m[2]], end: m.index + m[0].length };
+    parts.push(last);
+  }
+  if (last) last.body = text.slice(last.end);
+  const tidy = (t) => t.replace(/^[\s:：]+|[\s,，、;；]+$/g, '').replace(/\s*[,，、;；]\s*/g, '　').replace(/[ \t]+/g, ' ').trim()
+    .replace(/\(/g, '（').replace(/\)/g, '）').replace(/ *（ */g, '（').replace(/ *） */g, '）');
+  if (parts.length === 0) return tidy(text);
+  const segs = [];
+  parts.forEach(p => {
+    const nums = String(p.body).split(/(?=[①-⑳])/).map(x => x.trim()).filter(x => x !== '');
+    const numbered = nums.length > 1 || /^[①-⑳]/.test(nums[0] || '');
+    nums.forEach(n => {
+      const num = numbered ? (n.match(/^[①-⑳]/) || [''])[0] : '';
+      const body = tidy(n.replace(/^[①-⑳]/, ''));
+      if (body) segs.push(`(${p.pos}${num})${body}`);
+    });
+  });
+  return segs.join('/');
+}
+
+// 鉄壁形式：「番号 + 見出し語」に加えて、行頭の「□ 派生語」も1語として切り出す
+function splitTeppekiEntries(rawText) {
+  const lines = String(rawText || '').split(/\r?\n/);
+  const numRe = /^\s*(\d{1,4})[^A-Za-z\d]{0,15}([A-Za-z][A-Za-z'\-]*(?:\s[A-Za-z][A-Za-z'\-]*){0,4})/;
+  const boxRe = /^\s*[□口ロ☐◻▢]\s*([A-Za-z][A-Za-z'\-]*(?:\s[A-Za-z][A-Za-z'\-]*){0,4})/;
+  const marks = [];
+  lines.forEach((line, i) => {
+    if (/→\s*p\.?\s*\d+/i.test(line)) return; // 他ページ参照の関連語は見出しにしない
+    const m = line.match(numRe) || line.match(boxRe);
+    if (m) marks.push({ lineIdx: i, headword: (m[2] || m[1]).trim() });
+  });
+  const entries = [];
+  for (let i = 0; i < marks.length; i++) {
+    const blockLines = lines.slice(marks[i].lineIdx, i + 1 < marks.length ? marks[i + 1].lineIdx : lines.length);
+    const first = blockLines[0];
+    const at = first.indexOf(marks[i].headword);
+    const rest = [at !== -1 ? first.slice(at + marks[i].headword.length) : '', ...blockLines.slice(1)].join('\n');
+    const answer = convertVocabMeanings(rest.replace(/[*＊⁑]+/g, ''));
+    entries.push({ question: marks[i].headword, answer });
+  }
+  return entries.filter(e => e.question && e.answer);
+}
+
+// 取込形式：1行1語「見出し語<TAB>答え」（タブが無ければ最初の半角カンマで区切る）。
+// AIの出力にありがちなコードブロックの ``` や見出し行は読み飛ばす。
+function parseDelimitedVocab(rawText) {
+  const entries = [];
+  String(rawText || '').split(/\r?\n/).forEach(line => {
+    const l = line.trim();
+    if (!l || /^```/.test(l)) return;
+    let idx = l.indexOf('\t');
+    if (idx === -1) idx = l.indexOf(',');
+    if (idx === -1) return;
+    const q = l.slice(0, idx).trim().replace(/^"|"$/g, '');
+    const a = l.slice(idx + 1).trim().replace(/^"|"$/g, '');
+    if (!q || !a || (q === '問題' || q === '見出し語')) return;
+    entries.push({ question: q, answer: a });
+  });
+  return entries;
+}
+
+// format: 'auto' | 'delimited' | 'teppeki'
+function parseVocabText(rawText, format = 'auto') {
+  if (format === 'delimited') return parseDelimitedVocab(rawText);
+  if (format === 'teppeki') return splitTeppekiEntries(rawText);
+  const lines = String(rawText || '').split(/\r?\n/).filter(l => l.trim() !== '' && !/^```/.test(l.trim()));
+  const tabbed = lines.filter(l => l.includes('\t')).length;
+  if (lines.length && tabbed / lines.length >= 0.6) return parseDelimitedVocab(rawText);
+  const teppeki = splitTeppekiEntries(rawText);
+  return teppeki.length ? teppeki : parseDelimitedVocab(rawText);
+}
+
+// AIに変換を頼むときのプロンプト（📚 単語帳取込の「プロンプトをコピー」で使う）
+const VOCAB_AI_PROMPT = [
+  '添付した単語帳のページを、暗記アプリ「すするanki」に取り込める形式に変換してください。',
+  '',
+  '【出力形式】',
+  '・1行に1語、「見出し語<TAB>答え」のタブ区切り。変換結果だけをコードブロックで出力してください。',
+  '',
+  '【答えの書き方】',
+  '・品詞ごとに「(品詞)訳語」と書く。品詞は 名詞／動詞／他動詞／自動詞／形容詞／副詞／前置詞／接続詞／熟語 のどれか。',
+  '・品詞が複数あるとき、または①②で意味が分かれているときは半角「/」で区切る。同じ品詞の①②は (名詞①)(名詞②) のように番号を付ける。',
+  '　例: reason<TAB>(名詞①)理由　根拠/(名詞②)理性/(自動詞)論理的に考える',
+  '・同じ意味の言い換えは全角スペースで区切る。　例: rational<TAB>(形容詞)合理的な　理性的な',
+  '・「（～を）」のような補足は全角カッコで書く。答えの中で半角「/」は区切り以外に使わない（必要なら全角「／」）。',
+  '・番号の無い派生語も1語として含める。◆の熟語・成句は、その英語表現を見出し語にして「(熟語)訳」で1行にする。',
+  '・例文（▶）、解説（★）、他ページ参照（→p.○○）の語、Check!、Review Test は含めない。'
+].join('\n');
 
 // テキストエリア/inputのカーソル位置に文字列を挿入する（品詞タグのワンタップ挿入用）
 function insertAtCursor(fieldEl, insertText) {

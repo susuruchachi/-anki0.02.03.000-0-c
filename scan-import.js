@@ -10,7 +10,7 @@ let scanImportOcrWorker = null; // Tesseractワーカーはセッション中使
 
 function showScanImportModal(catName) {
   scanImportTargetCategory = catName;
-  document.getElementById('scanImportTitle').innerText = `📷 スキャン取込: ${catName}`;
+  document.getElementById('scanImportTitle').innerText = `📚 単語帳取込: ${catName}`;
   document.getElementById('scanImportFileInput').value = '';
   document.getElementById('txtScanRaw').value = '';
   const progressEl = document.getElementById('scanImportProgress');
@@ -20,6 +20,45 @@ function showScanImportModal(catName) {
   document.getElementById('scanReviewArea').style.display = 'none';
   document.getElementById('scanRawArea').style.display = 'block';
   document.getElementById('scanImportOverlay').style.display = 'flex';
+}
+
+// ★【0.03.01】カード箱から開く場合は、表示中のフォルダー（無ければ未分類）に取り込む
+function showScanImportFromBox() {
+  const cat = (typeof currentViewContext === 'object' && currentViewContext.type === 'category') ? currentViewContext.value : '未分類';
+  showScanImportModal(cat);
+}
+
+async function copyVocabAiPrompt() {
+  try {
+    await navigator.clipboard.writeText(VOCAB_AI_PROMPT);
+    alert('📋 プロンプトをコピーしました！\nAIに単語帳の写真やPDFと一緒に送ってください。');
+  } catch (e) {
+    // クリップボードが使えない環境では、テキスト欄に入れて手動コピーしてもらう
+    const ta = document.getElementById('txtScanRaw');
+    ta.value = VOCAB_AI_PROMPT; ta.focus(); ta.select();
+    alert('コピーできなかったので、テキスト欄にプロンプトを入れました。全選択してコピーしてください。\n（AIの結果を貼るときは、この内容を消してから貼り付けてください）');
+  }
+}
+
+// ★【0.03.01】PDFは pdf.js で1ページずつ画像にしてからOCRにかける
+async function pdfFileToImageDataURLs(file, onProgress) {
+  if (typeof pdfjsLib === 'undefined') throw new Error('PDFライブラリを読み込めません');
+  if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+  }
+  const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+  const urls = [];
+  for (let n = 1; n <= pdf.numPages; n++) {
+    if (onProgress) onProgress(n, pdf.numPages);
+    const page = await pdf.getPage(n);
+    const base = page.getViewport({ scale: 1 });
+    const viewport = page.getViewport({ scale: Math.min(3, 1800 / Math.max(base.width, base.height)) });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(viewport.width); canvas.height = Math.round(viewport.height);
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+    urls.push(canvas.toDataURL('image/jpeg', 0.9));
+  }
+  return urls;
 }
 
 function closeScanImport() {
@@ -57,7 +96,7 @@ async function getScanOcrWorker() {
 
 async function runScanOcr() {
   const files = document.getElementById('scanImportFileInput').files;
-  if (!files || files.length === 0) { alert('画像を選択してください。'); return; }
+  if (!files || files.length === 0) { alert('画像またはPDFを選択してください。'); return; }
   if (typeof Tesseract === 'undefined') { alert('⚠️ OCRライブラリの読み込みに失敗しました。通信環境を確認して再度お試しください。'); return; }
 
   const progressEl = document.getElementById('scanImportProgress');
@@ -69,14 +108,24 @@ async function runScanOcr() {
     const worker = await getScanOcrWorker();
     let combined = document.getElementById('txtScanRaw').value;
     for (let i = 0; i < files.length; i++) {
-      progressEl.innerText = `🔍 画像 ${i + 1}/${files.length} を処理中...`;
-      // ★ カード保存用の圧縮(640px)より高い解像度でOCRにかけ、細かい文字の認識精度を優先する
-      const prepared = await compressImageToDataURL(files[i], 1800, 0.9);
-      const { data: { text } } = await worker.recognize(prepared);
-      combined += (combined.trim() ? '\n\n----\n\n' : '') + text.trim();
+      const file = files[i];
+      let images;
+      if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
+        images = await pdfFileToImageDataURLs(file, (n, total) => { progressEl.innerText = `📄 PDF ${i + 1}/${files.length}：ページ ${n}/${total} を画像に変換中...`; });
+      } else {
+        // ★ カード保存用の圧縮(640px)より高い解像度でOCRにかけ、細かい文字の認識精度を優先する
+        images = [await compressImageToDataURL(file, 1800, 0.9)];
+      }
+      for (let j = 0; j < images.length; j++) {
+        progressEl.innerText = `🔍 ファイル ${i + 1}/${files.length}` + (images.length > 1 ? ` のページ ${j + 1}/${images.length}` : '') + ' を文字認識中...';
+        const { data: { text } } = await worker.recognize(images[j]);
+        // ★【0.03.01】日本語OCRで入りがちな「文 字 の 間 の 空白」を詰める
+        const tidied = text.trim().replace(/([\u3000-\u30ff\u4e00-\u9fff\uff00-\uffef]) +(?=[\u3000-\u30ff\u4e00-\u9fff\uff00-\uffef])/g, '$1');
+        combined += (combined.trim() ? '\n\n----\n\n' : '') + tidied;
+      }
     }
     document.getElementById('txtScanRaw').value = combined.trim();
-    progressEl.innerText = '✅ 文字認識が完了しました。内容を確認・修正してから「単語ごとに分割」を押してください。';
+    progressEl.innerText = '✅ 文字認識が完了しました。誤認識が多いことがあるので、内容を確認・修正してから「📑 カード候補を作る」を押してください。';
   } catch (e) {
     console.error('OCR error', e);
     progressEl.innerText = '⚠️ OCR処理中にエラーが発生しました。通信環境を確認するか、別の画像でお試しください。';
@@ -89,8 +138,9 @@ async function runScanOcr() {
 function scanSplitEntries() {
   const raw = document.getElementById('txtScanRaw').value;
   if (!raw.trim()) { alert('テキストがありません。'); return; }
-  const parsed = splitOcrIntoEntries(raw);
-  if (parsed.length === 0) { alert('「番号 + 英単語」のパターンが見つかりませんでした。\n(例: 「247 complete ...」のように行頭に見出し語番号が必要です)\nテキストを確認するか、直接カード追加をご利用ください。'); return; }
+  const format = (document.getElementById('selScanFormat') || {}).value || 'auto';
+  const parsed = parseVocabText(raw, format);
+  if (parsed.length === 0) { alert('カード候補が見つかりませんでした。\n・1行1語なら「見出し語（タブかカンマ）答え」の形にしてください\n・単語帳形式なら「247 complete …」のように行頭に見出し語番号が必要です'); return; }
   scanImportEntries = parsed.map((p, i) => ({ id: 'tmp_' + i + '_' + Date.now(), question: p.question, answer: p.answer }));
   renderScanReviewList();
   document.getElementById('scanRawArea').style.display = 'none';

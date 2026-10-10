@@ -19,6 +19,26 @@ function exportCSV() {
   const b = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csv], { type: 'text/csv;charset=utf-8;' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = `susuru_anki_${Date.now()}.csv`; a.click();
 }
+// ★【0.03.01】フォルダー欄に「親>子>孫」と書くと、入れ子のフォルダーを作ってその一番下に入れる
+function ensureCategoryPath(path) {
+  const parts = String(path || '').split('>').map(x => x.trim()).filter(x => x !== '');
+  if (parts.length === 0) parts.push('未分類');
+  let parent = null;
+  parts.forEach(name => {
+    if (!categories.includes(name)) categories.push(name);
+    if (typeof deletedCats !== 'undefined') deletedCats = deletedCats.filter(c => c !== name);
+    if (parent) {
+      const alreadyChild = Object.keys(categoryTree).some(p => (categoryTree[p] || []).includes(name));
+      if (!alreadyChild) {
+        if (!categoryTree[parent]) categoryTree[parent] = [];
+        categoryTree[parent].push(name);
+      }
+    }
+    parent = name;
+  });
+  return parts[parts.length - 1];
+}
+
 function importCSV(e) {
   if(!e.target.files[0]) return;
   const r = new FileReader(); r.onload = function(evt) {
@@ -36,7 +56,7 @@ function importCSV(e) {
         const c = parse(lines[i]); if(c.length <= Math.max(iQ, iA)) continue;
         const q = c[iQ]?.trim(), a = c[iA]?.trim(); if(!q || !a) continue;
         let cat = (iC !== -1 && c[iC]) ? c[iC].trim() : "未分類"; if(!cat) cat="未分類";
-        if(!categories.includes(cat)) categories.push(cat);
+        cat = ensureCategoryPath(cat);
         db.push({ id: 'id_'+Math.random().toString(36).slice(2)+Date.now().toString(36), question: q, answer: a, category: cat, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 }); count++;
       }
       autoMerge(); alert(`📊 ${count}件インポートしました。`); openPage('pgHome');
