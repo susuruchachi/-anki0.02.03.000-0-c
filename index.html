@@ -179,6 +179,7 @@ body.light-mode .sync-status { background: rgba(255,255,255,0.9); }
 .toggle-pill { display: flex; align-items: center; gap: 8px; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg3); font-size: 0.8rem; color: var(--text2); cursor: pointer; line-height: 1.3; }
 .toggle-pill input { width: 16px; height: 16px; accent-color: var(--primary); flex-shrink: 0; }
 .toggle-pill:has(input:checked) { border-color: var(--primary); color: var(--text); background: rgba(79,124,255,0.12); }
+.release-banner { display: flex; align-items: center; gap: 10px; background: rgba(79,124,255,0.12); border: 1px solid rgba(79,124,255,0.4); border-radius: 12px; padding: 10px 12px; margin-bottom: 15px; cursor: pointer; }
 .home-summary { display: flex; gap: 8px; margin-bottom: 15px; }
 .home-summary-item { flex: 1; background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 6px; text-align: center; cursor: pointer; }
 .home-summary-num { font-family: 'JetBrains Mono', monospace; font-size: 1.15rem; font-weight: 900; color: var(--text); }
@@ -298,6 +299,16 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 
   <div id="pgHome" class="screen active">
     <h2>🏠 クイズに挑戦</h2>
+
+    <!-- ★【0.03.00】新しいお知らせのバナー（未読のときだけ表示） -->
+    <div id="releaseBanner" class="release-banner" style="display:none;" onclick="openReleaseNotesFromBanner()">
+      <span style="font-size:1.2rem;">📢</span>
+      <div style="flex:1; min-width:0;">
+        <div style="font-size:0.7rem; color:var(--primary); font-weight:700;">アップデートのお知らせ</div>
+        <div id="releaseBannerText" style="font-size:0.85rem; font-weight:700; color:var(--text);"></div>
+      </div>
+      <button class="chip" onclick="event.stopPropagation(); markLatestReleaseNoteSeen();">✕</button>
+    </div>
 
     <!-- ★【0.03.00】学習状況のひと目サマリー（タップでカード箱を絞り込み） -->
     <div class="home-summary">
@@ -1024,6 +1035,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 <script src="rich-content.js"></script>
 <script src="rich-editors.js"></script>
 <script src="storage.js"></script>
+<script src="release-notes.js"></script>
 <script src="updates.js"></script>
 <script src="auth.js"></script>
 <script src="pages.js"></script>

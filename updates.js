@@ -15,37 +15,78 @@ function updateAdminUIVisibility() {
   }
 }
 
+// ★【0.03.00】Firestore のお知らせと、アプリ同梱のお知らせ（release-notes.js）をまとめて新しい順に表示する
 async function loadUpdates() {
   const area = document.getElementById('updatesListArea');
   area.innerHTML = '<p style="text-align:center; color:var(--text3); font-size:0.9rem;">読み込み中...</p>';
+  const isAdmin = currentUser && currentUser.uid === ADMIN_UID;
+  const items = [];
+  let fetchFailed = false;
   try {
     const snap = await firestore.collection('susuru_anki_updates').orderBy('date','desc').limit(30).get();
-    if(snap.empty) {
-      area.innerHTML = '<p style="text-align:center; color:var(--text3); font-size:0.9rem;">まだお知らせはありません。</p>';
-      return;
-    }
-    area.innerHTML = '';
-    
-    const isAdmin = currentUser && currentUser.uid === ADMIN_UID;
-
     snap.forEach(doc => {
       const d = doc.data();
-      const dateStr = d.date && d.date.toDate ? d.date.toDate().toLocaleDateString('ja-JP') : '';
-      
-      const delBtn = isAdmin ? `<button class="btn btn-danger" style="padding:4px 10px; font-size:0.75rem; margin-top:10px; width:auto;" onclick="deleteUpdate('${doc.id}')">🗑️ このお知らせを削除</button>` : '';
-
-      area.innerHTML += `<div class="card" style="margin-bottom:10px;">
-        <div class="update-banner-title" style="margin-bottom:8px;">🎉 ${escapeHtml(d.title)} (v${escapeHtml(d.version)}) 
-          <span style="font-size:0.7rem; color:var(--text3); margin-left:auto;">${dateStr}</span>
-        </div>
-        <div style="font-size:0.85rem; line-height:1.5; color:var(--text); white-space:pre-wrap;">${escapeHtml(d.content)}</div>
-        ${delBtn}
-      </div>`;
+      const date = d.date && d.date.toDate ? d.date.toDate() : null;
+      items.push({ id: doc.id, title: d.title, version: d.version, content: d.content, date, fromCloud: true });
     });
   } catch(e) {
     console.warn("アプデ情報の取得に失敗しました", e);
-    area.innerHTML = '<p style="text-align:center; color:var(--danger); font-size:0.9rem;">取得に失敗しました</p>';
+    fetchFailed = true;
   }
+  // 同じバージョンのお知らせが Firestore にあればそちらを優先し、同梱分は出さない
+  const cloudVersions = new Set(items.map(it => String(it.version)));
+  (typeof BUNDLED_RELEASE_NOTES !== 'undefined' ? BUNDLED_RELEASE_NOTES : []).forEach(n => {
+    if (cloudVersions.has(String(n.version))) return;
+    items.push({ title: n.title, version: n.version, content: n.content, date: n.date ? new Date(n.date + 'T00:00:00') : null, fromCloud: false });
+  });
+  items.sort((x, y) => (y.date ? y.date.getTime() : 0) - (x.date ? x.date.getTime() : 0));
+
+  if (items.length === 0) {
+    area.innerHTML = fetchFailed
+      ? '<p style="text-align:center; color:var(--danger); font-size:0.9rem;">取得に失敗しました</p>'
+      : '<p style="text-align:center; color:var(--text3); font-size:0.9rem;">まだお知らせはありません。</p>';
+    return;
+  }
+  area.innerHTML = '';
+  items.forEach(it => {
+    const dateStr = it.date ? it.date.toLocaleDateString('ja-JP') : '';
+    const delBtn = (isAdmin && it.fromCloud) ? `<button class="btn btn-danger" style="padding:4px 10px; font-size:0.75rem; margin-top:10px; width:auto;" onclick="deleteUpdate('${it.id}')">🗑️ このお知らせを削除</button>` : '';
+    area.innerHTML += `<div class="card" style="margin-bottom:10px;">
+      <div class="update-banner-title" style="margin-bottom:8px;">🎉 ${escapeHtml(it.title)} (v${escapeHtml(it.version)}) 
+        <span style="font-size:0.7rem; color:var(--text3); margin-left:auto;">${dateStr}</span>
+      </div>
+      <div style="font-size:0.85rem; line-height:1.5; color:var(--text); white-space:pre-wrap;">${escapeHtml(it.content)}</div>
+      ${delBtn}
+    </div>`;
+  });
+  if (fetchFailed) area.innerHTML += '<p style="text-align:center; color:var(--text3); font-size:0.75rem;">※ オンラインのお知らせは取得できませんでした</p>';
+  markLatestReleaseNoteSeen();
+}
+
+// ★【0.03.00】最新版の同梱お知らせを、まだ見ていない人のホーム画面にバナーで出す
+const SEEN_RELEASE_KEY = 'susuru_anki_seen_release';
+function getLatestReleaseNote() {
+  return (typeof BUNDLED_RELEASE_NOTES !== 'undefined' && BUNDLED_RELEASE_NOTES.length) ? BUNDLED_RELEASE_NOTES[0] : null;
+}
+function showReleaseBannerIfNew() {
+  const banner = document.getElementById('releaseBanner');
+  const note = getLatestReleaseNote();
+  if (!banner || !note) return;
+  let seen = null;
+  try { seen = localStorage.getItem(SEEN_RELEASE_KEY); } catch(e) {}
+  if (seen === note.version) { banner.style.display = 'none'; return; }
+  document.getElementById('releaseBannerText').innerText = `v${note.version}：${note.title}`;
+  banner.style.display = 'flex';
+}
+function markLatestReleaseNoteSeen() {
+  const note = getLatestReleaseNote();
+  if (!note) return;
+  try { localStorage.setItem(SEEN_RELEASE_KEY, note.version); } catch(e) {}
+  const banner = document.getElementById('releaseBanner');
+  if (banner) banner.style.display = 'none';
+}
+function openReleaseNotesFromBanner() {
+  openPage('pgUpdates'); loadUpdates();
 }
 
 // ★ 管理者用：お知らせを削除する
