@@ -42,32 +42,37 @@ const CHEM_DICTIONARY = [
   ['2,4,6-トリニトロトルエン（TNT）', 'CC1=C(C=C(C=C1N(=O)=O)N(=O)=O)N(=O)=O'], ['ピクリン酸', 'OC1=C(C=C(C=C1N(=O)=O)N(=O)=O)N(=O)=O'],
   ['アニリン', 'NC1=CC=CC=C1'], ['アニリン塩酸塩', '[Cl-].[NH3+]C1=CC=CC=C1'], ['アセトアニリド', 'CC(=O)NC1=CC=CC=C1'],
   ['塩化ベンゼンジアゾニウム', '[Cl-].N#[N+]C1=CC=CC=C1'], ['アゾベンゼン', 'C1=CC=C(C=C1)N=NC1=CC=CC=C1'],
-  ['p-ヒドロキシアゾベンゼン', 'OC1=CC=C(C=C1)N=NC1=CC=CC=C1']
+  ['p-ヒドロキシアゾベンゼン', 'OC1=CC=C(C=C1)N=NC1=CC=CC=C1'],
+  // ★【0.03.08】官能基・結合（* は結合の腕。線だけが残る）
+  ['カルボキシ基 −COOH', '*C(=O)O'], ['ヒドロキシ基 −OH', '*O'], ['ホルミル基（アルデヒド基） −CHO', '*C=O'], ['カルボニル基（ケトン基） >C=O', '*C(*)=O'],
+  ['アミノ基 −NH2', '*N'], ['ニトロ基 −NO2', '*N(=O)=O'], ['スルホ基 −SO3H', '*S(=O)(=O)O'], ['メチル基 −CH3', '*C'], ['エチル基 −C2H5', '*CC'],
+  ['ビニル基 −CH=CH2', '*C=C'], ['フェニル基 −C6H5', '*C1=CC=CC=C1'], ['ベンジル基 −CH2−C6H5', '*CC1=CC=CC=C1'], ['アセチル基 −COCH3', '*C(C)=O'],
+  ['エステル結合 −COO−', '*C(=O)O*'], ['アミド結合 −CONH−', '*C(=O)N*'], ['エーテル結合 −O−', '*O*'], ['アゾ基 −N=N−', '*N=N*']
 ];
 
 // 構造の部品（SMILES断片）。カーソル位置に挿入される。
 const CHEM_FRAGMENTS = [
   ['ベンゼン環', 'C1=CC=CC=C1'], ['-OH', 'O'], ['-COOH', 'C(=O)O'], ['-CHO', 'C=O'], ['-NH2', 'N'], ['-NO2', 'N(=O)=O'],
   ['-SO3H', 'S(=O)(=O)O'], ['-Cl', 'Cl'], ['-Br', 'Br'], ['-CH3', 'C'], ['エステル', 'C(=O)O'], ['二重結合 =', '='], ['三重結合 #', '#'],
-  ['枝 ( )', '()'], ['環を閉じる 1', '1']
+  ['枝 ( )', '()'], ['環を閉じる 1', '1'], ['結合の腕 *', '*']
 ];
 
 let _richEditorTarget = null; // 挿入先のテキストエリア
 let _richEditorRange = null;  // 置き換え対象ブロックの [start, end]（新規挿入時は null）
 
-// テキストエリア内で、カーソル位置にある（無ければ最初の）指定種類のブロックを探す
+// テキストエリア内で、カーソル位置にある指定種類のブロックを探す
 function findRichBlockAtCursor(textarea, wantType) {
   const text = textarea.value;
   const cursor = textarea.selectionStart != null ? textarea.selectionStart : 0;
   const re = new RegExp(RICH_BLOCK_RE.source, 'g');
-  let m, first = null;
+  let m;
   while ((m = re.exec(text)) !== null) {
     if (richBlockType(m[1]) !== wantType) continue;
     const hit = { start: m.index, end: m.index + m[0].length, body: m[2] };
-    if (cursor >= hit.start && cursor <= hit.end) return hit;
-    if (!first) first = hit;
+    // ★【0.03.08】カーソルがブロックの中にある時だけ「編集」。外なら新しく追加（1つの問題に複数の構造式を置ける）
+    if (cursor > hit.start && cursor < hit.end) return hit;
   }
-  return first;
+  return null;
 }
 
 function replaceRangeInTextarea(textarea, range, insertText) {
@@ -99,6 +104,7 @@ function openChemEditor(textareaId) {
   document.getElementById('txtChemSmiles').value = hit ? hit.body.trim() : '';
   document.getElementById('txtChemSearch').value = '';
   document.getElementById('chemEditorTitle').innerText = hit ? '🧪 構造式を編集' : '🧪 構造式を挿入';
+  const addBtn = document.getElementById('btnChemAddNew'); if (addBtn) addBtn.style.display = hit ? '' : 'none';
   document.getElementById('chemSearchStatus').innerText = '';
   renderChemSearchResults('');
   renderChemFragmentChips();
@@ -129,48 +135,85 @@ function normalizeChemQuery(s) {
   return toKatakana(String(s || '').toLowerCase()).replace(/[\s　・\-（）()]/g, '');
 }
 
+function chemResultChip(label, smiles, title) {
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'chip chip-strong'; b.innerText = label;
+  if (title) b.title = title;
+  b.onclick = () => { document.getElementById('txtChemSmiles').value = smiles; updateChemPreview(); };
+  return b;
+}
+
 function renderChemSearchResults(query) {
   const box = document.getElementById('chemSearchResults');
   if (!box) return;
-  const q = normalizeChemQuery(query);
-  const hits = q ? CHEM_DICTIONARY.filter(([name]) => normalizeChemQuery(name).includes(q)) : [];
+  const raw = String(query || '').trim();
+  const q = normalizeChemQuery(raw);
   box.innerHTML = '';
+  const st = document.getElementById('chemSearchStatus'); if (st) st.innerText = '';
   if (!q) {
-    box.innerHTML = '<div class="hint-small">化合物名を入力すると候補が出ます（高校化学の主な化合物を収録）。英語名なら PubChem でも検索できます。</div>';
+    box.innerHTML = '<div class="hint-small">化合物名（日本語・英語）、分子式（C2H6O）、示性式（CH3COOH）で探せます。「−COOH」などの官能基も選べます。</div>';
     return;
   }
+  // ★【0.03.08】分子式・示性式なら、分子式が同じものを並べる
+  const counts = parseChemFormula(raw);
+  if (counts) {
+    const f = hillFormula(counts);
+    const hits = findDictionaryByFormula(counts);
+    const head = document.createElement('div'); head.className = 'hint-small'; head.style.width = '100%';
+    head.innerText = hits.length ? `分子式 ${f} の化合物（収録分）：「🌐 ネット検索」でほかの異性体も探せます` : `分子式 ${f}：収録辞書にはありません。「🌐 ネット検索」で探せます`;
+    box.appendChild(head);
+    hits.forEach(e => box.appendChild(chemResultChip(e.name, e.smiles)));
+    return;
+  }
+  const hits = CHEM_DICTIONARY.filter(([name]) => normalizeChemQuery(name).includes(q));
   if (hits.length === 0) {
-    box.innerHTML = '<div class="hint-small">辞書に見つかりません。英語名（例: caffeine）で「🌐 PubChemで検索」を試してください。</div>';
+    box.innerHTML = '<div class="hint-small">収録辞書に見つかりません。「🌐 ネット検索」で日本語名・英語名から探せます。</div>';
     return;
   }
-  hits.slice(0, 30).forEach(([name, smiles]) => {
-    const b = document.createElement('button');
-    b.type = 'button'; b.className = 'chip chip-strong'; b.innerText = name;
-    b.onclick = () => { document.getElementById('txtChemSmiles').value = smiles; updateChemPreview(); };
-    box.appendChild(b);
-  });
+  hits.slice(0, 30).forEach(([name, smiles]) => box.appendChild(chemResultChip(name, smiles)));
 }
 
-async function searchChemOnPubChem() {
+// ★【0.03.08】ネット検索：分子式 → PubChem、日本語名 → Wikidata（だめなら英語名に直して PubChem）、英語名 → PubChem
+async function searchChemOnline() {
   const q = document.getElementById('txtChemSearch').value.trim();
   const status = document.getElementById('chemSearchStatus');
-  if (!q) { status.innerText = '検索する名前を入力してください。'; return; }
-  status.innerText = '🌐 PubChemで検索中...';
+  const box = document.getElementById('chemSearchResults');
+  if (!q) { status.innerText = '検索する名前か分子式を入力してください。'; return; }
+  const counts = parseChemFormula(q);
   try {
-    const url = `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/${encodeURIComponent(q)}/property/SMILES/JSON`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error('not found');
-    const data = await res.json();
-    const p = data && data.PropertyTable && data.PropertyTable.Properties && data.PropertyTable.Properties[0];
-    const smiles = p && (p.SMILES || p.IsomericSMILES || p.CanonicalSMILES || p.ConnectivitySMILES);
-    if (!smiles) throw new Error('no smiles');
-    document.getElementById('txtChemSmiles').value = smiles;
-    status.innerText = `✅ 「${q}」が見つかりました（PubChem CID: ${p.CID}）`;
+    if (counts) {
+      const f = hillFormula(counts);
+      status.innerText = `🌐 分子式 ${f} を PubChem で検索中...`;
+      const list = await pubchemByFormula(f, 12);
+      if (!list.length) throw new Error('none');
+      renderChemSearchResults(q);
+      const head = document.createElement('div'); head.className = 'hint-small'; head.style.width = '100%';
+      head.innerText = `🌐 PubChem の候補（英語名）：`;
+      box.appendChild(head);
+      list.forEach(r => box.appendChild(chemResultChip(r.title, r.smiles, 'PubChem CID: ' + r.cid)));
+      status.innerText = `✅ 分子式 ${f} の候補が ${list.length} 件見つかりました。タップするとプレビューに出ます`;
+      return;
+    }
+    if (/[ぁ-んァ-ヶ一-龠]/.test(q)) {
+      status.innerText = '🌐 日本語名で検索中...';
+      const r = await lookupJapaneseChemName(q);
+      document.getElementById('txtChemSmiles').value = r.smiles;
+      status.innerText = `✅ 「${r.title}」が見つかりました（${r.source}${r.cid ? ' CID: ' + r.cid : ''}）。プレビューで確認してください`;
+      updateChemPreview();
+      return;
+    }
+    status.innerText = '🌐 PubChemで検索中...';
+    const r = await pubchemByName(q);
+    document.getElementById('txtChemSmiles').value = r.smiles;
+    status.innerText = `✅ 「${r.title}」が見つかりました（PubChem CID: ${r.cid}）`;
     updateChemPreview();
   } catch (e) {
-    status.innerText = '⚠️ 見つかりませんでした。PubChemは英語名のみ対応です（例: aspirin, caffeine）。';
+    status.innerText = counts ? '⚠️ その分子式の化合物が見つかりませんでした。'
+      : '⚠️ 見つかりませんでした。別の名前（慣用名・英語名）や分子式で試してください。';
   }
 }
+// 以前の名前でも呼べるように
+const searchChemOnPubChem = searchChemOnline;
 
 function scheduleChemPreview() {
   clearTimeout(_chemPreviewTimer);
@@ -192,11 +235,13 @@ function updateChemPreview() {
   }).catch(() => { box.innerHTML = '<div class="chem-err">⚠️ 構造式ライブラリを読み込めません（通信状況を確認してください）</div>'; });
 }
 
-function submitChemEditor() {
+function submitChemEditor(asNew) {
   const smiles = document.getElementById('txtChemSmiles').value.trim();
   if (!smiles) { alert('構造（SMILES）を入力するか、化合物名から選んでください。'); return; }
   if (!_chemPreviewOk && !confirm('プレビューで構造式を描けていません。このまま挿入しますか？')) return;
-  replaceRangeInTextarea(_richEditorTarget, _richEditorRange, `{{構造式:${smiles}}}`);
+  // 「別に追加」は、編集していた構造式のすぐ後ろに新しく置く
+  const range = asNew ? (_richEditorRange ? [_richEditorRange[1], _richEditorRange[1]] : null) : _richEditorRange;
+  replaceRangeInTextarea(_richEditorTarget, range, (asNew && _richEditorRange ? ' ' : '') + `{{構造式:${smiles}}}`);
   closeChemEditor();
 }
 

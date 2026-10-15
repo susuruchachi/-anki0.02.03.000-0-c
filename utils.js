@@ -47,6 +47,20 @@ function srsParams() {
     grad: getGradThreshold()
   };
 }
+// ★【0.03.08】難易度ごとの「上がりやすさ・下がりにくさ」
+//  up: 正解1回が連続正解の何回分になるか（難しい設定で正解するほど早く上がる）
+//  down: 不正解1回が連続不正解の何回分になるか（難しい設定では下がりにくい）
+const SRS_SPEED_WEIGHTS = {
+  easy: { up: 0.75, down: 1.25 }, normal: { up: 1, down: 1 }, hard: { up: 1.5, down: 0.75 }, expert: { up: 2, down: 0.5 }
+};
+function srsSpeedWeights(speed) { return SRS_SPEED_WEIGHTS[speed] || SRS_SPEED_WEIGHTS.normal; }
+// ヒントを見た分だけ正解の重みを下げる（メモだけ ×0.75、先頭の文字 ×0.5、半分の文字 ×0.25）
+function srsHintFactor(memoShown, letterStages) {
+  if (letterStages >= 2) return 0.25;
+  if (letterStages === 1) return 0.5;
+  return memoShown ? 0.75 : 1;
+}
+function roundStat(v) { return Math.round(v * 100) / 100; }
 // カタカナをひらがなにそろえる（採点でひらがな・カタカナを同一視するため）
 function foldKana(s) {
   return String(s || '').replace(/[\u30A1-\u30F6]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x60))
@@ -80,6 +94,12 @@ function splitNoteForHiding(note, answerIsLatin) {
   }
   if (last < s.length) parts.push({ t: s.slice(last), hide: false });
   return parts;
+}
+// ★【0.03.08】メモの和訳・英単語を隠すのは、教科が英語（または教科なし）のフォルダーのカードだけ
+function noteHidingApplies(category) {
+  if (typeof getCategorySubject !== 'function') return true;
+  const subj = getCategorySubject(category || '');
+  return !subj || /英/.test(subj) || /english/i.test(subj);
 }
 function isLatinAnswer(answer) {
   const a = String(answer || '').replace(/\([^()]*\)/g, '');

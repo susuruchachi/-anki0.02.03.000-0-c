@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>すするanki</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
@@ -154,6 +154,11 @@ h2 { font-size: 1.4rem; font-weight: 700; margin-bottom: 20px; display: flex; al
 
 .combo-display { position: absolute; top: 30%; left: 50%; transform: translate(-50%, -50%) scale(0); font-size: 3rem; font-weight: 900; color: var(--warn); text-shadow: 0 4px 15px rgba(245,166,35,0.6); pointer-events: none; z-index: 50; opacity: 0; }
 .combo-display.pop { animation: comboPop 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+.level-display { position: absolute; top: 56%; left: 50%; transform: translate(-50%, -50%); font-size: 1.7rem; font-weight: 900; white-space: nowrap; pointer-events: none; z-index: 50; opacity: 0; }
+.level-display.up { color: var(--success); text-shadow: 0 3px 12px rgba(34,199,122,0.55); }
+.level-display.down { color: var(--danger); text-shadow: 0 3px 12px rgba(255,79,106,0.45); font-size: 1.4rem; }
+.level-display.pop { animation: levelPop 1.4s ease-out; }
+@keyframes levelPop { 0% { transform: translate(-50%, -20%) scale(0.6); opacity: 0; } 20% { transform: translate(-50%, -50%) scale(1.1); opacity: 1; } 70% { transform: translate(-50%, -60%) scale(1); opacity: 1; } 100% { transform: translate(-50%, -80%) scale(1); opacity: 0; } }
 @keyframes comboPop { 0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0; } 50% { transform: translate(-50%, -50%) scale(1.2); opacity: 1; } 100% { transform: translate(-50%, -50%) scale(1); opacity: 0; } }
 
 .question-display-box { background: var(--bg2); border: 1px solid var(--border2); border-radius: 14px; padding: 30px 20px; text-align: center; margin-bottom: 20px; position: relative; box-shadow: 0 8px 24px rgba(0,0,0,0.3); min-height: 140px; display: flex; align-items: center; justify-content: center; flex-direction: column; }
@@ -299,6 +304,41 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/mhchem.min.js"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
 
+<style>
+/* ★【0.03.08】iPhoneでは16px未満の入力欄をタップすると画面が拡大されて戻せなくなるので、入力欄の文字を16pxにそろえる */
+@supports (-webkit-touch-callout: none) {
+  input[type="text"], input[type="number"], input[type="search"], input[type="email"], input[type="url"], input:not([type]), textarea, select, .form-control { font-size: 16px !important; }
+}
+</style>
+<script>
+// ★【0.03.08】ボタンの連打やピンチで画面が拡大されないようにする（拡大されてしまったら元に戻す）
+(function () {
+  let lastTouchEnd = 0;
+  document.addEventListener('touchend', function (e) {
+    const now = Date.now();
+    if (now - lastTouchEnd < 350 && e.touches.length === 0) {
+      const t = e.target;
+      if (t && t.closest && !t.closest('input, textarea, select, [contenteditable="true"]')) {
+        e.preventDefault(); // ダブルタップ拡大を止める（代わりにタップとして扱う）
+        if (typeof t.click === 'function') t.click();
+        else if (t.parentElement) t.parentElement.click();
+      }
+    }
+    lastTouchEnd = now;
+  }, { passive: false });
+  ['gesturestart', 'gesturechange'].forEach(function (ev) { document.addEventListener(ev, function (e) { e.preventDefault(); }, { passive: false }); });
+  document.addEventListener('touchmove', function (e) { if (e.touches && e.touches.length > 1) e.preventDefault(); }, { passive: false });
+  // 入力欄から離れたときに拡大されたままなら元の倍率に戻す
+  document.addEventListener('focusout', function () {
+    const vv = window.visualViewport;
+    if (!vv || vv.scale <= 1.01) return;
+    const meta = document.querySelector('meta[name="viewport"]'); if (!meta) return;
+    const c = meta.getAttribute('content');
+    meta.setAttribute('content', c + ', minimum-scale=1.0');
+    setTimeout(function () { meta.setAttribute('content', c); }, 300);
+  });
+})();
+</script>
 </head>
 <body>
 
@@ -399,7 +439,15 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
           <input type="number" id="numQCount" class="form-control" value="10" min="1">
         </div>
       </div>
-      <div class="hint-small" style="margin:-4px 0 12px;">難易度は制限時間とヒントの出る速さに一括で反映されます。</div>
+      <div class="form-group" style="margin-bottom:6px;">
+        <label class="section-label" style="font-weight:500;">💡 ヒント</label>
+        <select id="selHintMode" class="form-control">
+          <option value="auto" selected>自動（「すごい」以外はオン）</option>
+          <option value="on">オン</option>
+          <option value="off">オフ</option>
+        </select>
+      </div>
+      <div class="hint-small" style="margin:0 0 12px;">難易度は制限時間・ヒントの出る速さ・レベルの上がりやすさ（難しいほど早く上がり、下がりにくい）に反映されます。ヒントを見て正解すると、レベルは上がりにくくなります。</div>
       <div class="form-group" style="margin-bottom:12px;">
         <label class="section-label" style="font-weight:500;">🔢 出題順</label>
         <select id="selQuizOrder" class="form-control">
@@ -484,6 +532,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
   <div id="pgQuizPlayer" class="screen">
     <div class="quiz-container">
       <div id="comboDisplay" class="combo-display">2 COMBO!</div>
+      <div id="levelDisplay" class="level-display"></div>
       
       <div>
         <div class="quiz-header-status">
@@ -972,10 +1021,10 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
   <div class="menu-card editor-card" onclick="event.stopPropagation()">
     <h3 style="color:var(--text); margin-bottom:12px; font-size:1.1rem;" id="chemEditorTitle">🧪 構造式を挿入</h3>
 
-    <label class="section-label">① 化合物名から選ぶ</label>
+    <label class="section-label">① 化合物名・分子式から選ぶ</label>
     <div class="form-row">
-      <input type="text" id="txtChemSearch" class="form-control" placeholder="例: ベンゼン / サリチル酸 / aspirin" oninput="renderChemSearchResults(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault(); searchChemOnPubChem();}">
-      <button type="button" class="btn btn-secondary" style="width:auto; padding:0 12px; font-size:0.8rem; white-space:nowrap;" onclick="searchChemOnPubChem()">🌐 PubChem</button>
+      <input type="text" id="txtChemSearch" class="form-control" placeholder="例: サリチル酸 / C2H6O / CH3COOH / カルボキシ基" oninput="renderChemSearchResults(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault(); searchChemOnline();}">
+      <button type="button" class="btn btn-secondary" style="width:auto; padding:0 12px; font-size:0.8rem; white-space:nowrap;" onclick="searchChemOnline()">🌐 ネット検索</button>
     </div>
     <div id="chemSearchStatus" class="hint-small" style="margin-top:4px;"></div>
     <div id="chemSearchResults" class="chip-row" style="max-height:120px; overflow-y:auto;"></div>
@@ -990,7 +1039,9 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
         ・<b>=</b> 二重結合、<b>#</b> 三重結合　例: C=C（エチレン）<br>
         ・<b>( )</b> で枝分かれ　例: CC(C)C（2-メチルプロパン）<br>
         ・同じ数字で環を閉じる　例: C1CCCCC1（シクロヘキサン）<br>
-        ・<b>/ \</b> でシス・トランス　例: C/C=C\C（シス）、C/C=C/C（トランス）
+        ・<b>/ \</b> でシス・トランス　例: C/C=C\C（シス）、C/C=C/C（トランス）<br>
+        ・<b>*</b> は結合の腕（線だけ残ります）　例: *C(=O)O（−COOH）、*C(=O)O*（エステル結合）<br>
+        ・<b>.</b> で区切ると、別々の分子を並べて描けます　例: CC(=O)O.OCC
       </div>
     </details>
 
@@ -999,6 +1050,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 
     <div class="form-row" style="margin-top:16px;">
       <button class="btn btn-secondary" style="flex:1;" onclick="closeChemEditor()">キャンセル</button>
+      <button class="btn btn-secondary" id="btnChemAddNew" style="flex:1; display:none;" onclick="submitChemEditor(true)">➕ 別に追加</button>
       <button class="btn" style="flex:1;" onclick="submitChemEditor()">✅ 挿入</button>
     </div>
   </div>
@@ -1147,6 +1199,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 <script src="utils.js"></script>
 <script src="rich-content.js"></script>
 <script src="rich-editors.js"></script>
+<script src="chem-search.js"></script>
 <script src="storage.js"></script>
 <script src="release-notes.js"></script>
 <script src="updates.js"></script>

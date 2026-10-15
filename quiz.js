@@ -191,7 +191,7 @@ function recordQuizOrderProgress(cur) {
 }
 
 const QUIZ_PREF_KEY = 'susuru_anki_quiz_prefs';
-const QUIZ_PREF_IDS = ['selQuizMode', 'selQuizSpeed', 'selQuizOrder', 'numQCount', 'numTimeLimit', 'numAutoNext', 'numGradThreshold', 'chkTTS', 'chkTimeAttack', 'chkIncludeGrad', 'chkSwapQA'];
+const QUIZ_PREF_IDS = ['selQuizMode', 'selQuizSpeed', 'selHintMode', 'selQuizOrder', 'numQCount', 'numTimeLimit', 'numAutoNext', 'numGradThreshold', 'chkTTS', 'chkTimeAttack', 'chkIncludeGrad', 'chkSwapQA'];
 function saveQuizPrefs() {
   const o = {};
   QUIZ_PREF_IDS.forEach(id => { const el = document.getElementById(id); if (el) o[id] = el.type === 'checkbox' ? el.checked : el.value; });
@@ -456,10 +456,12 @@ function loadQuizQuestion() {
   const hb = document.getElementById('lblQuizHint');
   hb.style.display = 'none'; hb.innerHTML = '';
   const speed = document.getElementById('selQuizSpeed').value;
-  quizHintState = buildHintStages(cur, mode, aStructured, richAnswer);
+  // ★【0.03.08】ヒントのオン・オフ（自動＝「すごい」以外はオン）
+  const hintsOn = hintsEnabled(speed);
+  quizHintState = hintsOn ? buildHintStages(cur, mode, aStructured, richAnswer) : { stages: [], shown: 0 };
   const hintBtn = document.getElementById('btnQuizHint');
   if (hintBtn) hintBtn.style.display = (quizHintState.stages.length && !window.currentOnlineMatch) ? 'inline-flex' : 'none';
-  const autoHintAt = speed === 'expert' ? [] : speed === 'easy' ? [0.15, 0.35, 0.6] : [0.25, 0.55, 0.8];
+  const autoHintAt = speed === 'easy' ? [0.15, 0.35, 0.6] : [0.25, 0.55, 0.8];
   const _timerStart = Date.now();
   const _timerBase = base;
   quizTimer = setInterval(() => {
@@ -486,6 +488,12 @@ function loadQuizQuestion() {
 }
 
 let quizHintState = { stages: [], shown: 0 };
+function hintsEnabled(speed) {
+  const v = (document.getElementById('selHintMode') || {}).value || 'auto';
+  if (v === 'on') return true;
+  if (v === 'off') return false;
+  return speed !== 'expert';
+}
 let currentNoteCardId = null;
 
 // 答え（と、その言い換え）をメモから伏せ字にする
@@ -515,7 +523,9 @@ function buildHintStages(cur, mode, structured, richAnswer) {
   const stages = [];
   const note = String(cur.note || '').trim();
   // メモの和訳（答えが英語なら英単語・語根）を隠してから、さらに答えそのものも伏せ字にする
-  if (note) stages.push({ html: '📝 ' + escapeHtml(maskAnswerInText(hideNoteTranslations(note, isLatinAnswer(getPrimaryAnswer(cur.answer))), cur.answer)).replace(/\n/g, '<br>') });
+  // ★【0.03.08】和訳・英単語を隠すのは英語（または教科なし）のフォルダーだけ。化学などでは化学式を隠さない
+  const hidden = noteHidingApplies(cur.category) ? hideNoteTranslations(note, isLatinAnswer(getPrimaryAnswer(cur.answer))) : note;
+  if (note) stages.push({ memo: true, html: '📝 ' + escapeHtml(maskAnswerInText(hidden, cur.answer)).replace(/\n/g, '<br>') });
   if (richAnswer || mode !== 'desc') return { stages, shown: 0 };
   if (structured) {
     stages.push({ structured: structured.map(seg => seg.text.charAt(0)) });
@@ -915,56 +925,71 @@ function evaluateRoundAnswer(isCorrect, head, opts = {}) {
 
   // ローカル学習記録の更新 (自分が持っている問題の場合のみ)
   let m = isPass ? null : db.find(q => q.id === cur.id);
+  let levelChange = null; // ★【0.03.08】LEVEL UP!/level down… の表示用
   if(m) {
     if(m.wrongStreak === undefined) m.wrongStreak = 0; if(m.shikkariStreak === undefined) m.shikkariStreak = 0;
     const mode = currentRoundMode;
     const multiplier = (mode === 'choice' || mode === 'tap' || mode === 'minhaya') ? 2 : 1; 
     // ★【0.03.03】設定の「卒業認定正解数」に比例して、レベルの上がり下がりの回数も変わる
     const P = srsParams();
+    // ★【0.03.08】難易度とヒントで1回の重みを変える（対戦中は難易度どおり・ヒントなし）
+    const W = srsSpeedWeights(window.currentOnlineMatch ? 'normal' : document.getElementById('selQuizSpeed').value);
+    const hs = quizHintState || { stages: [], shown: 0 };
+    const memoShown = hs.shown > 0 && hs.stages[0] && hs.stages[0].memo;
+    const letterStages = Math.max(0, hs.shown - (hs.stages[0] && hs.stages[0].memo ? 1 : 0));
+    const gain = W.up * srsHintFactor(memoShown, letterStages);
+    const loss = W.down;
 
     if(m.level5Correct === undefined) m.level5Correct = 0;
     const isGrad = isGraduated(m);
+    const beforeLevel = m.level;
 
     if(isCorrect) {
       m.correct++; recordCategoryScore(m.category, true);
       if (mode === 'self' && window.currentSelfJudge === 'good') m.wrongStreak = 0;
-      else { m.streak++; m.wrongStreak = 0; }
+      else { m.streak = roundStat((m.streak || 0) + gain); m.wrongStreak = 0; }
       
       if (m.level === -1) {
-        m.shikkariStreak++;
+        m.shikkariStreak = roundStat(m.shikkariStreak + gain);
         if (m.shikkariStreak >= P.recoverAt * multiplier) { m.level = 0; m.shikkariStreak = 0; m.streak = 0; }
       } else if (isGrad) {
         // 卒業済み：何もしない
       } else if (m.level >= 5) {
         // レベル5で未卒業：正解を積む
-        m.level5Correct++;
+        m.level5Correct = roundStat(m.level5Correct + gain);
+        if (isGraduated(m)) levelChange = { type: 'grad' };
       } else {
-        if (m.streak >= P.upStreak * multiplier && m.level < 5) {
+        if (m.streak >= P.upStreak * multiplier - 1e-9 && m.level < 5) {
           m.level++;
           if (m.level === 5) m.level5Correct = 0;
           m.streak = 0;
         }
       }
     } else {
-      m.incorrect++; m.wrongStreak++; m.streak = 0; m.shikkariStreak = 0;
+      m.incorrect++; m.streak = 0; m.shikkariStreak = 0;
+      const prevWrong = m.wrongStreak || 0;
+      m.wrongStreak = roundStat(prevWrong + loss);
       recordCategoryScore(m.category, false);
+      const crossed = (every) => Math.floor(m.wrongStreak / every + 1e-9) > Math.floor(prevWrong / every + 1e-9);
 
       if (isGrad) {
         // 卒業済みで不正解：続けて間違えると卒業取り消し（レベル5に留まる）
-        if (m.wrongStreak >= P.ungradAt * multiplier) { m.level5Correct = 0; m.wrongStreak = 0; }
+        if (m.wrongStreak >= P.ungradAt * multiplier - 1e-9) { m.level5Correct = 0; m.wrongStreak = 0; levelChange = { type: 'ungrad' }; }
       } else if (m.level >= 5) {
         // レベル5・未卒業で不正解：続けて間違えるとレベル4に下がる
-        if (m.wrongStreak >= P.level5Down * multiplier) { m.level = 4; m.level5Correct = 0; m.wrongStreak = 0; }
+        if (m.wrongStreak >= P.level5Down * multiplier - 1e-9) { m.level = 4; m.level5Correct = 0; m.wrongStreak = 0; }
       } else {
         if (m.level !== -1) {
-          if (m.wrongStreak >= P.shikkariAt * multiplier) { m.level = -1; m.wrongStreak = 0; m.correct = 0; } 
-          else if (m.wrongStreak > 0 && m.wrongStreak % (P.downEvery * multiplier) === 0 && m.level > 0) m.level--;
+          if (m.wrongStreak >= P.shikkariAt * multiplier - 1e-9) { m.level = -1; m.wrongStreak = 0; m.correct = 0; } 
+          else if (crossed(P.downEvery * multiplier) && m.level > 0) m.level--;
         }
       }
     }
+    if (!levelChange && m.level !== beforeLevel) levelChange = { type: m.level > beforeLevel ? 'up' : 'down', level: m.level };
     touchStats(m);
     saveData();
   }
+  if (levelChange) showLevelAnim(levelChange);
   const _hintBtn = document.getElementById('btnQuizHint'); if (_hintBtn) _hintBtn.style.display = 'none';
   
   const fb = document.getElementById('quizFeedback');
@@ -1011,6 +1036,19 @@ function evaluateRoundAnswer(isCorrect, head, opts = {}) {
     };
     if (baseDelay > 0 || window.currentOnlineMatch) scheduleAdvance(Math.max(advanceDelay, window.currentOnlineMatch ? 3000 : 0));
   }
+}
+
+// ★【0.03.08】レベルが変わったら COMBO とは別に表示する
+function showLevelAnim(ch) {
+  const el = document.getElementById('levelDisplay'); if (!el) return;
+  const lv = ch.level === -1 ? 'しっかり' : 'Lv.' + ch.level;
+  const map = {
+    up: ['LEVEL UP! (' + lv + ')', 'up'], down: ['level down… (' + lv + ')', 'down'],
+    grad: ['🎓 GRADUATED!', 'up'], ungrad: ['卒業取り消し… (Lv.5)', 'down']
+  };
+  const [txt, cls] = map[ch.type] || map.up;
+  el.innerText = txt; el.className = 'level-display ' + cls;
+  void el.offsetWidth; el.classList.add('pop');
 }
 
 function showComboAnim() {

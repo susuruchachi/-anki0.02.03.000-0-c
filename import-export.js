@@ -109,15 +109,22 @@ function importCSV(e) {
           const sameQ = db.filter(d => d.category === cat && String(d.question).trim() === q);
           if (sameQ.length === 1 && !usedIds.has(sameQ[0].id)) ex = sameQ[0];
         }
+        if (!ex) {
+          // ★【0.03.08】問題文の「（2つ）」のような数の書き方だけが違うなら、同じカードとして問題文も更新する
+          const qKey = t => String(t).replace(/[（(][0-9０-９]+(?:つ|段階|種類|個)[）)]/g, '').trim();
+          const k = qKey(q);
+          ex = db.find(d => d.category === cat && !usedIds.has(d.id) && String(d.answer).trim() === a && qKey(d.question) === k);
+        }
         if (ex) usedIds.add(ex.id);
         if (ex) {
-          const before = JSON.stringify([ex.answer, ex.note, ex.choices, ex.kind, ex.no]);
+          const before = JSON.stringify([ex.question, ex.answer, ex.note, ex.choices, ex.kind, ex.no]);
+          ex.question = q;
           ex.answer = a;
           if (iN !== -1) { if (note) ex.note = note; else delete ex.note; }
           if (iCh !== -1) { if (choices) ex.choices = choices; else delete ex.choices; }
           if (iK !== -1) { if (kind) ex.kind = kind; else delete ex.kind; }
           if (no) ex.no = no;
-          if (JSON.stringify([ex.answer, ex.note, ex.choices, ex.kind, ex.no]) !== before) { touchCard(ex); updated++; touchedCats.add(cat); }
+          if (JSON.stringify([ex.question, ex.answer, ex.note, ex.choices, ex.kind, ex.no]) !== before) { touchCard(ex); updated++; touchedCats.add(cat); }
           continue;
         }
         const card = { id: newCardId(), question: q, answer: a, category: cat, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 };

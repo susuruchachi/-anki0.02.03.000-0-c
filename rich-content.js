@@ -237,6 +237,7 @@ function drawSmilesInto(svg, smiles, scale = 1.4) {
     SmilesDrawer.parse(String(smiles).trim(), (tree) => {
       try {
         drawer.draw(tree, svg, 'anki', null, false);
+        removeAttachmentLabels(svg);
         fitChemSvg(svg, scale);
         resolve(true);
       } catch (e) { resolve(false); }
@@ -274,6 +275,15 @@ function labelNonBenzeneCarbons(drawer) {
     } catch (e) { /* 失敗しても通常の骨格式で描く */ }
     return origDrawVertices(debug);
   };
+}
+
+// ★【0.03.08】「*」（結合の腕）の文字を消して、結合の線だけを残す（−COOH などの基を描くため）
+function removeAttachmentLabels(svg) {
+  svg.querySelectorAll('text').forEach(t => {
+    if (t.textContent.trim() !== '*') return;
+    const g = t.parentNode;
+    if (g && g !== svg && g.tagName.toLowerCase() === 'g' && g.querySelectorAll('text').length === 1) g.remove(); else t.remove();
+  });
 }
 
 // ライブラリが付ける正方形の viewBox を、実際の描画範囲ぴったりに詰め直す
