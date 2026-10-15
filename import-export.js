@@ -32,6 +32,7 @@ function getCategoryPathString(cat) {
 function ensureCategoryPath(path) {
   const parts = String(path || '').split('>').map(x => x.trim()).filter(x => x !== '');
   if (parts.length === 0) parts.push('未分類');
+  for (let i = 0; i < parts.length; i++) { if (invalidCategoryName(parts[i])) parts[i] = parts[i].replace(/^__|__$/g, '_').slice(0, 100); }
   let parent = null;
   parts.forEach(name => {
     if (!categories.includes(name)) { markCatCreated(name); categories.push(name); }
@@ -89,6 +90,7 @@ function importCSV(e) {
       if(iQ===-1) iQ=0; if(iA===-1) iA=1; if(iC===-1) iC=2;
       let added = 0, updated = 0;
       const touchedCats = new Set();
+      const usedIds = new Set();
       for(let i=1; i<rows.length; i++) {
         const c = rows[i]; if(c.length <= Math.max(iQ, iA)) continue;
         const q = c[iQ]?.trim(), a = c[iA]?.trim(); if(!q || !a) continue;
@@ -99,7 +101,13 @@ function importCSV(e) {
         const kindRaw = iK !== -1 ? String(c[iK] || '').trim() : '';
         const kind = /テスト|test/i.test(kindRaw) ? 'test' : /例文|cloze/i.test(kindRaw) ? 'cloze' : '';
         // ★【0.03.02】同じフォルダーに同じ問題があれば、重複させずに答え・メモ等を更新する（成績はそのまま）
-        const ex = db.find(d => d.category === cat && String(d.question).trim() === q);
+        // 同じ問題・同じ答え → それを更新。答えが違う場合は、同じ問題のカードが1枚だけで、この取込でまだ使っていなければ更新
+        let ex = db.find(d => d.category === cat && String(d.question).trim() === q && String(d.answer).trim() === a && !usedIds.has(d.id));
+        if (!ex) {
+          const sameQ = db.filter(d => d.category === cat && String(d.question).trim() === q);
+          if (sameQ.length === 1 && !usedIds.has(sameQ[0].id)) ex = sameQ[0];
+        }
+        if (ex) usedIds.add(ex.id);
         if (ex) {
           const before = JSON.stringify([ex.answer, ex.note, ex.choices, ex.kind]);
           ex.answer = a;
@@ -116,7 +124,7 @@ function importCSV(e) {
         const info = getCategoryShareInfo(cat);
         if (info.shared && info.canEdit) card.sharedDocId = info.docId;
         touchCard(card);
-        db.push(card); added++; touchedCats.add(cat);
+        db.push(card); usedIds.add(card.id); added++; touchedCats.add(cat);
       }
       autoMerge();
       if (typeof pushSharedDocsForCategories === 'function') pushSharedDocsForCategories([...touchedCats]);
@@ -140,7 +148,7 @@ window.resetScores = function resetScores() {
 function factoryReset() { 
   if(!confirm("⚠️ 全消去します。よろしいですか？\n（ログイン中は、同期している他の端末やクラウドのデータも消えます）")) return; 
   // ★【0.03.02】削除記録を残して消す（記録が無いと、他の端末との同期で元に戻ってしまう）
-  db.forEach(q => { if (!deletedCards.includes(q.id)) deletedCards.push(q.id); });
+  tombstoneCards(db.map(q => q.id));
   markCatsDeleted(categories.filter(c => c !== '未分類'));
   [...subscribedDocs, ...ownedDocs].forEach(id => markDocLeft(id));
   db = []; categories = ["未分類"]; categoryTree = {}; subscribedDocs = []; ownedDocs = [];

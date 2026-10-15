@@ -164,7 +164,7 @@ function openCategoryEditor(catName) {
       ${info.shared ? '' : btn('share', '🔗', '共有URLを発行', { disabled: isRoot })}
       ${info.shared ? '' : btn('public', '🌐', '公開カテゴリーにする', { disabled: isRoot })}
       ${info.shared && info.isOwner ? btn('unshare', '🛑', '共有・公開を停止') : ''}
-      ${info.shared && !info.isOwner ? btn('leave', '🚫', '購読を解除', { danger: true }) : ''}
+      ${info.shared && !info.isOwner ? btn('leave', '🚫', info.root && info.root !== catName ? `購読を解除（${escapeHtml(info.root)} 全体）` : '購読を解除', { danger: true }) : ''}
     </div>
     ${isRoot ? '' : `<div class="cat-edit-sec">危険な操作</div><div class="cat-act-grid">${btn('delete', '🗑️', 'フォルダーと中身を削除', { danger: true, disabled: ro })}</div>`}
     ${ro ? '<div class="hint-small" style="margin-top:6px;">🔒 購読中のカテゴリーは作成者だけが編集できます。成績はあなた専用に保存されます。</div>' : ''}
@@ -218,7 +218,7 @@ function runCategoryAction(catName, act, info) {
       const ok = () => {
         const n = (document.getElementById('catEditInput').value || '').trim();
         if (!n) return;
-        if (n.includes('>')) return alert('フォルダー名に「>」は使えません。');
+        const bad = invalidCategoryName(n); if (bad) return alert(bad);
         if (categories.includes(n)) return alert('同じ名前のフォルダーが既にあります。');
         markCatCreated(n);
         categories.push(n);
@@ -242,7 +242,7 @@ function runCategoryAction(catName, act, info) {
       const ok = () => {
         const n = (document.getElementById('catEditInput').value || '').trim();
         if (!n || n === catName) return;
-        if (n.includes('>')) return alert('フォルダー名に「>」は使えません。');
+        const bad = invalidCategoryName(n); if (bad) return alert(bad);
         if (categories.includes(n)) {
           if (!confirm(`「${n}」は既にあります。\n「${catName}」の中身を「${n}」に統合しますか？`)) return;
           if (!mergeCategoryInto(catName, n)) return;
@@ -266,6 +266,7 @@ function runCategoryAction(catName, act, info) {
       panel.querySelector('#catEditOk').onclick = () => {
         const v = document.getElementById('catEditSelect').value;
         if (!v) return;
+        if (v !== '__top__') { const d = getCategoryShareInfo(v); if (d.shared && d.readOnly) return alert('🔒 閲覧専用の共有カテゴリーの中には移動できません。'); }
         moveCategory(catName, v === '__top__' ? null : v);
         openCategoryEditor(catName);
       };
@@ -300,6 +301,7 @@ function renameCategory(oldName, newName) {
   for (const p in categoryTree) categoryTree[p] = categoryTree[p].map(c => c === oldName ? newName : c);
   if (categoryTree[oldName]) { categoryTree[newName] = categoryTree[oldName]; delete categoryTree[oldName]; }
   db.forEach(q => { if (q.category === oldName) { q.category = newName; touchCard(q); } });
+  renameInSharedMeta(oldName, newName);
   markCatsDeleted([oldName]);
   markCatCreated(newName);
   replaceInScopePaths(oldName, newName);
@@ -321,6 +323,7 @@ function moveCategory(catName, newParent) {
 function mergeCategoryInto(src, dst) {
   if (src === dst || src === '未分類') return false;
   if (getAllSubcategories(src).includes(dst)) { alert('自分の中のフォルダーには統合できません。'); return false; }
+  if (isSharedDocRoot(src)) { alert('共有・公開カテゴリーの一番上のフォルダーは統合できません。\n（名前の変更や移動はできます）'); return false; }
   const sInfo = getCategoryShareInfo(src), dInfo = getCategoryShareInfo(dst);
   if ((sInfo.shared && sInfo.readOnly) || (dInfo.shared && dInfo.readOnly)) { alert('🔒 閲覧専用の共有カテゴリーは統合できません。'); return false; }
   db.forEach(q => {
@@ -353,15 +356,12 @@ async function deleteCategoryTree(catName, info) {
   const count = db.filter(q => toDelete.includes(q.category)).length;
   if(!confirm(`警告: 「${catName}」とサブフォルダー ${toDelete.length - 1} 個、問題 ${count} 問をすべて削除しますか？\n（元に戻せません）`)) return;
   let stopDoc = false;
-  if (info.shared && info.isOwner && currentUser) {
-    try {
-      const snap = await firestore.collection('susuru_anki_shared').doc(info.docId).get();
-      if (snap.exists && snap.data().catName === catName) {
-        stopDoc = confirm(`「${catName}」は共有・公開中です。\n共有・公開も停止して、クラウド上のデータも削除しますか？\n（キャンセルすると、手元のフォルダーだけ削除し、共有先からも中身が消えます）`);
-      }
-    } catch (e) {}
+  if (info.shared && info.isOwner && info.root === catName) {
+    stopDoc = confirm(`「${catName}」は共有・公開中です。\n共有・公開も停止して、クラウド上のデータも削除しますか？\n（キャンセルすると、手元のフォルダーだけ削除し、共有先からも中身が消えます）`);
+  } else if (info.shared && info.canEdit && !info.isOwner) {
+    if (!confirm(`⚠️ 「${catName}」は共同編集中の共有カテゴリーです。\n削除すると、共有している全員の手元からもこのフォルダーの問題が消えます。続けますか？\n（自分だけ使わなくなる場合は「購読を解除」を使ってください）`)) return;
   }
-  db.forEach(q => { if(toDelete.includes(q.category) && !deletedCards.includes(q.id)) deletedCards.push(q.id); });
+  tombstoneCards(db.filter(q => toDelete.includes(q.category)).map(q => q.id));
   db = db.filter(q => !toDelete.includes(q.category));
   categories = categories.filter(c => !toDelete.includes(c));
   for(let p in categoryTree) { if(toDelete.includes(p)) delete categoryTree[p]; else if(categoryTree[p]) categoryTree[p] = categoryTree[p].filter(c => !toDelete.includes(c)); }

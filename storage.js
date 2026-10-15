@@ -13,6 +13,7 @@ let deletedCats = [];
 // ・クラウドへの保存は「丸ごと上書き」だけにせず、他の端末の変更を検知したら取り込んでから保存する
 // ================================================================
 let catStamps = {};   // { フォルダー名: { a: 作成(復活)時刻, d: 削除時刻 } }
+let deletedCardsAt = {}; // { カードID: 削除時刻 }（削除後に取り込み直したカードは updatedAt が新しいので復活できる）
 let docStamps = {};   // { 共有docId: { a: 購読時刻, d: 解除時刻 } }
 let structAt = 0;     // フォルダー構造・購読状態を最後に変更した時刻
 let _structHash = null;
@@ -56,6 +57,30 @@ function markCatsDeleted(names) {
     if (!deletedCats.includes(n)) deletedCats.push(n);
   });
 }
+// カードを削除したことを記録する
+function tombstoneCards(ids) {
+  const now = Date.now();
+  (ids || []).forEach(id => {
+    if (!id) return;
+    deletedCardsAt[id] = Math.max(deletedCardsAt[id] || 0, now);
+    if (!deletedCards.includes(id)) deletedCards.push(id);
+  });
+}
+// 削除済みのIDのカードを取り込み直すとき（再購読など）に呼ぶ。カードの updatedAt を削除時刻より新しくする
+function reviveCard(card) {
+  if (!card) return;
+  deletedCards = deletedCards.filter(id => id !== card.id);
+  card.updatedAt = Math.max(Date.now(), (deletedCardsAt[card.id] || 0) + 1);
+}
+// フォルダー名として使えない名前（Firestoreの予約名・区切り文字）
+function invalidCategoryName(n) {
+  if (!n) return 'フォルダー名を入力してください。';
+  if (n.includes('>')) return 'フォルダー名に「>」は使えません。';
+  if (/^__.*__$/.test(n)) return '「__」で始まり「__」で終わる名前は使えません。';
+  if (n.length > 100) return 'フォルダー名が長すぎます（100文字まで）。';
+  return '';
+}
+
 function markDocJoined(docId) {
   if (!docId) return;
   const s = docStamps[docId] || {}; s.a = Math.max(Date.now(), (s.d || 0) + 1); docStamps[docId] = s;
@@ -66,6 +91,8 @@ function markDocLeft(docId) {
 }
 function stampAlive(s) { return !s || !(s.d > 0) || (s.a || 0) > s.d; }
 
+let _resolveDataLoaded;
+const dataLoaded = new Promise(r => { _resolveDataLoaded = r; });
 function loadData() {
   try {
     const raw=localStorage.getItem(STORAGE_KEY);
@@ -79,6 +106,7 @@ function loadData() {
       if(p.deletedCards) deletedCards=p.deletedCards;
       if(p.deletedCats) deletedCats=p.deletedCats;
       if(p.catStamps) catStamps=p.catStamps;
+      if(p.deletedCardsAt) deletedCardsAt=p.deletedCardsAt;
       if(p.docStamps) docStamps=p.docStamps;
       if(p.structAt) structAt=p.structAt;
     }
@@ -91,6 +119,7 @@ function loadData() {
     if (savedScope) lastQuizScopePath = JSON.parse(savedScope);
   } catch(e){}
   _structHash = structFingerprint();
+  _resolveDataLoaded();
 }
 
 // ★【0.03.02】旧バージョンのデータに同期用の情報を付け足す（端末ごとに1回だけ）
@@ -105,6 +134,8 @@ function migrateSyncMeta() {
     if (!(catStamps[c].a > 0)) catStamps[c].a = 2; // 旧データの削除記録(=1扱い)より新しい
   });
   deletedCats = deletedCats.filter(c => !categories.includes(c));
+  const now = Date.now();
+  deletedCards.forEach(id => { if (!deletedCardsAt[id]) deletedCardsAt[id] = now; });
   // ★ 重複カードの「足し算」で膨らんだ正解数・誤答数を修復する
   const fixed = repairInflatedStats(true);
   try { localStorage.setItem(FLAG, '1'); } catch (e) {}
@@ -142,12 +173,17 @@ function updateStructStamp() {
 }
 
 function buildSyncPayload() {
-  return { db, categories, categoryTree, subscribedDocs, ownedDocs, deletedCards, deletedCats, catStamps, docStamps, structAt };
+  return { db, categories, categoryTree, subscribedDocs, ownedDocs, deletedCards, deletedCardsAt, deletedCats, catStamps, docStamps, structAt };
 }
 
+let _quotaWarned = false;
 function writeLocal() {
   const payload = buildSyncPayload();
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(payload)); }
+  catch (e) {
+    console.error('ローカル保存に失敗:', e);
+    if (!_quotaWarned) { _quotaWarned = true; setTimeout(() => alert('⚠️ 端末の保存容量がいっぱいで保存できませんでした。\n画像付きのカードを減らすか、JSONでバックアップしてから不要なデータを削除してください。'), 0); }
+  }
   // ★【0.02.58-g】カテゴリー選択を保存
   try { localStorage.setItem(STORAGE_KEY + '_scopePath', JSON.stringify(lastQuizScopePath)); } catch(e){}
   return payload;
@@ -176,22 +212,47 @@ function setSyncStatus(state, text) {
 
 function userDocRef() { return firestore.collection("susuru_anki_users").doc(currentUser.uid); }
 
+let _cloudSaving = false, _cloudSaveAgain = false;
+function newWriteId() {
+  const id = DEVICE_ID + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
+  _myWriteIds.push(id); if (_myWriteIds.length > 30) _myWriteIds.shift();
+  return id;
+}
+// ★【0.03.02】クラウドへの保存は「読む→（他の端末の変更があれば取り込む）→書く」をトランザクションで行う
+// （丸ごと上書きすると、まだ取り込んでいない他の端末の変更を消してしまうため）
 async function backgroundCloudSave() {
   if (!currentUser || !cloudReady) return;
+  if (_cloudSaving) { _cloudSaveAgain = true; return; }
+  _cloudSaving = true;
   try {
-    const writeId = DEVICE_ID + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
-    _myWriteIds.push(writeId); if (_myWriteIds.length > 20) _myWriteIds.shift();
-    // undefined を含むとFirestoreが拒否するので、JSONを通して取り除く
-    const body = JSON.parse(JSON.stringify(buildSyncPayload()));
-    await userDocRef().set({
-      ...body,
-      version: typeof APP_VERSION !== 'undefined' ? APP_VERSION : "unknown",
-      writer: DEVICE_ID, writeId,
-      lastSync: firebase.firestore.FieldValue.serverTimestamp()
+    const ref = userDocRef();
+    let writeId = null, merged = false;
+    await firestore.runTransaction(async tx => {
+      const snap = await tx.get(ref);
+      if (snap.exists) {
+        const r = snap.data() || {};
+        if (!r.writeId || (r.writeId !== _lastSeenWriteId && !_myWriteIds.includes(r.writeId))) { mergeIntoLocal(r); merged = true; }
+      }
+      writeId = newWriteId();
+      // undefined を含むとFirestoreが拒否するので、JSONを通して取り除く
+      const body = JSON.parse(JSON.stringify(buildSyncPayload()));
+      tx.set(ref, {
+        ...body,
+        version: typeof APP_VERSION !== 'undefined' ? APP_VERSION : "unknown",
+        writer: DEVICE_ID, writeId,
+        lastSync: firebase.firestore.FieldValue.serverTimestamp()
+      });
     });
     _lastSeenWriteId = writeId;
+    if (merged) refreshVisibleViews(true);
     setSyncStatus('success', '✅ 保存完了');
-  } catch (err) { setSyncStatus('error', '⚠️ 保存エラー'); }
+  } catch (err) {
+    console.warn('クラウド保存エラー:', err);
+    setSyncStatus('error', '⚠️ 保存エラー（次の保存時に再試行します）');
+  } finally {
+    _cloudSaving = false;
+    if (_cloudSaveAgain) { _cloudSaveAgain = false; backgroundCloudSave(); }
+  }
 }
 
 // ----------------------------------------------------------------
@@ -224,8 +285,12 @@ function mergeCardPair(l, c) {
 }
 
 function mergeSyncStates(L, C) {
-  const delCards = [...new Set([...(L.deletedCards || []), ...(C.deletedCards || [])])];
-  const delSet = new Set(delCards);
+  // カードの削除記録（時刻つき）。時刻の無い旧データの記録は「1」として扱う
+  const delAt = {};
+  [L, C].forEach(s => {
+    Object.keys(s.deletedCardsAt || {}).forEach(id => { delAt[id] = Math.max(delAt[id] || 0, s.deletedCardsAt[id] || 0); });
+    (s.deletedCards || []).forEach(id => { if (!(delAt[id] > 0)) delAt[id] = 1; });
+  });
 
   // フォルダーの作成・削除記録（旧データの削除記録は時刻が無いので「1」として扱う）
   const cs = mergeStampMaps(L.catStamps, C.catStamps);
@@ -240,7 +305,10 @@ function mergeSyncStates(L, C) {
     const c = map.get(l.id);
     map.set(l.id, c ? mergeCardPair(l, c) : l);
   });
-  const mergedDb = [...map.values()].filter(q => !delSet.has(q.id)).map(q => Object.assign({}, q));
+  // 削除より後に（再購読などで）取り込み直されたカードは残す
+  const mergedDb = [...map.values()].filter(q => !(delAt[q.id] > 0) || (q.updatedAt || 0) > delAt[q.id]).map(q => Object.assign({}, q));
+  const aliveIds = new Set(mergedDb.map(q => q.id));
+  const delCards = Object.keys(delAt).filter(id => !aliveIds.has(id));
 
   // フォルダー構造：名前は両方の和集合（削除記録のあるものを除く）、親子関係は新しく変更した側を優先
   const newer = (L.structAt || 0) > (C.structAt || 0) ? L : C;
@@ -257,12 +325,15 @@ function mergeSyncStates(L, C) {
   const parentOf = {};
   const tree = {};
   const isAncestor = (anc, node) => { let x = node, g = 0; while (x !== undefined && g++ < 10000) { if (x === anc) return true; x = parentOf[x]; } return false; };
+  // 新しい側が知っているフォルダーは、新しい側の親子関係（一番上の階層なら親なし）だけを採用する
+  const newerKnows = new Set([...(newer.categories || []), ...Object.keys(newer.categoryTree || {}), ...Object.values(newer.categoryTree || {}).flat()]);
   [newer, older].forEach(s => {
     const t = s.categoryTree || {};
     Object.keys(t).forEach(p => {
       if (!aliveSet.has(p)) return;
       (t[p] || []).forEach(ch => {
         if (!aliveSet.has(ch) || ch === p || parentOf[ch] !== undefined) return;
+        if (s === older && newerKnows.has(ch)) return;
         if (isAncestor(ch, p)) return; // 循環になる親子関係は採用しない
         parentOf[ch] = p;
         (tree[p] || (tree[p] = [])).push(ch);
@@ -279,26 +350,35 @@ function mergeSyncStates(L, C) {
   const deadCats = Object.keys(cs).filter(n => !catAlive(n));
   return {
     db: mergedDb, categories: aliveNames, categoryTree: tree,
-    deletedCards: delCards, deletedCats: deadCats, catStamps: cs, docStamps: ds,
+    deletedCards: delCards, deletedCardsAt: delAt, deletedCats: deadCats, catStamps: cs, docStamps: ds,
     structAt: Math.max(L.structAt || 0, C.structAt || 0),
     subscribedDocs: subs, ownedDocs: owned
   };
 }
 
-// クラウドから届いた状態をこの端末に取り込む。取り込み後、クラウドと内容が違えば（この端末にしかない変更があれば）書き戻す
-function applyCloudState(r, { forcePush = false } = {}) {
+// クラウドの状態をこの端末に取り込む（書き戻しはしない）
+function mergeIntoLocal(r) {
   const merged = mergeSyncStates(buildSyncPayload(), r);
   db = merged.db; categories = merged.categories; categoryTree = merged.categoryTree;
-  deletedCards = merged.deletedCards; deletedCats = merged.deletedCats;
+  deletedCards = merged.deletedCards; deletedCardsAt = merged.deletedCardsAt; deletedCats = merged.deletedCats;
   catStamps = merged.catStamps; docStamps = merged.docStamps; structAt = merged.structAt;
   subscribedDocs = merged.subscribedDocs; ownedDocs = merged.ownedDocs;
   ensureSystemSanity();
   autoMerge(true);
   _structHash = structFingerprint(); // 取り込みによる構造の変化では変更時刻を進めない（端末間で押し付け合いにならないように）
   writeLocal();
+}
+// クラウドから届いた状態をこの端末に取り込む。取り込み後、クラウドと内容が違えば（この端末にしかない変更があれば）書き戻す
+function applyCloudState(r, { forcePush = false } = {}) {
+  const before = viewFingerprint();
+  mergeIntoLocal(r);
   const differs = forcePush || syncFingerprint(buildSyncPayload()) !== syncFingerprint(r);
   if (differs && currentUser && cloudReady) backgroundCloudSave();
-  refreshVisibleViews();
+  refreshVisibleViews(viewFingerprint() !== before);
+}
+// 画面の表示に関係する部分だけの指紋（成績だけの変化では一覧を描き直さない）
+function viewFingerprint() {
+  return JSON.stringify([categories, categoryTree, db.length, db.map(q => q.id + '\u0001' + q.category + '\u0001' + q.question + '\u0001' + q.answer + '\u0001' + (q.note || '')).join('\u0002')]);
 }
 
 function stableStringify(v) {
@@ -310,18 +390,20 @@ function syncFingerprint(p) {
   const dbSorted = [...(p.db || [])].sort((a, b) => String(a.id).localeCompare(String(b.id)));
   return stableStringify({
     db: dbSorted, categories: [...(p.categories || [])].sort(), categoryTree: p.categoryTree || {},
-    deletedCards: [...(p.deletedCards || [])].sort(), deletedCats: [...(p.deletedCats || [])].sort(),
+    deletedCards: [...(p.deletedCards || [])].sort(), deletedCardsAt: p.deletedCardsAt || {}, deletedCats: [...(p.deletedCats || [])].sort(),
     catStamps: p.catStamps || {}, docStamps: p.docStamps || {}, structAt: p.structAt || 0,
     subscribedDocs: [...(p.subscribedDocs || [])].sort(), ownedDocs: [...(p.ownedDocs || [])].sort()
   });
 }
 
-function refreshVisibleViews() {
+function refreshVisibleViews(contentChanged = true) {
   const isActive = id => { const el = document.getElementById(id); return el && el.classList.contains('active'); };
   try {
-    if (isActive('pgTree') && typeof renderTree === 'function') renderTree();
-    if (isActive('pgBox') && typeof renderBox === 'function') renderBox();
-    if (isActive('pgHome')) { if (typeof buildQuizScopeDropdown === 'function') buildQuizScopeDropdown(); }
+    if (contentChanged) {
+      if (isActive('pgTree') && typeof renderTree === 'function') renderTree();
+      if (isActive('pgBox') && typeof renderBox === 'function') renderBox();
+      if (isActive('pgHome')) { if (typeof buildQuizScopeDropdown === 'function') buildQuizScopeDropdown(); }
+    }
     if (typeof updateHomeSummary === 'function') updateHomeSummary();
   } catch (e) { console.warn(e); }
 }
@@ -336,7 +418,7 @@ function startCloudListener() {
     if (r.writeId && (_myWriteIds.includes(r.writeId) || r.writeId === _lastSeenWriteId)) return;
     _lastSeenWriteId = r.writeId || null;
     applyCloudState(r);
-  }, err => console.warn('クラウド監視エラー:', err));
+  }, err => { console.warn('クラウド監視エラー:', err); cloudReady = false; cloudUnsubscribe = null; });
 }
 function stopCloudListener() {
   if (cloudUnsubscribe) { cloudUnsubscribe(); cloudUnsubscribe = null; }
@@ -418,7 +500,7 @@ function autoMerge(skipSave = false) {
       if (!keep.kind && dup.kind) keep.kind = dup.kind;
       keep.updatedAt = Math.max(keep.updatedAt || 0, dup.updatedAt || 0) || undefined;
       keep.statsAt = Math.max(keep.statsAt || 0, dup.statsAt || 0) || undefined;
-      if (!dup.sharedDocId && !deletedCards.includes(dup.id)) deletedCards.push(dup.id);
+      if (!dup.sharedDocId) tombstoneCards([dup.id]);
     });
     if (keep.updatedAt === undefined) delete keep.updatedAt;
     if (keep.statsAt === undefined) delete keep.statsAt;
@@ -428,9 +510,32 @@ function autoMerge(skipSave = false) {
   if (!skipSave) saveData();
 }
 
+const OWNER_UID_KEY = 'susuru_anki_owner_uid';
+// ★【0.03.02】この端末のデータが別のアカウントのものだった場合の扱いを決める
+function resolveAccountSwitch() {
+  let owner = null;
+  try { owner = localStorage.getItem(OWNER_UID_KEY); } catch (e) {}
+  const hasLocal = db.length > 0 || categories.length > 1;
+  if (owner && owner !== currentUser.uid && hasLocal) {
+    const merge = confirm('この端末には、別のGoogleアカウントで使っていたデータがあります。\n\nOK：この端末のデータを今のアカウントに統合する\nキャンセル：この端末のデータを今のアカウントのデータに置き換える（統合しない）');
+    if (!merge) {
+      db = []; categories = ['未分類']; categoryTree = {}; subscribedDocs = []; ownedDocs = [];
+      deletedCards = []; deletedCardsAt = {}; deletedCats = []; catStamps = {}; docStamps = {}; structAt = 0;
+      sharedDocPermissions = {};
+      _structHash = structFingerprint(); writeLocal();
+    }
+  }
+  try { localStorage.setItem(OWNER_UID_KEY, currentUser.uid); } catch (e) {}
+}
+
+let _syncing = false;
 async function syncToCloud(isSilent = false) {
   if (!currentUser) { if (!isSilent) alert("Googleアカウントでログインしてください。"); return; }
+  await dataLoaded; // 端末のデータを読み込む前にクラウドと合わせない
+  if (_syncing) return;
+  _syncing = true;
   try {
+    resolveAccountSwitch();
     const snap = await userDocRef().get();
     // 最初の同期が終わるまではクラウドに書かない（古いデータでクラウドを上書きしないため）
     cloudReady = true;
@@ -447,4 +552,12 @@ async function syncToCloud(isSilent = false) {
     if (typeof syncSubscriptions === 'function') await syncSubscriptions();
     if (!isSilent) { alert(`☁️ 同期完了！`); openPage('pgHome'); }
   } catch (err) { if (!isSilent) alert(`⚠️ 同期エラー: ${err.message}\n(Firebaseのルール設定などを確認してください)`); }
+  finally { _syncing = false; }
+}
+
+// ★【0.03.02】オフラインで起動した・通信が切れた場合は、つながったときに同期をやり直す
+if (typeof window !== 'undefined' && window.addEventListener) {
+  const retrySync = () => { if (currentUser && !cloudReady) syncToCloud(true); };
+  window.addEventListener('online', retrySync);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') retrySync(); });
 }

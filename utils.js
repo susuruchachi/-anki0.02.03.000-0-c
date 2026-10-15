@@ -6,6 +6,15 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
+// ★【0.03.02】onclick="fn(...)" の引数に文字列を安全に埋め込む（名前に ' や \ が入っていてもスクリプトとして実行されない）
+function jsArg(v) {
+  return JSON.stringify(String(v == null ? '' : v)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '&#39;');
+}
+// 属性値（src など）に埋め込む文字列をエスケープする
+function escAttr(v) {
+  return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '&#39;');
+}
+
 function toggleLightMode(forceOn = false) {
   const isLight = forceOn || !document.body.classList.contains('light-mode');
   if(isLight) document.body.classList.add('light-mode'); else document.body.classList.remove('light-mode');
@@ -114,8 +123,8 @@ function isStructuredSegmentCorrect(input, correctText) {
 // （画像タグやKaTeX記法をそのまま埋め込めるようにする、既存の出題表示の方針に合わせるため）
 function formatStructuredAnswerHTML(segments) {
   return segments.map(seg => {
-    const labelPart = seg.label ? `<div style="font-size:0.75rem; color:var(--primary); font-weight:700; margin-bottom:1px;">🏷️ ${seg.label}</div>` : '';
-    return `<div style="margin-bottom:8px; text-align:left;">${labelPart}<div>${renderRichText(seg.text)}</div></div>`;
+    const labelPart = seg.label ? `<div style="font-size:0.75rem; color:var(--primary); font-weight:700; margin-bottom:1px;">🏷️ ${escAttr(seg.label)}</div>` : '';
+    return `<div style="margin-bottom:8px; text-align:left;">${labelPart}<div>${renderRichText(seg.text, { escape: true })}</div></div>`;
   }).join('');
 }
 

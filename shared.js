@@ -19,23 +19,55 @@ function getSharedAccess(docId) {
   const canEdit = isOwner || !!(perm && perm.canEdit);
   return { shared: true, docId, canEdit, isOwner, readOnly: !canEdit };
 }
-// フォルダー（またはその中・上位のフォルダー）が属している共有ドキュメントを探す
+// ★【0.03.02】共有ドキュメントごとの「一番上のフォルダー名・含まれるフォルダー・前回見たカードID」をこの端末に覚えておく
+// （空のフォルダーでも共有かどうか判定するため／他の編集者が削除したカードを見分けるため）
+const SHARED_META_KEY = 'susuru_anki_shared_meta';
+let sharedMeta = (() => { try { return JSON.parse(localStorage.getItem(SHARED_META_KEY) || '{}') || {}; } catch (e) { return {}; } })();
+function saveSharedMeta() { try { localStorage.setItem(SHARED_META_KEY, JSON.stringify(sharedMeta)); } catch (e) {} }
+function setSharedMeta(docId, root, cats, ids) {
+  if (!docId) return;
+  const m = sharedMeta[docId] || {};
+  if (root) m.root = root;
+  if (cats) m.cats = [...new Set(cats)];
+  if (ids) m.ids = [...new Set(ids)];
+  sharedMeta[docId] = m; saveSharedMeta();
+}
+// フォルダー名の変更を、共有ドキュメントの記録にも反映する
+function renameInSharedMeta(oldName, newName) {
+  let changed = false;
+  Object.values(sharedMeta).forEach(m => {
+    if (m.root === oldName) { m.root = newName; changed = true; }
+    if (Array.isArray(m.cats) && m.cats.includes(oldName)) { m.cats = m.cats.map(c => c === oldName ? newName : c); changed = true; }
+  });
+  if (changed) saveSharedMeta();
+}
+function isSharedDocRoot(catName) {
+  return Object.keys(sharedMeta).some(id => sharedMeta[id].root === catName && getSharedAccess(id).shared);
+}
+function knownSharedDocIds() { return [...new Set([...(subscribedDocs || []), ...(ownedDocs || [])])]; }
+
+// フォルダー（またはその上位のフォルダー）が属している共有ドキュメントを探す
 function getCategoryShareInfo(catName) {
-  const sub = new Set(getAllSubcategories(catName));
-  let card = db.find(q => sub.has(q.category) && q.sharedDocId && getSharedAccess(q.sharedDocId).shared);
-  if (!card) {
-    // 上位フォルダーをたどる（空のサブフォルダーでも判定できるように）
-    let cur = catName, guard = 0;
-    while (!card && guard++ < 100) {
-      let parent = null;
-      for (const p in categoryTree) { if ((categoryTree[p] || []).includes(cur)) { parent = p; break; } }
-      if (!parent) break;
-      card = db.find(q => q.category === parent && q.sharedDocId && getSharedAccess(q.sharedDocId).shared);
-      cur = parent;
-    }
+  const docForCat = (c) => {
+    const byMeta = knownSharedDocIds().find(id => (sharedMeta[id] && (sharedMeta[id].root === c || (sharedMeta[id].cats || []).includes(c))));
+    if (byMeta) return byMeta;
+    const card = db.find(q => q.category === c && q.sharedDocId && getSharedAccess(q.sharedDocId).shared);
+    return card ? card.sharedDocId : null;
+  };
+  let docId = docForCat(catName);
+  // 上位フォルダーをたどる（空のサブフォルダーでも判定できるように）
+  let cur = catName, guard = 0;
+  while (!docId && guard++ < 100) {
+    let parent = null;
+    for (const p in categoryTree) { if ((categoryTree[p] || []).includes(cur)) { parent = p; break; } }
+    if (!parent) break;
+    docId = docForCat(parent);
+    cur = parent;
   }
-  if (!card) return { shared: false, canEdit: true, isOwner: false, readOnly: false, docId: null };
-  return getSharedAccess(card.sharedDocId);
+  if (!docId) return { shared: false, canEdit: true, isOwner: false, readOnly: false, docId: null };
+  const acc = getSharedAccess(docId);
+  if (!acc.shared) return { shared: false, canEdit: true, isOwner: false, readOnly: false, docId: null };
+  return { ...acc, root: (sharedMeta[docId] && sharedMeta[docId].root) || null };
 }
 
 // 共有ドキュメントの印を外して、手元の普通のカードに戻す（公開の停止・削除、ドキュメント消失時）
@@ -45,6 +77,7 @@ function detachSharedDoc(docId) {
   ownedDocs = ownedDocs.filter(id => id !== docId);
   delete sharedDocPermissions[docId];
   markDocLeft(docId);
+  delete sharedMeta[docId]; saveSharedMeta();
 }
 
 // 共有ドキュメントに保存するカードの形（成績は含めない）
@@ -80,19 +113,21 @@ async function syncSubscriptions() {
       
       const cloudCards = data.cards || [];
       const cloudCardIds = new Set(cloudCards.map(c => c.id));
+      const prevMeta = sharedMeta[docId] || {};
+      const seenBefore = new Set(prevMeta.ids || []);
       let localWins = false;
       
-      // 1. クラウドから削除されたカードをローカルからも消す（編集できる人は、手元の変更を優先して後で書き戻す）
-      if (!canEdit) {
-        const removed = db.filter(q => q.sharedDocId === docId && !cloudCardIds.has(q.id));
-        if (removed.length > 0) {
-          removed.forEach(q => { if (!deletedCards.includes(q.id)) deletedCards.push(q.id); });
-          db = db.filter(q => !(q.sharedDocId === docId && !cloudCardIds.has(q.id)));
-          changed = true;
-        }
-      } else if (db.some(q => q.sharedDocId === docId && !cloudCardIds.has(q.id))) {
-        localWins = true;
+      // 1. クラウドから削除されたカードをローカルからも消す
+      //    編集できる人：前回クラウドにあったのに今は無い＝他の人が削除した → 消す／一度もクラウドに無い＝手元で追加した → 書き戻す
+      const missing = db.filter(q => q.sharedDocId === docId && !cloudCardIds.has(q.id));
+      const removed = canEdit ? missing.filter(q => seenBefore.has(q.id)) : missing;
+      if (removed.length > 0) {
+        const ids = new Set(removed.map(q => q.id));
+        tombstoneCards([...ids]);
+        db = db.filter(q => !ids.has(q.id));
+        changed = true;
       }
+      if (canEdit && missing.length > removed.length) localWins = true;
       
       // 2. クラウドの更新をローカルに反映・新規追加
       cloudCards.forEach(cq => {
@@ -110,7 +145,6 @@ async function syncSubscriptions() {
               touchCard(lq); changed = true;
             }
           }
-          if (!lq.note && cq.note) { lq.note = cq.note; touchCard(lq); changed = true; }
           if (lq.sharedDocId !== docId) { lq.sharedDocId = docId; touchCard(lq); changed = true; }
         } else {
           const newLocalCard = { id: cq.id, question: cq.question, answer: cq.answer, category: cq.category, sharedDocId: docId, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 };
@@ -138,6 +172,19 @@ async function syncSubscriptions() {
           }
         });
       }
+      // 3'. 閲覧専用：共有ドキュメントから無くなった空のフォルダー（作成者が名前を変えた・消した）を片付ける
+      if (!canEdit && Array.isArray(prevMeta.cats)) {
+        const nowCats = new Set(data.categories || []);
+        const gone = prevMeta.cats.filter(c => !nowCats.has(c) && categories.includes(c) && !db.some(q => q.category === c) && !(categoryTree[c] || []).length);
+        if (gone.length) {
+          markCatsDeleted(gone);
+          categories = categories.filter(c => !gone.includes(c));
+          for (const k in categoryTree) categoryTree[k] = (categoryTree[k] || []).filter(c => !gone.includes(c));
+          gone.forEach(c => delete categoryTree[c]);
+          changed = true;
+        }
+      }
+      setSharedMeta(docId, data.catName, data.categories || [], [...cloudCardIds]);
       if (localWins) needPush.push(docId);
     } catch (e) { console.warn("Sync error for doc:", docId, e); }
   }
@@ -166,16 +213,20 @@ async function pushSharedDocFromLocal(docId) {
     // 手元に無く、削除もしていないカード（他の共同編集者が追加したもの）は残す
     const keep = (data.cards || []).filter(c => c && !localIds.has(c.id) && !delSet.has(c.id));
     const newCards = [...localCards.map(toSharedCard), ...keep];
-    const rootCat = data.catName;
+    // 一番上のフォルダー名が変わっていたら（名前の変更）、共有ドキュメントの名前も変える
+    const rootCat = (sharedMeta[docId] && sharedMeta[docId].root && categories.includes(sharedMeta[docId].root)) ? sharedMeta[docId].root : data.catName;
     const update = { cards: newCards };
+    let allRelated = null;
     if (rootCat && categories.includes(rootCat)) {
-      const allRelated = getAllSubcategories(rootCat);
+      allRelated = getAllSubcategories(rootCat);
       const partialTree = {};
       allRelated.forEach(c => { if (categoryTree[c]) partialTree[c] = categoryTree[c].filter(ch => allRelated.includes(ch)); });
       update.categories = allRelated;
       update.categoryTree = partialTree;
+      if (rootCat !== data.catName) update.catName = rootCat;
     }
     await ref.update(JSON.parse(JSON.stringify(update)));
+    setSharedMeta(docId, rootCat, allRelated || data.categories || [], newCards.map(c => c.id));
   } catch (e) { console.warn('共有ドキュメントへの書き戻しに失敗:', e); }
 }
 // フォルダー（とその中身）に関係する編集可能な共有ドキュメントをすべて書き戻す
@@ -238,6 +289,7 @@ async function shareCategory(catName) {
     if (!ownedDocs.includes(docRef.id)) ownedDocs.push(docRef.id);
     markDocJoined(docRef.id);
     sharedDocPermissions[docRef.id] = { canEdit: true, isOwner: true };
+    setSharedMeta(docRef.id, catName, allTargets, subset.map(s => s.id));
     const ids = new Set(subset.map(s => s.id));
     db.forEach(q => { if (ids.has(q.id)) { q.sharedDocId = docRef.id; touchCard(q); } });
     saveData(); syncSubscriptions();
@@ -325,8 +377,8 @@ function renderSharedPage() {
         }
         
         fList.innerHTML += `<div style="display:flex; justify-content:space-between; align-items:center; background:var(--bg3); padding:8px; border-radius:6px; border:1px solid var(--border);">
-          <span id="shared_friend_name_${fUid}" style="font-size:0.8rem;">${escapeHtml(displayName)}</span>
-          <button class="btn btn-danger" style="padding:4px 10px; font-size:0.75rem;" onclick="removeFriendFromShared('${fUid}')">削除</button>
+          <span id="shared_friend_name_${escAttr(fUid)}" style="font-size:0.8rem;">${escapeHtml(displayName)}</span>
+          <button class="btn btn-danger" style="padding:4px 10px; font-size:0.75rem;" onclick="removeFriendFromShared(${jsArg(fUid)})">削除</button>
         </div>`;
       });
     }
@@ -367,8 +419,16 @@ async function addCardToShared() {
 }
 async function deleteCardFromShared(idx) {
   if (!confirm("クラウド上から削除しますか？")) return;
-  const newCards = [...currentSharedData.cards]; newCards.splice(idx, 1);
-  try { await firestore.collection("susuru_anki_shared").doc(currentSharedDocId).update({ cards: newCards }); } catch(e) {}
+  const newCards = [...currentSharedData.cards]; const removed = newCards.splice(idx, 1)[0];
+  try {
+    await firestore.collection("susuru_anki_shared").doc(currentSharedDocId).update({ cards: newCards });
+    // ★【0.03.02】手元のカードも削除の記録つきで消す（残っていると、次の同期で書き戻されていた）
+    if (removed && removed.id) {
+      tombstoneCards([removed.id]);
+      db = db.filter(q => q.id !== removed.id);
+      saveData(true);
+    }
+  } catch(e) {}
 }
 
 function importCurrentShared() {
@@ -394,16 +454,16 @@ function subscribeToSharedData(docId, data) {
   let count = 0;
   (data.cards || []).forEach(q => {
     if (!q.question || !q.answer) return;
-    deletedCards = deletedCards.filter(id => id !== q.id); // 以前に購読解除したカードも取り込み直せるように
     const existing = db.find(d => d.id === q.id);
     if (existing) { existing.sharedDocId = docId; touchCard(existing); }
     else {
       const c = { id: q.id, question: q.question, answer: q.answer, category: q.category, sharedDocId: docId, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 };
       ['note', 'questionImage', 'answerImage', 'choices', 'kind'].forEach(f => { if (q[f] !== undefined) c[f] = q[f]; });
-      touchCard(c);
+      reviveCard(c); // 以前に購読解除したカードも取り込み直せるように（削除の記録より新しくする）
       db.push(c); count++;
     }
   });
+  setSharedMeta(docId, data.catName, data.categories || [], (data.cards || []).map(c => c.id));
   return count;
 }
 
@@ -430,6 +490,7 @@ async function makePublicCategory(catName) {
     if (!ownedDocs.includes(docRef.id)) ownedDocs.push(docRef.id);
     markDocJoined(docRef.id);
     sharedDocPermissions[docRef.id] = { canEdit: true, isOwner: true };
+    setSharedMeta(docRef.id, catName, allTargets, subset.map(s => s.id));
     const ids = new Set(subset.map(s => s.id));
     db.forEach(q => { if (ids.has(q.id)) { q.sharedDocId = docRef.id; touchCard(q); } });
     saveData(); syncSubscriptions();
@@ -457,19 +518,23 @@ async function deletePublicCategory(docId, catName) {
 }
 
 async function unsubscribeSharedCategory(catName) {
-  if (!confirm("「" + catName + "」の購読を解除しますか？\n\n※このフォルダーと中の問題がすべて削除されます。\n（学習成績も消えます）")) return;
+  const _root = (getCategoryShareInfo(catName).root) || catName;
+  if (!confirm("「" + _root + "」の購読を解除しますか？\n\n※このカテゴリーのフォルダーと中の問題がすべて削除されます。\n（学習成績も消えます）")) return;
   // ★【0.03.02】削除する前に docId を特定する（以前は削除後に探していたため見つからず、購読が残って次の同期で復活していた）
   const info = getCategoryShareInfo(catName);
   const docId = info.docId || (db.find(q => getAllSubcategories(catName).includes(q.category) && q.sharedDocId) || {}).sharedDocId || null;
+  if (!docId) return alert('このフォルダーは購読中のカテゴリーではありません。');
   await leaveSharedCategory(docId, catName);
   alert("✅ 「" + catName + "」の購読を解除しました");
 }
 
 // 購読解除の共通処理：フォルダーと中身を削除記録つきで消し、購読リストからも外す
 async function leaveSharedCategory(docId, catName) {
-  const allTarget = getAllSubcategories(catName);
+  // ★【0.03.02】サブフォルダーから解除しても、購読しているカテゴリー全体（一番上のフォルダーから）を解除する
+  const root = (docId && sharedMeta[docId] && sharedMeta[docId].root && categories.includes(sharedMeta[docId].root)) ? sharedMeta[docId].root : catName;
+  const allTarget = getAllSubcategories(root);
   const removedIds = db.filter(q => allTarget.includes(q.category) || (docId && q.sharedDocId === docId)).map(q => q.id);
-  removedIds.forEach(id => { if (!deletedCards.includes(id)) deletedCards.push(id); });
+  tombstoneCards(removedIds);
   db = db.filter(q => !removedIds.includes(q.id));
   markCatsDeleted(allTarget);
   categories = categories.filter(c => !allTarget.includes(c));
@@ -532,15 +597,15 @@ function renderPublicCategories() {
     const subscribeBtn = isOwner
       ? ''
       : isSubscribed
-        ? `<button class="btn" style="margin-top:8px; width:100%; background:var(--danger); color:#fff; border-color:var(--danger);" onclick="unsubscribePublicCategory('${cat.id}', '${escapeHtml(cat.catName)}')">🚫 購読を解除</button>`
-        : `<button class="btn btn-success" style="margin-top:8px; width:100%;" onclick="importPublicCategory('${cat.id}', '${escapeHtml(cat.catName)}')">📥 購読してインポート</button>`;
+        ? `<button class="btn" style="margin-top:8px; width:100%; background:var(--danger); color:#fff; border-color:var(--danger);" onclick="unsubscribePublicCategory(${jsArg(cat.id)}, ${jsArg(cat.catName)})">🚫 購読を解除</button>`
+        : `<button class="btn btn-success" style="margin-top:8px; width:100%;" onclick="importPublicCategory(${jsArg(cat.id)}, ${jsArg(cat.catName)})">📥 購読してインポート</button>`;
     card.innerHTML = `
       <div class="q-card-text">${escapeHtml(cat.catName)}</div>
       <div style="font-size:0.85rem; color:var(--text2); margin-top:4px;">作成者: <span style="color:var(--text);">${escapeHtml(cat.ownerName || 'Unknown')}</span></div>
       <div style="font-size:0.8rem; color:var(--text3); margin-top:6px;">カード数: <span style="color:var(--primary); font-weight:bold;">${(cat.cards || []).length}問</span> 👥 利用者: <span style="color:var(--accent); font-weight:bold;">${(cat.subscriberUids || []).length}人</span></div>
-      <button class="btn btn-secondary" style="margin-top:10px; width:100%;" onclick="openPage('pgShared'); listenToSharedDoc('${cat.id}')">🌐 詳細・共同編集者の管理</button>
+      <button class="btn btn-secondary" style="margin-top:10px; width:100%;" onclick="openPage('pgShared'); listenToSharedDoc(${jsArg(cat.id)})">🌐 詳細・共同編集者の管理</button>
       ${subscribeBtn}
-      ${isOwner ? `<button class="btn btn-danger" style="margin-top:8px; width:100%;" onclick="deletePublicCategory('${cat.id}', '${escapeHtml(cat.catName)}')">🗑️ 削除</button>` : ''}`;
+      ${isOwner ? `<button class="btn btn-danger" style="margin-top:8px; width:100%;" onclick="deletePublicCategory(${jsArg(cat.id)}, ${jsArg(cat.catName)})">🗑️ 削除</button>` : ''}`;
     listDiv.appendChild(card);
   });
 }
@@ -578,7 +643,7 @@ async function loadMyPublicCategories() {
              カード: ${(cat.cards || []).length}問 👥 ${(cat.subscriberUids || []).length}人
           </div>
         </div>
-        <button class="btn btn-danger" style="width:auto; padding:6px 12px; font-size:0.8rem; margin-left:10px; flex-shrink:0;" onclick="deleteMyPublicCategory('${doc.id}', '${escapeHtml(cat.catName || '不明')}')">🗑️ 削除</button>`;
+        <button class="btn btn-danger" style="width:auto; padding:6px 12px; font-size:0.8rem; margin-left:10px; flex-shrink:0;" onclick="deleteMyPublicCategory(${jsArg(doc.id)}, ${jsArg(cat.catName || '不明')})">🗑️ 削除</button>`;
       listDiv.appendChild(row);
     });
   } catch(e) {

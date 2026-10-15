@@ -281,7 +281,8 @@ function loadQuizQuestion() {
     else if (aStructured) { qDisplay = stripParens(cur.question); qSpeech = qDisplay; }
     // 例文・テスト問題は、問題文（1行目の英文）だけを読み上げる
     if (cur.kind && /\n/.test(cur.question)) qSpeech = cur.question.split('\n')[0];
-    qEl.innerHTML = renderRichText(qDisplay, { kanbunRows: 12 });
+    // 構造化表示（formatStructuredAnswerHTML）は内部でエスケープ済み。それ以外は文字列をエスケープして表示する
+    qEl.innerHTML = qStructuredSelf ? qDisplay : renderRichText(qDisplay, { escape: true, kanbunRows: 12 });
     if (cur._senseLabel) {
       const senseDiv = document.createElement('div');
       senseDiv.style.cssText = 'font-size:0.8rem; color:var(--primary); font-weight:700; margin-top:8px;';
@@ -296,6 +297,7 @@ function loadQuizQuestion() {
     }
     hydrateRich(qEl, { chemScale: 1.6 });
   document.getElementById('quizFeedback').style.display = 'none';
+  flushPendingNote(); // 前の問題のメモを保存してから切り替える
   const noteEl = document.getElementById('txtQuickNote');
   noteEl.value = cur.note || ''; autoResizeNote(noteEl);
   currentNoteCardId = cur._sourceId || cur.id;
@@ -483,7 +485,7 @@ function setupDescAnswerArea(structured) {
       labelRow.style.cssText = 'display:flex; justify-content:space-between; align-items:baseline; margin-bottom:5px;';
       const label = document.createElement('div');
       label.style.cssText = 'font-size:0.78rem; color:var(--text2); font-weight:700;';
-      label.innerHTML = `🏷️ ${seg.label || ('解答 ' + (i + 1))}`;
+      label.innerText = `🏷️ ${seg.label || ('解答 ' + (i + 1))}`;
       const hintSpan = document.createElement('span');
       hintSpan.id = 'structHint_' + i;
       hintSpan.style.cssText = 'font-size:0.72rem; color:var(--warn); font-weight:700; display:none;';
@@ -696,7 +698,7 @@ function showSelfAnswer() {
   const saEl = document.getElementById('selfAnswerDisplay');
     const _cur = quizPool[quizIndex];
     if (currentStructuredAnswer) { saEl.innerHTML = `<div style="margin-bottom:4px;">A:</div>` + formatStructuredAnswerHTML(currentStructuredAnswer); }
-    else { saEl.innerHTML = `A: ${renderRichText(getPrimaryAnswer(_cur.answer))}`; }
+    else { saEl.innerHTML = `A: ${renderRichText(getPrimaryAnswer(_cur.answer), { escape: true })}`; }
     if (_cur.answerImage) {
       const aImg = document.createElement('img');
       aImg.src = _cur.answerImage; aImg.alt = '解答画像';
@@ -846,8 +848,8 @@ function evaluateRoundAnswer(isCorrect, head) {
   if (currentStructuredAnswer) {
     fbAnsEl.innerHTML = `<div style="font-weight:700; margin-bottom:6px;">正解:</div>` + formatStructuredAnswerHTML(currentStructuredAnswer);
   } else {
-    const senseLabelPrefix = cur._senseLabel ? `<span style="color:var(--primary); font-weight:700;">[${cur._senseLabel}]</span> ` : '';
-    fbAnsEl.innerHTML = `正解: ${senseLabelPrefix}${renderRichText(getPrimaryAnswer(cur.answer))}`;
+    const senseLabelPrefix = cur._senseLabel ? `<span style="color:var(--primary); font-weight:700;">[${escapeHtml(cur._senseLabel)}]</span> ` : '';
+    fbAnsEl.innerHTML = `正解: ${senseLabelPrefix}${renderRichText(getPrimaryAnswer(cur.answer), { escape: true })}`;
   }
   if (cur.answerImage) {
     const aImg = document.createElement('img');
@@ -891,8 +893,8 @@ function showComboAnim() {
 
 // ★【0.03.02】クイックメモは入力するたびに保存する（どのカードのメモかは出題時に記録したIDで決める）
 let _noteSaveTimer = null;
-function saveQuickNote(val) {
-  const id = currentNoteCardId || (quizPool[quizIndex] && (quizPool[quizIndex]._sourceId || quizPool[quizIndex].id));
+function saveQuickNote(val, cardId) {
+  const id = cardId || currentNoteCardId || (quizPool[quizIndex] && (quizPool[quizIndex]._sourceId || quizPool[quizIndex].id));
   const m = db.find(q => q.id === id);
   if (!m) return;
   const v = String(val || '').trim();
@@ -901,16 +903,25 @@ function saveQuickNote(val) {
   quizPool.forEach(q => { if (q.id === id || q._sourceId === id) { if (v) q.note = v; else delete q.note; } });
   touchCard(m); saveData();
 }
+let _pendingNote = null; // 入力途中で、まだ保存していないメモ { id, value }
 function onQuickNoteInput(el) {
   autoResizeNote(el);
   clearTimeout(_noteSaveTimer);
-  _noteSaveTimer = setTimeout(() => saveQuickNote(el.value), 600);
+  // どのカードのメモかは「入力した時点」で決める（保存前に次の問題へ進んでも、別のカードに書き込まないように）
+  _pendingNote = { id: currentNoteCardId, value: el.value };
+  _noteSaveTimer = setTimeout(flushPendingNote, 600);
+}
+function flushPendingNote() {
+  clearTimeout(_noteSaveTimer);
+  if (!_pendingNote) return;
+  const p = _pendingNote; _pendingNote = null;
+  saveQuickNote(p.value, p.id);
 }
 function onQuickNoteFocus() {
   const lbl = document.getElementById('lblNoteTyping'); if (lbl) lbl.style.display = 'inline';
 }
 function onQuickNoteBlur(el) {
-  clearTimeout(_noteSaveTimer); saveQuickNote(el.value);
+  flushPendingNote();
   const lbl = document.getElementById('lblNoteTyping'); if (lbl) lbl.style.display = 'none';
 }
 function autoResizeNote(el) {
@@ -928,4 +939,13 @@ async function recordDailyLog(isCorrect) {
     await lRef.set({ date:d, uid:currentUser.uid, name:currentUser.displayName, answered:firebase.firestore.FieldValue.increment(1), correct:firebase.firestore.FieldValue.increment(isCorrect?1:0) }, {merge:true});
     if(isCorrect) await sRef.set({ date:d, uid:currentUser.uid, name:currentUser.displayName, score:firebase.firestore.FieldValue.increment(1) }, {merge:true});
   } catch(e){}
+}
+
+// ★【0.03.02】文字タップモード：入力欄をタップすると最後の1文字を取り消す（以前は関数が無くエラーになっていた）
+function removeLastTap() {
+  if (quizPhase !== 'q' || currentTapInput.length === 0) return;
+  const removed = currentTapInput.pop();
+  const btn = document.getElementById(removed.id);
+  if (btn) btn.style.display = 'inline-flex';
+  renderTapInput();
 }

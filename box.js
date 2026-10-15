@@ -139,7 +139,7 @@ function renderBox() {
     const noteHTML = item.note ? `<div class="q-card-note" onclick="this.classList.toggle('expanded')" title="タップで全文表示">📝 ${escapeHtml(item.note)}</div>` : '';
     const kindBadge = item.kind === 'test' ? '<span class="badge badge-level" style="margin-right:4px;">テスト</span>' : item.kind === 'cloze' ? '<span class="badge badge-level" style="margin-right:4px;">例文</span>' : '';
     // ★【0.02.63】問題に画像が添付されていればサムネイル表示
-    const qImgHTML = item.questionImage ? `<img src="${item.questionImage}" alt="問題画像" style="max-width:100%; max-height:120px; border-radius:8px; margin-bottom:8px; display:block;">` : '';
+    const qImgHTML = item.questionImage ? `<img src="${escAttr(item.questionImage)}" alt="問題画像" style="max-width:100%; max-height:120px; border-radius:8px; margin-bottom:8px; display:block;">` : '';
     
     card.innerHTML = `
       <div class="q-card-text">${kindBadge}${renderRichText(item.question, { escape: true, kanbunRows: 10 })}</div>
@@ -162,7 +162,7 @@ function toggleCardAnswer(el) {
   el.setAttribute('data-shown', shown ? '0' : '1');
   if (shown) { el.innerHTML = 'A: <span style="background:var(--bg4); color:var(--text2); padding:2px 8px; border-radius:6px; border:1px solid var(--border); display:inline-block; font-size:0.75rem;">👆 タップして答えを表示</span>'; } 
   else {
-    const imgHTML = cached.image ? `<img src="${cached.image}" alt="解答画像" style="max-width:100%; max-height:150px; border-radius:8px; margin-top:6px; display:block;">` : '';
+    const imgHTML = cached.image ? `<img src="${escAttr(cached.image)}" alt="解答画像" style="max-width:100%; max-height:150px; border-radius:8px; margin-top:6px; display:block;">` : '';
     el.innerHTML = 'A: <span style="color:var(--text); font-weight:500;">' + renderRichText(cached.text, { escape: true, kanbunRows: 10 }) + '</span><span style="color:var(--text3); font-size:0.7rem; margin-left:8px;">👆 隠す</span>' + imgHTML;
     hydrateRich(el, { chemScale: 1.1 });
   }
@@ -184,7 +184,7 @@ function handleQuestionLongpress(itemRef) {
     { html: '🗑️ 削除', danger: true, action: async () => { 
         if(!confirm("完全に消去しますか？")) return; 
         const it = cur();
-        if (!deletedCards.includes(it.id)) deletedCards.push(it.id);
+        tombstoneCards([it.id]);
         db = db.filter(q => q.id !== it.id); 
         if (it.sharedDocId) await updateCardInSharedDoc(it.sharedDocId, it, 'delete');
         saveData(true); renderBox(); 

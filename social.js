@@ -67,7 +67,7 @@ async function loadAppFriends() {
       const fProfSnap = await firestore.collection('susuru_anki_profiles').doc(fUid).get();
       const fName = fProfSnap.exists ? fProfSnap.data().displayName : '未登録ユーザー';
       const div = document.createElement('div'); div.className = 'achieve-row';
-      div.innerHTML = `<div class="achieve-label">👤 ${escapeHtml(fName)}</div><button class="btn" style="width:auto; padding:6px 12px; font-size:0.8rem;" onclick="openChat('${fUid}', '${escapeHtml(fName)}')">💬</button>`;
+      div.innerHTML = `<div class="achieve-label">👤 ${escapeHtml(fName)}</div><button class="btn" style="width:auto; padding:6px 12px; font-size:0.8rem;" onclick="openChat(${jsArg(fUid)}, ${jsArg(fName)})">💬</button>`;
       listDiv.appendChild(div);
     }
   } catch (e) { listDiv.innerHTML = '<p style="color:var(--danger); font-size:0.8rem; text-align:center;">エラーが発生しました。</p>'; }
@@ -1080,7 +1080,7 @@ async function showMatchResult(data) {
     isFriendAlready = (myProf.exists && (myProf.data().friends || []).includes(oppUid));
   } catch(e) {}
 
-  const friendBtnHtml = (!isFriendAlready && oppUid) ? `<button class="btn btn-secondary" style="width:100%; max-width:180px; margin-top:8px;" onclick="sendFriendRequestFromMatch('${oppUid}', '${escapeHtml(oppName).replace(/'/g,"&#39;")}')">👤 フレンド申請</button>` : '';
+  const friendBtnHtml = (!isFriendAlready && oppUid) ? `<button class="btn btn-secondary" style="width:100%; max-width:180px; margin-top:8px;" onclick="sendFriendRequestFromMatch(${jsArg(oppUid)}, ${jsArg(oppName)})">👤 フレンド申請</button>` : '';
 
   gameView.innerHTML = `
     <div style="flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center; padding:16px;">
@@ -1141,7 +1141,7 @@ function renderMatchHistory() {
       </div>
       <div style="display:flex; flex-direction:column; align-items:flex-end; gap:6px;">
         <div style="font-size:0.85rem; font-weight:bold; color:${col};">${result}</div>
-        ${entry.oppUid ? `<button class="btn btn-secondary" style="font-size:0.75rem; padding:4px 10px; white-space:nowrap;" onclick="sendFriendRequestFromMatch('${entry.oppUid}', '${escapeHtml(entry.oppName || '').replace(/'/g,"\\'")}')">👤 フレンド申請</button>` : ''}
+        ${entry.oppUid ? `<button class="btn btn-secondary" style="font-size:0.75rem; padding:4px 10px; white-space:nowrap;" onclick="sendFriendRequestFromMatch(${jsArg(entry.oppUid)}, ${jsArg(entry.oppName || '')})">👤 フレンド申請</button>` : ''}
       </div>
     `;
     area.appendChild(div);
