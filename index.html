@@ -96,6 +96,26 @@ h2 { font-size: 1.4rem; font-weight: 700; margin-bottom: 20px; display: flex; al
 .menu-item:active { background: var(--bg4); }
 .menu-item.danger { color: var(--danger); }
 .menu-sep { height: 1px; background: var(--border); margin: 6px 8px; }
+/* ★【0.03.02】フォルダー編集パネル */
+.cat-editor { padding: 16px; }
+.cat-edit-head { margin-bottom: 6px; }
+.cat-edit-path { font-size: 0.72rem; color: var(--text3); word-break: break-all; }
+.cat-edit-title { font-size: 1.15rem; font-weight: 800; color: var(--text); word-break: break-all; margin: 2px 0 4px; }
+.cat-edit-meta { font-size: 0.75rem; color: var(--text2); line-height: 1.6; }
+.cat-chip { display: inline-block; font-size: 0.7rem; padding: 2px 8px; border-radius: 10px; margin-left: 4px; border: 1px solid var(--border); }
+.cat-chip.ro { color: var(--warn); border-color: rgba(245,166,35,0.5); }
+.cat-chip.own { color: var(--success); border-color: rgba(34,199,122,0.5); }
+.cat-chip.edit { color: var(--accent); border-color: rgba(124,63,255,0.5); }
+.cat-edit-sec { font-size: 0.72rem; font-weight: 700; color: var(--text3); margin: 12px 0 6px; letter-spacing: 0.05em; }
+.cat-act-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.cat-act { display: flex; align-items: center; gap: 8px; padding: 11px 10px; background: var(--bg3); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font-size: 0.82rem; font-weight: 600; text-align: left; cursor: pointer; font-family: inherit; line-height: 1.25; }
+.cat-act:active { background: var(--bg4); transform: scale(0.98); }
+.cat-act:disabled { opacity: 0.4; cursor: not-allowed; }
+.cat-act.danger { color: var(--danger); border-color: rgba(255,79,106,0.35); }
+.cat-act-ic { font-size: 1.05rem; flex-shrink: 0; }
+.cat-edit-panel { margin-top: 10px; padding: 12px; background: var(--bg3); border: 1px solid var(--border2); border-radius: 10px; }
+.cat-edit-panel .form-control { background: var(--bg2); }
+
 
 .list-header { margin-bottom: 15px; font-size: 0.85rem; color: var(--text2); display: flex; justify-content: space-between; align-items: center; }
 .q-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 10px; position: relative; transition: 0.2s; }

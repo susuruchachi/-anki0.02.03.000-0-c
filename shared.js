@@ -5,56 +5,140 @@ let currentSharedDocId = null, currentSharedData = null, unsubscribeShared = nul
 let sharedFriendsLoaded = false;
 let friendNameCache = {}; // { UID: "表示名" }
 
+// ================================================================
+// ★【0.03.02】共有・公開カテゴリーの権限判定を一か所にまとめる
+// ・ownedDocs（自分が作った）を最優先で「編集可」とみなす（起動直後で権限を取得する前でも編集できるように）
+// ・購読も所有もしていない docId（＝公開を停止・削除済み）は「共有ではない」として扱う
+// ================================================================
+function getSharedAccess(docId) {
+  if (!docId) return { shared: false, canEdit: true, isOwner: false, readOnly: false };
+  const perm = sharedDocPermissions[docId];
+  const isOwner = ownedDocs.includes(docId) || !!(perm && perm.isOwner);
+  const known = isOwner || subscribedDocs.includes(docId);
+  if (!known) return { shared: false, stale: true, canEdit: true, isOwner: false, readOnly: false };
+  const canEdit = isOwner || !!(perm && perm.canEdit);
+  return { shared: true, docId, canEdit, isOwner, readOnly: !canEdit };
+}
+// フォルダー（またはその中・上位のフォルダー）が属している共有ドキュメントを探す
+function getCategoryShareInfo(catName) {
+  const sub = new Set(getAllSubcategories(catName));
+  let card = db.find(q => sub.has(q.category) && q.sharedDocId && getSharedAccess(q.sharedDocId).shared);
+  if (!card) {
+    // 上位フォルダーをたどる（空のサブフォルダーでも判定できるように）
+    let cur = catName, guard = 0;
+    while (!card && guard++ < 100) {
+      let parent = null;
+      for (const p in categoryTree) { if ((categoryTree[p] || []).includes(cur)) { parent = p; break; } }
+      if (!parent) break;
+      card = db.find(q => q.category === parent && q.sharedDocId && getSharedAccess(q.sharedDocId).shared);
+      cur = parent;
+    }
+  }
+  if (!card) return { shared: false, canEdit: true, isOwner: false, readOnly: false, docId: null };
+  return getSharedAccess(card.sharedDocId);
+}
+
+// 共有ドキュメントの印を外して、手元の普通のカードに戻す（公開の停止・削除、ドキュメント消失時）
+function detachSharedDoc(docId) {
+  db.forEach(q => { if (q.sharedDocId === docId) { delete q.sharedDocId; touchCard(q); } });
+  subscribedDocs = subscribedDocs.filter(id => id !== docId);
+  ownedDocs = ownedDocs.filter(id => id !== docId);
+  delete sharedDocPermissions[docId];
+  markDocLeft(docId);
+}
+
+// 共有ドキュメントに保存するカードの形（成績は含めない）
+function toSharedCard(card) {
+  const o = { id: card.id, question: card.question, answer: card.answer, category: card.category, updatedAt: card.updatedAt || Date.now() };
+  ['note', 'questionImage', 'answerImage', 'choices', 'kind'].forEach(f => { if (card[f] !== undefined && card[f] !== null && card[f] !== '') o[f] = card[f]; });
+  return o;
+}
+const SHARED_CONTENT_FIELDS = ['question', 'answer', 'category', 'questionImage', 'answerImage', 'choices', 'kind'];
+function sharedCardDiffers(lq, cq) {
+  return SHARED_CONTENT_FIELDS.some(f => JSON.stringify(lq[f] === undefined ? null : lq[f]) !== JSON.stringify(cq[f] === undefined ? null : cq[f]));
+}
+
 // ★ 定期同期＆起動時同期ロジック
 async function syncSubscriptions() {
   if (!currentUser) return;
   if (!subscribedDocs || subscribedDocs.length === 0) return;
   
   let changed = false;
-  for (let docId of subscribedDocs) {
+  const needPush = [];
+  for (let docId of [...subscribedDocs]) {
     try {
       const snap = await firestore.collection("susuru_anki_shared").doc(docId).get();
-      if (!snap.exists) continue;
+      if (!snap.exists) {
+        // ★【0.03.02】公開が停止・削除されたドキュメント：手元のカードは普通のカードとして残す
+        detachSharedDoc(docId); changed = true; continue;
+      }
       const data = snap.data();
       const isOwner = (data.ownerId === currentUser.uid);
       const canEdit = isOwner || (data.friends && data.friends.includes(currentUser.uid));
       sharedDocPermissions[docId] = { canEdit, isOwner };
+      if (isOwner && !ownedDocs.includes(docId)) { ownedDocs.push(docId); changed = true; }
       
       const cloudCards = data.cards || [];
-      const cloudCardIds = cloudCards.map(c => c.id);
+      const cloudCardIds = new Set(cloudCards.map(c => c.id));
+      let localWins = false;
       
-      // 1. クラウドから削除されたカードをローカルからも消す（成績も消えます）
-      const initialLen = db.length;
-      db = db.filter(q => !(q.sharedDocId === docId && !cloudCardIds.includes(q.id)));
-      if (db.length !== initialLen) changed = true;
+      // 1. クラウドから削除されたカードをローカルからも消す（編集できる人は、手元の変更を優先して後で書き戻す）
+      if (!canEdit) {
+        const removed = db.filter(q => q.sharedDocId === docId && !cloudCardIds.has(q.id));
+        if (removed.length > 0) {
+          removed.forEach(q => { if (!deletedCards.includes(q.id)) deletedCards.push(q.id); });
+          db = db.filter(q => !(q.sharedDocId === docId && !cloudCardIds.has(q.id)));
+          changed = true;
+        }
+      } else if (db.some(q => q.sharedDocId === docId && !cloudCardIds.has(q.id))) {
+        localWins = true;
+      }
       
       // 2. クラウドの更新をローカルに反映・新規追加
       cloudCards.forEach(cq => {
+        if (!cq || !cq.id || !cq.question || !cq.answer) return;
+        if (deletedCards.includes(cq.id)) { if (canEdit) localWins = true; return; } // 自分で削除したカードは復活させない
         let lq = db.find(q => q.id === cq.id);
         if (lq) {
-          // ★【0.02.63】questionImage/answerImage も差分検知・同期対象に含める
-          if (lq.question !== cq.question || lq.answer !== cq.answer || lq.category !== cq.category || lq.questionImage !== cq.questionImage || lq.answerImage !== cq.answerImage) {
-            lq.question = cq.question; lq.answer = cq.answer; lq.category = cq.category;
-            if (cq.questionImage) lq.questionImage = cq.questionImage; else delete lq.questionImage;
-            if (cq.answerImage) lq.answerImage = cq.answerImage; else delete lq.answerImage;
-            changed = true;
+          if (sharedCardDiffers(lq, cq)) {
+            // 編集できる人：手元の方が新しければ手元を優先（作成者は同時刻なら手元を優先）
+            const lu = lq.updatedAt || 0, cu = cq.updatedAt || 0;
+            const preferLocal = canEdit && (lu > cu || (isOwner && lu === cu));
+            if (preferLocal) { localWins = true; }
+            else {
+              SHARED_CONTENT_FIELDS.forEach(f => { if (cq[f] !== undefined) lq[f] = cq[f]; else delete lq[f]; });
+              touchCard(lq); changed = true;
+            }
           }
-          if (lq.sharedDocId !== docId) { lq.sharedDocId = docId; changed = true; }
+          if (!lq.note && cq.note) { lq.note = cq.note; touchCard(lq); changed = true; }
+          if (lq.sharedDocId !== docId) { lq.sharedDocId = docId; touchCard(lq); changed = true; }
         } else {
           const newLocalCard = { id: cq.id, question: cq.question, answer: cq.answer, category: cq.category, sharedDocId: docId, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 };
-          if (cq.questionImage) newLocalCard.questionImage = cq.questionImage;
-          if (cq.answerImage) newLocalCard.answerImage = cq.answerImage;
+          ['note', 'questionImage', 'answerImage', 'choices', 'kind'].forEach(f => { if (cq[f] !== undefined) newLocalCard[f] = cq[f]; });
+          touchCard(newLocalCard);
           db.push(newLocalCard);
           changed = true;
         }
       });
       
-      // 3. カテゴリー構造の同期
-      (data.categories || []).forEach(c => { if(!categories.includes(c)) { categories.push(c); changed = true; } });
-      for (let p in (data.categoryTree || {})) {
-        if (!categoryTree[p]) categoryTree[p] = [];
-        (data.categoryTree[p] || []).forEach(c => { if (!categoryTree[p].includes(c)) { categoryTree[p].push(c); changed = true; } });
+      // 3. カテゴリー構造の同期（自分で削除したフォルダーは復活させない）
+      const isDead = c => deletedCats.includes(c);
+      (data.categories || []).forEach(c => { if (!isDead(c) && !categories.includes(c)) { categories.push(c); changed = true; } });
+      const tree = data.categoryTree || {};
+      for (let p in tree) {
+        if (isDead(p)) continue;
+        (tree[p] || []).forEach(c => {
+          if (isDead(c)) return;
+          const placed = Object.keys(categoryTree).some(k => (categoryTree[k] || []).includes(c));
+          if (placed && canEdit) return; // 編集できる人の手元の配置は動かさない
+          if (!placed || !(categoryTree[p] || []).includes(c)) {
+            for (const k in categoryTree) categoryTree[k] = (categoryTree[k] || []).filter(x => x !== c);
+            if (!categoryTree[p]) categoryTree[p] = [];
+            categoryTree[p].push(c); changed = true;
+          }
+        });
       }
+      if (localWins) needPush.push(docId);
     } catch (e) { console.warn("Sync error for doc:", docId, e); }
   }
   
@@ -63,6 +147,46 @@ async function syncSubscriptions() {
     if (document.getElementById('pgBox').classList.contains('active')) renderBox();
     if (document.getElementById('pgTree').classList.contains('active')) renderTree();
   }
+  for (const docId of needPush) await pushSharedDocFromLocal(docId);
+}
+
+// ★【0.03.02】手元の内容（カード・フォルダー構造）を共有ドキュメントへ書き戻す（作成者・共同編集者のみ）
+// フォルダー名の変更・統合・移動・削除のあとに呼ぶ。以前はこれが無く、次回起動時に元の状態へ戻ってしまっていた
+async function pushSharedDocFromLocal(docId) {
+  if (!currentUser || !docId) return;
+  if (!getSharedAccess(docId).canEdit) return;
+  try {
+    const ref = firestore.collection('susuru_anki_shared').doc(docId);
+    const snap = await ref.get();
+    if (!snap.exists) { detachSharedDoc(docId); saveData(); return; }
+    const data = snap.data();
+    const localCards = db.filter(q => q.sharedDocId === docId);
+    const localIds = new Set(localCards.map(q => q.id));
+    const delSet = new Set(deletedCards);
+    // 手元に無く、削除もしていないカード（他の共同編集者が追加したもの）は残す
+    const keep = (data.cards || []).filter(c => c && !localIds.has(c.id) && !delSet.has(c.id));
+    const newCards = [...localCards.map(toSharedCard), ...keep];
+    const rootCat = data.catName;
+    const update = { cards: newCards };
+    if (rootCat && categories.includes(rootCat)) {
+      const allRelated = getAllSubcategories(rootCat);
+      const partialTree = {};
+      allRelated.forEach(c => { if (categoryTree[c]) partialTree[c] = categoryTree[c].filter(ch => allRelated.includes(ch)); });
+      update.categories = allRelated;
+      update.categoryTree = partialTree;
+    }
+    await ref.update(JSON.parse(JSON.stringify(update)));
+  } catch (e) { console.warn('共有ドキュメントへの書き戻しに失敗:', e); }
+}
+// フォルダー（とその中身）に関係する編集可能な共有ドキュメントをすべて書き戻す
+function pushSharedDocsForCategories(catNames) {
+  const ids = new Set();
+  (catNames || []).forEach(c => {
+    const info = getCategoryShareInfo(c);
+    if (info.shared && info.canEdit) ids.add(info.docId);
+  });
+  db.forEach(q => { if (q.sharedDocId && (catNames || []).includes(q.category)) { const a = getSharedAccess(q.sharedDocId); if (a.shared && a.canEdit) ids.add(q.sharedDocId); } });
+  ids.forEach(id => pushSharedDocFromLocal(id));
 }
 
 // ★ ローカルの編集・追加・削除をクラウドに同期するヘルパー関数
@@ -72,38 +196,50 @@ async function updateCardInSharedDoc(docId, card, action) {
     const snap = await firestore.collection("susuru_anki_shared").doc(docId).get();
     if (!snap.exists) return;
     const data = snap.data();
-    let newCards = [...data.cards];
+    let newCards = [...(data.cards || [])];
     if (action === 'edit') {
        const idx = newCards.findIndex(c => c.id === card.id);
-       if (idx !== -1) {
-         newCards[idx].question = card.question; newCards[idx].answer = card.answer; newCards[idx].category = card.category;
-         // ★【0.02.63】画像は「値がある時だけキーを持たせる」形でFirestoreにundefinedが渡らないようにする
-         if (card.questionImage) newCards[idx].questionImage = card.questionImage; else delete newCards[idx].questionImage;
-         if (card.answerImage) newCards[idx].answerImage = card.answerImage; else delete newCards[idx].answerImage;
-       }
+       if (idx !== -1) newCards[idx] = Object.assign({}, newCards[idx], toSharedCard(card));
+       ['questionImage', 'answerImage', 'choices', 'kind'].forEach(f => { if (idx !== -1 && (card[f] === undefined || card[f] === null)) delete newCards[idx][f]; });
     } else if (action === 'delete') {
        newCards = newCards.filter(c => c.id !== card.id);
     } else if (action === 'add') {
-       const newCardData = { id: card.id, question: card.question, answer: card.answer, category: card.category, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 };
-       if (card.questionImage) newCardData.questionImage = card.questionImage;
-       if (card.answerImage) newCardData.answerImage = card.answerImage;
-       newCards.push(newCardData);
+       if (!newCards.some(c => c.id === card.id)) newCards.push(toSharedCard(card));
     }
-    await firestore.collection("susuru_anki_shared").doc(docId).update({ cards: newCards });
+    await firestore.collection("susuru_anki_shared").doc(docId).update({ cards: JSON.parse(JSON.stringify(newCards)) });
   } catch(e) { console.error("Cloud update failed", e); }
+}
+// ★【0.03.02】まとめて追加（1枚ずつ同時に書き込むと、互いに上書きしてカードが消えることがあったため）
+async function addCardsToSharedDoc(docId, cards) {
+  if (!currentUser || !docId || !cards || cards.length === 0) return;
+  try {
+    const ref = firestore.collection("susuru_anki_shared").doc(docId);
+    const snap = await ref.get();
+    if (!snap.exists) return;
+    const existing = snap.data().cards || [];
+    const ids = new Set(existing.map(c => c.id));
+    const added = cards.filter(c => !ids.has(c.id)).map(toSharedCard);
+    await ref.update({ cards: JSON.parse(JSON.stringify([...existing, ...added])) });
+  } catch (e) { console.error("Cloud bulk add failed", e); }
 }
 
 async function shareCategory(catName) {
   if (!currentUser) return alert("管理画面からログインしてください。");
+  const already = getCategoryShareInfo(catName);
+  if (already.shared) return alert("このフォルダーは既に共有・公開カテゴリーに含まれています。");
   const allTargets = getAllSubcategories(catName); const subset = db.filter(q => allTargets.includes(q.category));
   let partialTree = {}; allTargets.forEach(t => { if(categoryTree[t]) partialTree[t] = categoryTree[t]; });
   try {
-    const docRef = await firestore.collection("susuru_anki_shared").add({ catName: catName, cards: subset, categories: allTargets, categoryTree: partialTree, ownerId: currentUser.uid, ownerName: currentUser.displayName || currentUser.email || '不明', friends: [], createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+    const docRef = await firestore.collection("susuru_anki_shared").add(JSON.parse(JSON.stringify({ catName: catName, cards: subset.map(toSharedCard), categories: allTargets, categoryTree: partialTree, ownerId: currentUser.uid, ownerName: currentUser.displayName || currentUser.email || '不明', friends: [] })));
+    await docRef.update({ createdAt: firebase.firestore.FieldValue.serverTimestamp() }).catch(() => {});
     
     // 自分が作ったものも同期対象にする
     if (!subscribedDocs.includes(docRef.id)) subscribedDocs.push(docRef.id);
     if (!ownedDocs.includes(docRef.id)) ownedDocs.push(docRef.id);
-    db.forEach(q => { if (subset.find(s => s.id === q.id)) q.sharedDocId = docRef.id; });
+    markDocJoined(docRef.id);
+    sharedDocPermissions[docRef.id] = { canEdit: true, isOwner: true };
+    const ids = new Set(subset.map(s => s.id));
+    db.forEach(q => { if (ids.has(q.id)) { q.sharedDocId = docRef.id; touchCard(q); } });
     saveData(); syncSubscriptions();
     
     const shareUrl = window.location.origin + window.location.pathname + "?share_id=" + docRef.id; await navigator.clipboard.writeText(shareUrl); alert(`✅ URLを発行・コピーしました！\nURL: ${shareUrl}\n\n（※今後、あなたがこのカテゴリー内の問題を編集・追加すると、全員に自動同期されます）`);
@@ -239,23 +375,38 @@ function importCurrentShared() {
   const data = currentSharedData; if (!data) return;
   if (!confirm(`購読しますか？\n（今後、作成者が問題を編集・追加すると自動で同期されます）`)) return;
   
-  if (!subscribedDocs.includes(currentSharedDocId)) subscribedDocs.push(currentSharedDocId);
-  (data.categories || []).forEach(c => { if(!categories.includes(c)) categories.push(c); });
-  for (let p in (data.categoryTree || {})) { if (!categoryTree[p]) categoryTree[p] = []; (data.categoryTree[p] || []).forEach(c => { if (!categoryTree[p].includes(c)) categoryTree[p].push(c); }); }
-  
-  let count = 0;
-  (data.cards || []).forEach(q => {
-    if (!q.question || !q.answer) return;
-    let existing = db.find(d => d.id === q.id);
-    if (existing) {
-      existing.sharedDocId = currentSharedDocId;
-    } else {
-      db.push({ id: q.id, question: q.question, answer: q.answer, category: q.category, sharedDocId: currentSharedDocId, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 }); count++;
-    }
-  });
+  const count = subscribeToSharedData(currentSharedDocId, data);
   autoMerge(); alert(`✅ 取り込みました！\n新規追加: ${count}件`); exitSharedMode();
   syncSubscriptions();
 }
+// ★【0.03.02】共有・公開カテゴリーを購読して手元に取り込む（購読を解除した後にもう一度購読した場合も含む）
+function subscribeToSharedData(docId, data) {
+  if (!subscribedDocs.includes(docId)) subscribedDocs.push(docId);
+  markDocJoined(docId);
+  (data.categories || []).forEach(c => { if (!categories.includes(c) || deletedCats.includes(c)) { markCatCreated(c); if (!categories.includes(c)) categories.push(c); } });
+  for (let p in (data.categoryTree || {})) {
+    (data.categoryTree[p] || []).forEach(c => {
+      for (const k in categoryTree) categoryTree[k] = (categoryTree[k] || []).filter(x => x !== c);
+      if (!categoryTree[p]) categoryTree[p] = [];
+      categoryTree[p].push(c);
+    });
+  }
+  let count = 0;
+  (data.cards || []).forEach(q => {
+    if (!q.question || !q.answer) return;
+    deletedCards = deletedCards.filter(id => id !== q.id); // 以前に購読解除したカードも取り込み直せるように
+    const existing = db.find(d => d.id === q.id);
+    if (existing) { existing.sharedDocId = docId; touchCard(existing); }
+    else {
+      const c = { id: q.id, question: q.question, answer: q.answer, category: q.category, sharedDocId: docId, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 };
+      ['note', 'questionImage', 'answerImage', 'choices', 'kind'].forEach(f => { if (q[f] !== undefined) c[f] = q[f]; });
+      touchCard(c);
+      db.push(c); count++;
+    }
+  });
+  return count;
+}
+
 function exitSharedMode() {
   if (unsubscribeShared) unsubscribeShared(); currentSharedDocId = null; currentSharedData = null;
   sharedFriendsLoaded = false;
@@ -264,16 +415,23 @@ function exitSharedMode() {
 
 async function makePublicCategory(catName) {
   if (!currentUser) return alert("ログインしてください");
+  const already = getCategoryShareInfo(catName);
+  if (already.shared) return alert("このフォルダーは既に共有・公開カテゴリーに含まれています。");
+  if (!confirm(`「${catName}」を公開カテゴリーにしますか？\n\n・誰でも検索して購読できるようになります\n・問題・答え・クイックメモが公開されます（成績は公開されません）\n・市販の単語帳などを書き写したものは公開しないでください`)) return;
   const allTargets = getAllSubcategories(catName); const subset = db.filter(q => allTargets.includes(q.category)); let partialTree = {}; allTargets.forEach(t => { if(categoryTree[t]) partialTree[t] = categoryTree[t]; });
   
   try {
-    const docRef = await firestore.collection("susuru_anki_shared").add({
-      catName: catName, cards: subset, categories: allTargets, categoryTree: partialTree, ownerId: currentUser.uid, ownerName: currentUser.displayName || currentUser.email || '不明', isPublic: true, friends: [], subscriberUids: [currentUser.uid], createdAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
+    const docRef = await firestore.collection("susuru_anki_shared").add(JSON.parse(JSON.stringify({
+      catName: catName, cards: subset.map(toSharedCard), categories: allTargets, categoryTree: partialTree, ownerId: currentUser.uid, ownerName: currentUser.displayName || currentUser.email || '不明', isPublic: true, friends: [], subscriberUids: [currentUser.uid]
+    })));
+    await docRef.update({ createdAt: firebase.firestore.FieldValue.serverTimestamp() }).catch(() => {});
     
     if (!subscribedDocs.includes(docRef.id)) subscribedDocs.push(docRef.id);
     if (!ownedDocs.includes(docRef.id)) ownedDocs.push(docRef.id);
-    db.forEach(q => { if (subset.find(s => s.id === q.id)) q.sharedDocId = docRef.id; });
+    markDocJoined(docRef.id);
+    sharedDocPermissions[docRef.id] = { canEdit: true, isOwner: true };
+    const ids = new Set(subset.map(s => s.id));
+    db.forEach(q => { if (ids.has(q.id)) { q.sharedDocId = docRef.id; touchCard(q); } });
     saveData(); syncSubscriptions();
     
     alert(`✅ 「${catName}」を公開カテゴリーに設定しました！\n（※今後、あなたがこのカテゴリーを編集すると全員に同期されます）`);
@@ -282,16 +440,16 @@ async function makePublicCategory(catName) {
 
 async function deletePublicCategory(docId, catName) {
   if (!currentUser) return alert("ログインしてください");
-  if (!confirm(`「${escapeHtml(catName)}」の公開を停止してFirebaseからデータを完全削除しますか？\n\n※手元のフォルダーや問題データは消えずにそのまま残ります。\n※購読者のデバイスからは次の同期時に削除されます。`)) return;
+  if (!confirm(`「${catName}」の公開を停止してFirebaseからデータを完全削除しますか？\n\n※手元のフォルダーや問題データは消えずにそのまま残り、普通のフォルダーとして編集できるようになります。\n※購読していた人の手元には、同期が止まったフォルダーとして残ります。`)) return;
   try {
     const docSnap = await firestore.collection("susuru_anki_shared").doc(docId).get();
     if (!docSnap.exists) return alert("カテゴリーが見つかりません");
     const data = docSnap.data(); if (data.ownerId !== currentUser.uid) return alert("削除権限がありません");
     await firestore.collection("susuru_anki_shared").doc(docId).delete();
-    subscribedDocs = subscribedDocs.filter(id => id !== docId);
-    ownedDocs = ownedDocs.filter(id => id !== docId);
-    delete sharedDocPermissions[docId];
-    saveData();
+    // ★【0.03.02】カードに残った共有の印も外す（残っていると「公開カテゴリーだから編集できない」状態のままになっていた）
+    detachSharedDoc(docId);
+    saveData(true);
+    if (document.getElementById('pgTree').classList.contains('active')) renderTree();
     alert("✅ 公開を停止しFirebaseから削除しました（手元のデータは安全です）");
     loadPublicCategories();
     loadMyPublicCategories();
@@ -300,35 +458,41 @@ async function deletePublicCategory(docId, catName) {
 
 async function unsubscribeSharedCategory(catName) {
   if (!confirm("「" + catName + "」の購読を解除しますか？\n\n※このフォルダーと中の問題がすべて削除されます。\n（学習成績も消えます）")) return;
+  // ★【0.03.02】削除する前に docId を特定する（以前は削除後に探していたため見つからず、購読が残って次の同期で復活していた）
+  const info = getCategoryShareInfo(catName);
+  const docId = info.docId || (db.find(q => getAllSubcategories(catName).includes(q.category) && q.sharedDocId) || {}).sharedDocId || null;
+  await leaveSharedCategory(docId, catName);
+  alert("✅ 「" + catName + "」の購読を解除しました");
+}
 
-  // ★ 修正箇所：問題が含まれていない空のサブフォルダーも確実に消すため、getAllSubcategoriesを使用
+// 購読解除の共通処理：フォルダーと中身を削除記録つきで消し、購読リストからも外す
+async function leaveSharedCategory(docId, catName) {
   const allTarget = getAllSubcategories(catName);
-
-  db = db.filter(q => !allTarget.includes(q.category));
+  const removedIds = db.filter(q => allTarget.includes(q.category) || (docId && q.sharedDocId === docId)).map(q => q.id);
+  removedIds.forEach(id => { if (!deletedCards.includes(id)) deletedCards.push(id); });
+  db = db.filter(q => !removedIds.includes(q.id));
+  markCatsDeleted(allTarget);
   categories = categories.filter(c => !allTarget.includes(c));
   for (let p in categoryTree) {
     if (allTarget.includes(p)) delete categoryTree[p];
     else if (categoryTree[p]) categoryTree[p] = categoryTree[p].filter(c => !allTarget.includes(c));
   }
-
-  // もし docId が特定できる場合は共有情報からも消す
-  const sharedCard = db.find(q => q.category === catName && q.sharedDocId);
-  if (sharedCard) {
-    const docId = sharedCard.sharedDocId;
+  if (docId) {
     subscribedDocs = subscribedDocs.filter(id => id !== docId);
     delete sharedDocPermissions[docId];
+    markDocLeft(docId);
     if (currentUser) {
       try {
         await firestore.collection('susuru_anki_shared').doc(docId).update({
           subscriberUids: firebase.firestore.FieldValue.arrayRemove(currentUser.uid)
         });
+        const cached = publicCategoriesCache.find(c => c.id === docId);
+        if (cached && cached.subscriberUids) cached.subscriberUids = cached.subscriberUids.filter(uid => uid !== currentUser.uid);
       } catch(e) { /* 無視 */ }
     }
   }
-
   saveData(true);
-  renderTree();
-  alert("✅ 「" + catName + "」の購読を解除しました");
+  if (document.getElementById('pgTree').classList.contains('active')) renderTree();
 }
 
 let publicCategoriesCache = []; let unsubscribePublicCategories = null;
@@ -383,36 +547,7 @@ function renderPublicCategories() {
 
 async function unsubscribePublicCategory(docId, catName) {
   if (!confirm(`「${catName}」の購読を解除しますか？\n\n※このカテゴリーの問題がすべてローカルから削除されます。`)) return;
-
-  // ★ 修正箇所：問題が含まれていない空のサブフォルダーも確実に消すため、getAllSubcategoriesを使用
-  const allTarget = getAllSubcategories(catName);
-
-  db = db.filter(q => !allTarget.includes(q.category));
-  categories = categories.filter(c => !allTarget.includes(c));
-  for (let p in categoryTree) {
-    if (allTarget.includes(p)) delete categoryTree[p];
-    else if (categoryTree[p]) categoryTree[p] = categoryTree[p].filter(c => !allTarget.includes(c));
-  }
-
-  subscribedDocs = subscribedDocs.filter(id => id !== docId);
-  delete sharedDocPermissions[docId];
-
-  // FirestoreのsubscriberUidsから自分を除去
-  if (currentUser) {
-    try {
-      await firestore.collection('susuru_anki_shared').doc(docId).update({
-        subscriberUids: firebase.firestore.FieldValue.arrayRemove(currentUser.uid)
-      });
-      // ローカルキャッシュも更新して利用者数を即時反映
-      const cached = publicCategoriesCache.find(c => c.id === docId);
-      if (cached && cached.subscriberUids) {
-        cached.subscriberUids = cached.subscriberUids.filter(uid => uid !== currentUser.uid);
-      }
-    } catch(e) { /* 無視 */ }
-  }
-
-  saveData(true);
-  renderTree();
+  await leaveSharedCategory(docId, catName);
   renderPublicCategories(); // ボタンを即時更新
   alert(`✅ 「${catName}」の購読を解除しました`);
 }
@@ -456,10 +591,8 @@ async function deleteMyPublicCategory(docId, catName) {
   if (!confirm(`「${catName}」をFirebaseから完全に削除しますか？\n\n※手元のフォルダーや問題データは消えずに残ります。`)) return;
   try {
     await firestore.collection('susuru_anki_shared').doc(docId).delete();
-    subscribedDocs = subscribedDocs.filter(id => id !== docId);
-    ownedDocs = ownedDocs.filter(id => id !== docId);
-    delete sharedDocPermissions[docId];
-    saveData();
+    detachSharedDoc(docId);
+    saveData(true);
     await loadMyPublicCategories();
     loadPublicCategories();
     alert(`✅ 「${catName}」をFirebaseから削除しました`);
@@ -472,21 +605,7 @@ async function importPublicCategory(docId, catName) {
   const cat = publicCategoriesCache.find(c => c.id === docId); if (!cat) return alert('カテゴリーが見つかりません');
   if (!confirm(`「${escapeHtml(catName)}」を購読しますか？\n（今後、作成者が問題を編集・追加すると自動で同期されます）`)) return;
   try {
-    if (!subscribedDocs.includes(docId)) subscribedDocs.push(docId);
-    (cat.categories || []).forEach(c => { if (!categories.includes(c)) categories.push(c); });
-    for (let p in (cat.categoryTree || {})) { if (!categoryTree[p]) categoryTree[p] = []; (cat.categoryTree[p] || []).forEach(c => { if (!categoryTree[p].includes(c)) categoryTree[p].push(c); }); }
-    let count = 0;
-    (cat.cards || []).forEach(q => {
-      if (!q.question || !q.answer) return;
-      let existing = db.find(d => d.id === q.id);
-      if (existing) { existing.sharedDocId = docId; } 
-      else {
-        const newLocalCard = { id: q.id, question: q.question, answer: q.answer, category: q.category, sharedDocId: docId, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 };
-        if (q.questionImage) newLocalCard.questionImage = q.questionImage;
-        if (q.answerImage) newLocalCard.answerImage = q.answerImage;
-        db.push(newLocalCard); count++;
-      }
-    });
+    const count = subscribeToSharedData(docId, cat);
     autoMerge(); alert(`✅ 購読完了！\n新規追加: ${count}件`); openPage('pgBox');
     syncSubscriptions();
     // 利用者数を記録（自分のUIDをsubscriberUidsに追記）
@@ -510,79 +629,14 @@ async function importPublicCategory(docId, catName) {
 // 指定カテゴリーを含むsharedDocId（オーナー or 共同編集者）を探す
 function findEditableSharedDocForCat(catName) {
   if (!currentUser) return null;
-  const card = db.find(q => q.category === catName && q.sharedDocId);
-  if (!card) return null;
-  const docId = card.sharedDocId;
-  const perm = sharedDocPermissions[docId];
-  if (!perm || !perm.canEdit) return null;
-  return docId;
+  const info = getCategoryShareInfo(catName);
+  return info.shared && info.canEdit ? info.docId : null;
 }
 
-// sharedDocのcategories/categoryTreeを更新する（カードは変えない）
-async function syncSharedDocStructure(docId) {
-  if (!docId || !currentUser) return;
-  try {
-    const snap = await firestore.collection('susuru_anki_shared').doc(docId).get();
-    if (!snap.exists) return;
-    const data = snap.data();
-    // このdocIdに関係するカテゴリーをローカルから収集
-    const rootCat = data.catName;
-    const allRelated = getAllSubcategories(rootCat);
-    // ローカルのcategoryTreeからallRelatedのみ抽出
-    const partialTree = {};
-    allRelated.forEach(c => { if (categoryTree[c]) partialTree[c] = categoryTree[c].filter(child => allRelated.includes(child)); });
-    const existingCats = allRelated.filter(c => categories.includes(c));
-    await firestore.collection('susuru_anki_shared').doc(docId).update({
-      categories: existingCats,
-      categoryTree: partialTree
-    });
-  } catch(e) { console.warn('SharedDoc構造同期失敗:', e); }
-}
-
-// カテゴリー新規追加後にsharedDocへ同期（親カテゴリーがshared対象の場合）
+// フォルダー構造の変更を共有ドキュメントへ反映する（旧API名。中身は pushSharedDocFromLocal）
+async function syncSharedDocStructure(docId) { await pushSharedDocFromLocal(docId); }
 async function syncNewCategoryToShared(parentCatName, newCatName) {
   if (!parentCatName) return;
   const docId = findEditableSharedDocForCat(parentCatName);
-  if (!docId) return;
-  try {
-    await firestore.collection('susuru_anki_shared').doc(docId).update({
-      categories: firebase.firestore.FieldValue.arrayUnion(newCatName),
-      [`categoryTree.${parentCatName}`]: firebase.firestore.FieldValue.arrayUnion(newCatName)
-    });
-  } catch(e) { console.warn('SharedDoc新カテゴリー同期失敗:', e); }
-}
-
-// カテゴリー削除時にsharedDocからのみ削除（ローカルは呼び出し元で管理）
-async function removeCategoryFromShared(catName) {
-  // 親カテゴリーを探す
-  let parentDocId = null;
-  for (const parent in categoryTree) {
-    if ((categoryTree[parent] || []).includes(catName)) {
-      const docId = findEditableSharedDocForCat(parent);
-      if (docId) { parentDocId = docId; break; }
-    }
-  }
-  // 直接ルートカテゴリーの場合
-  if (!parentDocId) {
-    const card = db.find(q => q.category === catName && q.sharedDocId);
-    if (card) {
-      const perm = sharedDocPermissions[card.sharedDocId];
-      if (perm && perm.canEdit) parentDocId = card.sharedDocId;
-    }
-  }
-  if (!parentDocId) return;
-  try {
-    const allSub = getAllSubcategories(catName);
-    // categoriesからallSubを削除
-    const snap = await firestore.collection('susuru_anki_shared').doc(parentDocId).get();
-    if (!snap.exists) return;
-    const data = snap.data();
-    const newCats = (data.categories || []).filter(c => !allSub.includes(c));
-    const newTree = Object.assign({}, data.categoryTree || {});
-    allSub.forEach(c => { delete newTree[c]; });
-    // 親のchildrenからも削除
-    for (const p in newTree) { newTree[p] = (newTree[p] || []).filter(c => !allSub.includes(c)); }
-    // カードはsharedDocから削除しない（ローカルのカードはローカルのまま）
-    await firestore.collection('susuru_anki_shared').doc(parentDocId).update({ categories: newCats, categoryTree: newTree });
-  } catch(e) { console.warn('SharedDocカテゴリー削除失敗:', e); }
+  if (docId) await pushSharedDocFromLocal(docId);
 }
