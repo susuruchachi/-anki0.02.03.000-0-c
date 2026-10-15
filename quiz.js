@@ -113,7 +113,7 @@ function buildQuizScopeDropdown() {
     const sel = container.querySelectorAll('select')[depth];
     if (!sel) return;
     sel.value = val;
-    const children = categoryTree[val] || [];
+    const children = getChildCategories(val);
     if (children.length > 0) createScopeSelect(depth + 1, children);
   });
 }
@@ -128,7 +128,7 @@ function createScopeSelect(depth, categoriesToShow) {
     const selects = Array.from(container.querySelectorAll('select')); selects.forEach((sel, idx) => { if (idx > depth) sel.remove(); });
     if (val === "all") { selectedScopePath = ["all"]; saveScopePath(); return; }
     selectedScopePath[depth] = val; selectedScopePath = selectedScopePath.slice(0, depth + 1); saveScopePath();
-    const children = categoryTree[val] || []; if (children.length > 0) createScopeSelect(depth + 1, children);
+    const children = getChildCategories(val); if (children.length > 0) createScopeSelect(depth + 1, children);
   };
   document.getElementById('scopeSelectors').appendChild(select);
 }
@@ -150,6 +150,55 @@ function quitQuiz() {
   openPage('pgHome');
 }
 
+// ================================================================
+// ★【0.03.03】問題番号順の出題・詳細設定の保存
+// ================================================================
+let currentQuizOrderScope = null;
+// フォルダーの並び（番号順のツリー）→ カードの番号 の順に並べる
+function sortCardsByNumber(arr) {
+  const catIdx = getCategoryOrderIndex();
+  return arr.sort((a, b) =>
+    ((catIdx[a.category] ?? 1e9) - (catIdx[b.category] ?? 1e9)) ||
+    ((a.no ?? 1e9) - (b.no ?? 1e9)) ||
+    naturalCompare(a.question, b.question));
+}
+function quizOrderKey(scope) { return 'susuru_anki_order_pos_' + (scope || 'all'); }
+function loadQuizOrderPosition(scope) { try { return localStorage.getItem(quizOrderKey(scope)); } catch (e) { return null; } }
+// 番号順（続きから）で解いた最後のカードを覚えておく
+function recordQuizOrderProgress(cur) {
+  if (!currentQuizOrderScope || !cur || window.currentOnlineMatch) return;
+  try { localStorage.setItem(quizOrderKey(currentQuizOrderScope), cur._sourceId || cur.id); } catch (e) {}
+}
+
+const QUIZ_PREF_KEY = 'susuru_anki_quiz_prefs';
+const QUIZ_PREF_IDS = ['selQuizMode', 'selQuizSpeed', 'selQuizOrder', 'numQCount', 'numTimeLimit', 'numAutoNext', 'numGradThreshold', 'chkTTS', 'chkTimeAttack', 'chkIncludeGrad', 'chkSwapQA'];
+function saveQuizPrefs() {
+  const o = {};
+  QUIZ_PREF_IDS.forEach(id => { const el = document.getElementById(id); if (el) o[id] = el.type === 'checkbox' ? el.checked : el.value; });
+  try { localStorage.setItem(QUIZ_PREF_KEY, JSON.stringify(o)); } catch (e) {}
+  // 卒業認定正解数は採点にも使うので別に保存する
+  const g = parseInt((document.getElementById('numGradThreshold') || {}).value, 10);
+  try { if (Number.isFinite(g) && g >= 1 && g <= 30) localStorage.setItem('susuru_anki_grad_threshold', String(g)); } catch (e) {}
+  if (typeof updateHomeSummary === 'function') updateHomeSummary();
+}
+function loadQuizPrefs() {
+  let o = {};
+  try { o = JSON.parse(localStorage.getItem(QUIZ_PREF_KEY) || '{}') || {}; } catch (e) {}
+  QUIZ_PREF_IDS.forEach(id => {
+    const el = document.getElementById(id); if (!el) return;
+    if (o[id] !== undefined) { if (el.type === 'checkbox') el.checked = !!o[id]; else el.value = o[id]; }
+    if (!el.dataset.prefBound) { el.addEventListener('change', saveQuizPrefs); el.dataset.prefBound = '1'; }
+  });
+  const g = document.getElementById('numGradThreshold'); if (g && !g.value) g.value = getGradThreshold();
+}
+// 数値の設定を読む（空欄なら null）
+function getQuizPrefNumber(id) {
+  const el = document.getElementById(id);
+  if (!el || String(el.value).trim() === '') return null;
+  const v = Number(el.value);
+  return Number.isFinite(v) && v >= 0 ? v : null;
+}
+
 // ★【0.03.02】問題と解答の入れ替え。例文・テスト（選択肢つき）のカードは入れ替えない
 function swapQuizEntry(q) {
   if (q.kind || (Array.isArray(q.choices) && q.choices.length)) return q;
@@ -158,7 +207,7 @@ function swapQuizEntry(q) {
 
 function normalizeAnswer(str) {
   if(!str) return '';
-  let s = String(str).replace(/[Ａ-Ｚａ-ｚ０-９]/g, c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0)).toLowerCase().trim();
+  let s = foldKana(String(str).replace(/[Ａ-Ｚａ-ｚ０-９]/g, c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0)).toLowerCase().trim());
   s = s.replace(/擦/g, 'こす');
   s = s.replace(/[、，＼＼ \u3000]+/g, ',');
   return s.split(',').map(x=>x.trim()).filter(x=>x!=='').sort().join(',');
@@ -200,8 +249,8 @@ async function startQuiz(modeType = 'normal') {
 
   let subset = [...db];
   if (modeType === 'tokkun') subset = subset.filter(q => q.level <= 0 || q.level === -1);
-  else if (modeType === 'review') subset = subset.filter(q => q.level >= 5 && (q.level5Correct || 0) >= 5);
-  else if (!includeGrad) subset = subset.filter(q => !(q.level >= 5 && (q.level5Correct || 0) >= 5));
+  else if (modeType === 'review') subset = subset.filter(q => isGraduated(q));
+  else if (!includeGrad) subset = subset.filter(q => !(isGraduated(q)));
 
   if(scope.startsWith('cat:')) {
     const cName = scope.replace('cat:', '');
@@ -244,16 +293,32 @@ async function startQuiz(modeType = 'normal') {
 
   // 以下通常のソロプレイ処理
   if(subset.length === 0) return alert("⚠️ 条件に合致する問題が見つかりませんでした。");
-  const prioritize = (q) => {
-    if (q.level === 0 && (q.correct > 0 || q.incorrect > 0)) return 1;
-    if (q.level === -1) return 2;
-    if (q.correct === 0 && q.incorrect === 0) return 3;
-    return 4;
-  };
-
-  for (let i = subset.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [subset[i], subset[j]] = [subset[j], subset[i]]; }
-  subset.sort((a, b) => prioritize(a) - prioritize(b));
-  quizPool = subset.slice(0, limitCount); quizIndex = 0;
+  const order = modeType === 'review' ? 'srs' : (document.getElementById('selQuizOrder') ? document.getElementById('selQuizOrder').value : 'srs');
+  if (order === 'number' || order === 'continue') {
+    // ★【0.03.03】問題番号順に出題（フォルダーの番号順→カードの番号順）
+    sortCardsByNumber(subset);
+    let start = 0;
+    if (order === 'continue') {
+      const lastId = loadQuizOrderPosition(scope);
+      const idx = lastId ? subset.findIndex(q => q.id === lastId) : -1;
+      start = idx >= 0 ? (idx + 1) % subset.length : 0;
+    }
+    quizPool = [...subset.slice(start), ...subset.slice(0, start)].slice(0, limitCount);
+    currentQuizOrderScope = scope;
+  } else {
+    // ★【0.03.03】優先度：しっかり(Lv-1) → 苦手(Lv0で実績あり) → 未着手 → その他（使い方ガイドの説明どおりに）
+    const prioritize = (q) => {
+      if (q.level === -1) return 1;
+      if (q.level === 0 && (q.correct > 0 || q.incorrect > 0)) return 2;
+      if (q.correct === 0 && q.incorrect === 0) return 3;
+      return 4;
+    };
+    for (let i = subset.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [subset[i], subset[j]] = [subset[j], subset[i]]; }
+    subset.sort((a, b) => prioritize(a) - prioritize(b));
+    quizPool = subset.slice(0, limitCount);
+    currentQuizOrderScope = null;
+  }
+  quizIndex = 0;
 
   if (document.getElementById('chkSwapQA').checked) quizPool = quizPool.map(swapQuizEntry);
   // ★【0.02.65】選択式モードは品詞タグごとに独立した問題として連続出題する
@@ -337,16 +402,21 @@ function loadQuizQuestion() {
     if(cur.answer.length > 5) base += Math.min(15, (cur.answer.length - 5) * 1.5);
   } else {
     const speed = document.getElementById('selQuizSpeed').value;
-    if(speed==='easy') base=25; else if(speed==='hard') base=10; else if(speed==='expert') base=5;
-    if(cur.answer.length > 5) base += Math.min(15, (cur.answer.length - 5) * 1.5);
+    const customLimit = getQuizPrefNumber('numTimeLimit'); // ★【0.03.03】制限時間（秒）。空欄＝難易度どおり、0＝無制限
+    if (customLimit !== null && customLimit > 0) base = customLimit;
+    else {
+      if(speed==='easy') base=25; else if(speed==='hard') base=10; else if(speed==='expert') base=5;
+      if(cur.answer.length > 5) base += Math.min(15, (cur.answer.length - 5) * 1.5);
+    }
     if(document.getElementById('chkTimeAttack').checked) base *= 0.5;
   }
+  const unlimitedTime = !window.currentOnlineMatch && getQuizPrefNumber('numTimeLimit') === 0;
 
   // ★【0.02.65】記述式モードで構造化解答の場合、欄の数だけ制限時間を倍にする（実際のカウントダウンにも反映されるようbaseそのものを変更する）
   if (mode === 'desc' && aStructured) {
     base *= aStructured.length;
   }
-  quizTimeLimit = base; quizTimeLeft = base;
+  quizTimeLimit = unlimitedTime ? Infinity : base; quizTimeLeft = quizTimeLimit;
   stopQuizTimer(); updateTimerUI();
   
   // ★【0.03.02】解いている間にヒントを少しずつ出す
@@ -362,6 +432,13 @@ function loadQuizQuestion() {
   const _timerStart = Date.now();
   const _timerBase = base;
   quizTimer = setInterval(() => {
+    if (unlimitedTime) {
+      // 無制限：ヒントは「30秒で一巡」の速さで出す
+      const el = (Date.now() - _timerStart) / 1000;
+      updateTimerUI(el);
+      while (quizHintState.shown < quizHintState.stages.length && autoHintAt[quizHintState.shown] !== undefined && el / 30 >= autoHintAt[quizHintState.shown]) showNextHint();
+      return;
+    }
     quizTimeLeft = Math.max(0, _timerBase - (Date.now() - _timerStart) / 1000);
     updateTimerUI();
     if (quizTimeLeft <= 0) {
@@ -446,7 +523,12 @@ function showNextHint() {
   if (btn && st.shown >= st.stages.length) btn.style.display = 'none';
 }
 
-function updateTimerUI() {
+function updateTimerUI(elapsedUnlimited) {
+  if (!Number.isFinite(quizTimeLimit)) {
+    const bar = document.getElementById('barTimerFill'); bar.style.width = '100%'; bar.className = 'timer-bar-fill';
+    document.getElementById('lblQuizTimerText').innerText = `∞ ${Math.floor(elapsedUnlimited || 0)}s`;
+    return;
+  }
   const pct = (quizTimeLeft/quizTimeLimit)*100;
   const bar = document.getElementById('barTimerFill'); bar.style.width=`${pct}%`;
   bar.className = `timer-bar-fill ${pct<30?'warning':''}`;
@@ -584,8 +666,11 @@ function sideCharsPool(cur) {
 }
 
 let minhayaTarget = ""; let minhayaPos = 0;
+// ★【0.03.03】みんはや：スペース・読点・スラッシュ・カッコなどの区切り文字は自動で埋めて飛ばす
+const MINHAYA_SKIP_RE = /[\s\u3000、，,・／/()（）～〜]/;
+function skipMinhayaSeparators() { while (minhayaPos < minhayaTarget.length && MINHAYA_SKIP_RE.test(minhayaTarget[minhayaPos])) minhayaPos++; }
 function buildMinhayaMode(cur) {
-  minhayaTarget = getPrimaryAnswer(cur.answer); minhayaPos = 0; renderMinhayaDisplay(cur);
+  minhayaTarget = getPrimaryAnswer(cur.answer); minhayaPos = 0; skipMinhayaSeparators(); renderMinhayaDisplay(cur);
 }
 function renderMinhayaDisplay(cur) {
   const area = document.getElementById('boxMinhayaArea'); area.innerHTML = '';
@@ -605,7 +690,7 @@ function renderMinhayaDisplay(cur) {
   for (let i = 0; i < minhayaTarget.length; i++) {
     const slot = document.createElement('div'); const filled = i < minhayaPos; const current = i === minhayaPos;
     slot.style.cssText = `min-width:42px; height:46px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:1.3rem; font-weight:bold; padding:0 6px; border:2px solid ${filled ? 'var(--success)' : current ? 'var(--primary)' : 'var(--border)'}; background:${filled ? 'rgba(34,199,122,0.12)' : current ? 'rgba(79,124,255,0.1)' : 'var(--bg3)'}; color:${filled ? 'var(--success)' : current ? 'var(--primary)' : 'var(--text3)'};`;
-    slot.innerText = filled ? minhayaTarget[i] : (current ? '?' : '＿');
+    slot.innerText = (filled || MINHAYA_SKIP_RE.test(minhayaTarget[i])) ? minhayaTarget[i] : (current ? '?' : '＿');
     slotsDiv.appendChild(slot);
   }
   area.appendChild(slotsDiv);
@@ -638,7 +723,7 @@ function renderMinhayaDisplay(cur) {
     btn.onclick = () => {
       if (quizPhase !== 'q') return;
       if (c === correctChar) {
-        minhayaPos++;
+        minhayaPos++; skipMinhayaSeparators();
         if (minhayaPos >= minhayaTarget.length) { stopQuizTimer(); evaluateRoundAnswer(true, "🎉 正解！"); } else renderMinhayaDisplay(cur);
       } else {
         stopQuizTimer(); btn.style.background = 'rgba(255,79,106,0.3)'; btn.style.borderColor = 'var(--danger)';
@@ -716,7 +801,7 @@ function submitSelfMode(judge) {
 
 function passQuizQuestion() {
   stopQuizTimer();
-  evaluateRoundAnswer(false, "🏳️ パスしました");
+  evaluateRoundAnswer(false, "🏳️ パスしました（成績には記録しません）", { pass: true });
 }
 
 function submitQuizAction() {
@@ -773,11 +858,15 @@ function gradeStructuredAnswer(structured) {
   return allCorrect;
 }
 
-function evaluateRoundAnswer(isCorrect, head) {
+function evaluateRoundAnswer(isCorrect, head, opts = {}) {
   if (quizPhase === 'a') return; // 二重呼び出し防止
   quizPhase = 'a'; const cur = quizPool[quizIndex];
+  const isPass = !!opts.pass; // ★【0.03.03】パスは不正解として記録しない（答えを見るだけ）
+  if (!isPass) recordQuizOrderProgress(cur);
   
-  if(isCorrect) {
+  if (isPass) {
+    // 成績・コンボ・連続記録はそのまま
+  } else if(isCorrect) {
     currentCombo++; todayCorrectCount++; showComboAnim(); recordDailyLog(true);
     // ★ オンライン対戦なら自分のスコアをFirebaseに送信（即時反映）
     if (window.currentOnlineMatch) {
@@ -790,15 +879,16 @@ function evaluateRoundAnswer(isCorrect, head) {
   }
 
   // ローカル学習記録の更新 (自分が持っている問題の場合のみ)
-  let m = db.find(q => q.id === cur.id);
+  let m = isPass ? null : db.find(q => q.id === cur.id);
   if(m) {
     if(m.wrongStreak === undefined) m.wrongStreak = 0; if(m.shikkariStreak === undefined) m.shikkariStreak = 0;
     const mode = currentRoundMode;
     const multiplier = (mode === 'choice' || mode === 'tap' || mode === 'minhaya') ? 2 : 1; 
-    const th = currentQuestionGradThreshold;
+    // ★【0.03.03】設定の「卒業認定正解数」に比例して、レベルの上がり下がりの回数も変わる
+    const P = srsParams();
 
     if(m.level5Correct === undefined) m.level5Correct = 0;
-    const isGraduated = m.level >= 5 && m.level5Correct >= 5;
+    const isGrad = isGraduated(m);
 
     if(isCorrect) {
       m.correct++; recordCategoryScore(m.category, true);
@@ -807,14 +897,14 @@ function evaluateRoundAnswer(isCorrect, head) {
       
       if (m.level === -1) {
         m.shikkariStreak++;
-        if (m.shikkariStreak >= 5 * multiplier) { m.level = 0; m.shikkariStreak = 0; m.streak = 0; }
-      } else if (isGraduated) {
+        if (m.shikkariStreak >= P.recoverAt * multiplier) { m.level = 0; m.shikkariStreak = 0; m.streak = 0; }
+      } else if (isGrad) {
         // 卒業済み：何もしない
       } else if (m.level >= 5) {
         // レベル5で未卒業：正解を積む
         m.level5Correct++;
       } else {
-        if (m.streak >= 2 * multiplier && m.level < 5) {
+        if (m.streak >= P.upStreak * multiplier && m.level < 5) {
           m.level++;
           if (m.level === 5) m.level5Correct = 0;
           m.streak = 0;
@@ -824,16 +914,16 @@ function evaluateRoundAnswer(isCorrect, head) {
       m.incorrect++; m.wrongStreak++; m.streak = 0; m.shikkariStreak = 0;
       recordCategoryScore(m.category, false);
 
-      if (isGraduated) {
-        // 卒業済みで不正解：5回で卒業取り消し（レベル5に留まる）
-        if (m.wrongStreak >= 5 * multiplier) { m.level5Correct = 0; m.wrongStreak = 0; }
+      if (isGrad) {
+        // 卒業済みで不正解：続けて間違えると卒業取り消し（レベル5に留まる）
+        if (m.wrongStreak >= P.ungradAt * multiplier) { m.level5Correct = 0; m.wrongStreak = 0; }
       } else if (m.level >= 5) {
-        // レベル5・未卒業で不正解：2回でレベル4に下がる
-        if (m.wrongStreak >= 2 * multiplier) { m.level = 4; m.level5Correct = 0; m.wrongStreak = 0; }
+        // レベル5・未卒業で不正解：続けて間違えるとレベル4に下がる
+        if (m.wrongStreak >= P.level5Down * multiplier) { m.level = 4; m.level5Correct = 0; m.wrongStreak = 0; }
       } else {
         if (m.level !== -1) {
-          if (m.wrongStreak >= 4 * multiplier) { m.level = -1; m.wrongStreak = 0; m.correct = 0; } 
-          else if (m.wrongStreak > 0 && m.wrongStreak % (2 * multiplier) === 0 && m.level > 0) m.level--;
+          if (m.wrongStreak >= P.shikkariAt * multiplier) { m.level = -1; m.wrongStreak = 0; m.correct = 0; } 
+          else if (m.wrongStreak > 0 && m.wrongStreak % (P.downEvery * multiplier) === 0 && m.level > 0) m.level--;
         }
       }
     }
@@ -859,7 +949,7 @@ function evaluateRoundAnswer(isCorrect, head) {
   }
   hydrateRich(fbAnsEl, { chemScale: 1.3 });
   speakText(getPrimaryAnswer(cur.answer));
-  fb.className = `feedback-area ${isCorrect ? 'correct':'incorrect'}`; fb.style.display = 'flex';
+  fb.className = `feedback-area ${isCorrect ? 'correct' : isPass ? 'pass' : 'incorrect'}`; fb.style.display = 'flex';
   
   document.getElementById('btnQuizPass').style.display = 'none';
   document.getElementById('btnQuizAction').style.display = 'inline-flex';
@@ -871,7 +961,10 @@ function evaluateRoundAnswer(isCorrect, head) {
   if (['choice', 'tap', 'self', 'minhaya', 'desc'].includes(mode)) {
     clearTimeout(autoNextTimeout);
     // ★【0.02.63】構造化解答は読む量が多いので、センス数に応じて自動送りまでの時間を延長する
-    const advanceDelay = currentStructuredAnswer ? Math.min(15000, 3000 + currentStructuredAnswer.length * 2000) : 3000;
+    // ★【0.03.03】自動進行（秒）。0＝自動で進まない
+    const autoSec = getQuizPrefNumber('numAutoNext');
+    const baseDelay = autoSec === null ? 3000 : autoSec * 1000;
+    const advanceDelay = currentStructuredAnswer ? Math.min(baseDelay + 12000, baseDelay + currentStructuredAnswer.length * 2000) : baseDelay;
     // ★【0.03.02】クイックメモを入力中は自動で次へ進まない（入力が終わるまで待つ）
     const scheduleAdvance = (delay) => {
       autoNextTimeout = setTimeout(() => {
@@ -881,7 +974,7 @@ function evaluateRoundAnswer(isCorrect, head) {
         submitQuizAction();
       }, delay);
     };
-    scheduleAdvance(advanceDelay);
+    if (baseDelay > 0 || window.currentOnlineMatch) scheduleAdvance(Math.max(advanceDelay, window.currentOnlineMatch ? 3000 : 0));
   }
 }
 

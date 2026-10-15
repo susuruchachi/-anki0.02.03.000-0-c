@@ -69,7 +69,7 @@ function renderBox() {
     
     // サブフォルダーを箱分けして表示
     if (typeof categoryTree !== 'undefined' && categoryTree[currentCat] && categoryTree[currentCat].length > 0) {
-      const children = categoryTree[currentCat];
+      const children = getChildCategories(currentCat);
       
       const subTitle = document.createElement('div');
       subTitle.style.cssText = 'font-size:0.8rem; color:var(--text2); font-weight:bold; margin-top:5px;';
@@ -98,11 +98,11 @@ function renderBox() {
     }
   } else if (typeof currentViewContext === 'string' && currentViewContext !== 'all') {
     titleString = `📊 実績抽出カードの一覧`;
-    if (currentViewContext === 'grad') filtered = db.filter(q => q.level >= 5 && (q.level5Correct || 0) >= 5);
-    if (currentViewContext === 'master') filtered = db.filter(q => !(q.level >= 5 && (q.level5Correct || 0) >= 5) && q.level >= 3);
-    if (currentViewContext === 'normal') filtered = db.filter(q => !(q.level >= 5 && (q.level5Correct || 0) >= 5) && q.level >= 1 && q.level <= 2);
-    if (currentViewContext === 'weak') filtered = db.filter(q => !(q.level >= 5 && (q.level5Correct || 0) >= 5) && q.level === 0 && (q.correct+q.incorrect)>0);
-    if (currentViewContext === 'shikkari') filtered = db.filter(q => !(q.level >= 5 && (q.level5Correct || 0) >= 5) && q.level === -1);
+    if (currentViewContext === 'grad') filtered = db.filter(q => isGraduated(q));
+    if (currentViewContext === 'master') filtered = db.filter(q => !(isGraduated(q)) && q.level >= 3);
+    if (currentViewContext === 'normal') filtered = db.filter(q => !(isGraduated(q)) && q.level >= 1 && q.level <= 2);
+    if (currentViewContext === 'weak') filtered = db.filter(q => !(isGraduated(q)) && q.level === 0 && (q.correct+q.incorrect)>0);
+    if (currentViewContext === 'shikkari') filtered = db.filter(q => !(isGraduated(q)) && q.level === -1);
     if (currentViewContext === 'unseen') filtered = db.filter(q => q.correct === 0 && q.incorrect === 0 && q.level >= 0);
   }
 
@@ -112,6 +112,8 @@ function renderBox() {
     filtered = filtered.filter(q => q.question.toLowerCase().includes(kw) || q.answer.toLowerCase().includes(kw) || String(q.note || '').toLowerCase().includes(kw));
   }
 
+  // ★【0.03.03】フォルダーの番号順 → 問題番号順に並べる（追加した順ではなく）
+  sortCardsByNumber(filtered);
   document.getElementById('boxTitle').innerText = titleString;
   document.getElementById('lblBoxCount').innerText = `${filtered.length} 件`;
   
@@ -126,12 +128,13 @@ function renderBox() {
   }
 
   filtered.forEach(item => {
-    const isGrad = item.level >= 5 && (item.level5Correct || 0) >= 5;
+    const isGrad = isGraduated(item);
     const card = document.createElement('div'); card.className = 'q-card';
     setupLongpress(card, () => handleQuestionLongpress(item));
     _boxAnswerCache[item.id] = { text: item.answer, image: item.answerImage || null };
 
     const lvlStr = item.level === -1 ? 'しっかり' : 'LV '+item.level;
+    const noHTML = item.no ? `<span class="card-no">No.${Number(item.no)}</span>` : '';
     const badgeHTML = `<span class="badge ${isGrad ? 'badge-grad':'badge-level'}">${isGrad ? 'GRADUATE' : lvlStr}</span>`;
     
     const sharedIcon = item.sharedDocId ? `<span style="margin-left:6px; font-size:0.75rem; color:var(--accent);">🌐同期</span>` : '';
@@ -142,7 +145,7 @@ function renderBox() {
     const qImgHTML = item.questionImage ? `<img src="${escAttr(item.questionImage)}" alt="問題画像" style="max-width:100%; max-height:120px; border-radius:8px; margin-bottom:8px; display:block;">` : '';
     
     card.innerHTML = `
-      <div class="q-card-text">${kindBadge}${renderRichText(item.question, { escape: true, kanbunRows: 10 })}</div>
+      <div class="q-card-text">${noHTML}${kindBadge}${renderRichText(item.question, { escape: true, kanbunRows: 10 })}</div>
       ${qImgHTML}
       <div style="font-size:0.85rem; color:var(--text2); margin-bottom:8px; cursor:pointer;" data-id="${escapeHtml(item.id)}" data-shown="0" onclick="toggleCardAnswer(this)">
         A: <span style="background:var(--bg4); color:var(--text2); padding:2px 8px; border-radius:6px; border:1px solid var(--border); display:inline-block; font-size:0.75rem;">👆 タップして答えを表示</span>
@@ -207,7 +210,8 @@ function openCardMoveDialog(item) {
     const dest = getCategoryShareInfo(cat);
     if (dest.shared && dest.readOnly) return alert('🔒 閲覧専用の共有カテゴリーには移動できません。');
     const oldDoc = it.sharedDocId;
-    it.category = cat; touchCard(it);
+    it.category = cat; delete it.no; touchCard(it); // 移動先の最後の番号の次になる
+    assignCardNumbers();
     if (dest.shared && dest.docId !== oldDoc) {
       if (oldDoc) await updateCardInSharedDoc(oldDoc, it, 'delete');
       it.sharedDocId = dest.docId; await updateCardInSharedDoc(dest.docId, it, 'add');
@@ -253,6 +257,7 @@ function openCardModal(mode, itemOrDefaults) {
   document.getElementById('txtCardQuestion').value = mode === 'edit' ? (itemOrDefaults.question || '') : '';
   document.getElementById('txtCardAnswer').value = mode === 'edit' ? (itemOrDefaults.answer || '') : '';
   document.getElementById('txtCardNote').value = mode === 'edit' ? (itemOrDefaults.note || '') : '';
+  document.getElementById('numCardNo').value = mode === 'edit' && itemOrDefaults.no ? itemOrDefaults.no : '';
   updateCardImagePreview('question');
   updateCardImagePreview('answer');
   document.getElementById('cardModalOverlay').style.display = 'flex';
@@ -291,6 +296,8 @@ async function submitCardModal() {
   const q = document.getElementById('txtCardQuestion').value.trim();
   const a = document.getElementById('txtCardAnswer').value.trim();
   const note = document.getElementById('txtCardNote').value.trim();
+  const noVal = parseInt(document.getElementById('numCardNo').value, 10);
+  const no = Number.isFinite(noVal) && noVal > 0 ? noVal : null;
   if (!q) { alert('問題文を入力してください。'); document.getElementById('txtCardQuestion').focus(); return; }
   if (!a) { alert('答えを入力してください。'); document.getElementById('txtCardAnswer').focus(); return; }
 
@@ -299,6 +306,7 @@ async function submitCardModal() {
     const item = db.find(x => x.id === _cardModalState.item.id) || _cardModalState.item;
     item.question = q; item.answer = a;
     if (note) item.note = note; else delete item.note;
+    if (no) item.no = no;
     touchCard(item);
     if (_cardModalState.qImage) item.questionImage = _cardModalState.qImage; else delete item.questionImage;
     if (_cardModalState.aImage) item.answerImage = _cardModalState.aImage; else delete item.answerImage;
@@ -307,6 +315,7 @@ async function submitCardModal() {
   } else {
     const newCard = { id: newCardId(), question: q, answer: a, category: _cardModalState.category, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 };
     if (note) newCard.note = note;
+    if (no) newCard.no = no;
     touchCard(newCard);
     if (_cardModalState.qImage) newCard.questionImage = _cardModalState.qImage;
     if (_cardModalState.aImage) newCard.answerImage = _cardModalState.aImage;

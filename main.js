@@ -2,6 +2,7 @@
 
 window.onload = function() {
   loadData(); ensureSystemSanity(); autoMerge();
+  if (typeof loadQuizPrefs === 'function') loadQuizPrefs(); // ★【0.03.03】詳細設定を復元
   buildQuizScopeDropdown(); 
   if (typeof updateHomeSummary === 'function') updateHomeSummary(); // ★【0.03.00】
   if (typeof showReleaseBannerIfNew === 'function') showReleaseBannerIfNew(); // ★【0.03.00】未読のお知らせバナー

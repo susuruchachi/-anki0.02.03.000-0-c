@@ -366,7 +366,7 @@ function initOnlineMatchPage() {
     container.innerHTML = '';
     
     // ★【0.02.51-g追加】共有カテゴリーのみを抽出してリスト化
-    const sharedCats = [...new Set(db.filter(q => q.sharedDocId).map(q => q.category))];
+    const sharedCats = sortCategoryNames([...new Set(db.filter(q => q.sharedDocId).map(q => q.category))]);
     
     if (sharedCats.length === 0) {
       container.innerHTML = '<div style="color:var(--danger); font-size:0.85rem; padding:10px; background:var(--bg3); border-radius:8px; border:1px solid rgba(255,79,106,0.3);">⚠️ 共有カテゴリーがありません。オンライン対戦は共有カテゴリーのみ出題可能です。まずは公開カテゴリーを購読するか、共有URLから追加してください。</div>';

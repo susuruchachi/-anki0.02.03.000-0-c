@@ -98,6 +98,8 @@ h2 { font-size: 1.4rem; font-weight: 700; margin-bottom: 20px; display: flex; al
 .menu-sep { height: 1px; background: var(--border); margin: 6px 8px; }
 /* ★【0.03.02】フォルダー編集パネル */
 .cat-editor { padding: 16px; }
+.shared-doc-row { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.78rem; color: var(--text2); }
+.card-no { display: inline-block; font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; font-weight: 700; color: var(--text3); background: var(--bg3); border: 1px solid var(--border); border-radius: 6px; padding: 0 6px; margin-right: 6px; vertical-align: middle; }
 .quick-note { padding: 6px 8px; font-size: 0.85rem; resize: none; min-height: 38px; line-height: 1.45; font-family: inherit; }
 .quiz-hints { text-align: left; line-height: 1.5; border-radius: 10px; animation: none; padding: 8px 12px; }
 .quiz-hints > div + div { margin-top: 4px; }
@@ -152,6 +154,7 @@ h2 { font-size: 1.4rem; font-weight: 700; margin-bottom: 20px; display: flex; al
 
 .feedback-area { margin-top: 15px; padding: 12px; border-radius: 8px; text-align: center; font-weight: 700; font-size: 1rem; display: none; flex-direction: column; gap: 8px; }
 .feedback-area.correct { display: flex; background: rgba(34,199,122,0.15); color: var(--success); border: 1px solid rgba(34,199,122,0.3); }
+.feedback-area.pass { display: flex; background: rgba(245,166,35,0.12); color: var(--warn); border: 1px solid rgba(245,166,35,0.3); }
 .feedback-area.incorrect { display: flex; background: rgba(255,79,106,0.15); color: var(--danger); border: 1px solid rgba(255,79,106,0.3); }
 .feedback-ans { font-size: 0.85rem; color: var(--text); font-weight: 400; margin-top: 2px; }
 
@@ -385,6 +388,29 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
         </div>
       </div>
       <div class="hint-small" style="margin:-4px 0 12px;">難易度は制限時間とヒントの出る速さに一括で反映されます。</div>
+      <div class="form-group" style="margin-bottom:12px;">
+        <label class="section-label" style="font-weight:500;">🔢 出題順</label>
+        <select id="selQuizOrder" class="form-control">
+          <option value="srs" selected>🎯 おまかせ（しっかり・苦手を優先、ランダム）</option>
+          <option value="number">🔢 問題番号順（最初から）</option>
+          <option value="continue">⏭️ 問題番号順（前回の続きから）</option>
+        </select>
+      </div>
+      <div class="form-row" style="margin-bottom:6px;">
+        <div style="flex:1;">
+          <label class="section-label" style="font-weight:500;">⏱️ 制限時間(秒)</label>
+          <input type="number" id="numTimeLimit" class="form-control" min="0" placeholder="自動">
+        </div>
+        <div style="flex:1;">
+          <label class="section-label" style="font-weight:500;">⏩ 自動進行(秒)</label>
+          <input type="number" id="numAutoNext" class="form-control" min="0" placeholder="3">
+        </div>
+        <div style="flex:1;">
+          <label class="section-label" style="font-weight:500;">🎓 卒業正解数</label>
+          <input type="number" id="numGradThreshold" class="form-control" min="1" max="30" placeholder="5">
+        </div>
+      </div>
+      <div class="hint-small" style="margin:0 0 12px;">制限時間：空欄＝難易度どおり、0＝無制限。自動進行：答えを表示してから次へ進むまでの秒数（0＝自動で進まない）。卒業正解数：レベル5になってから何回正解で卒業か（レベルの上がり下がりの回数もこれに比例します）。</div>
       <div class="toggle-grid">
         <label class="toggle-pill"><input type="checkbox" id="chkTTS">🗣️ 問題を読み上げ</label>
         <label class="toggle-pill"><input type="checkbox" id="chkTimeAttack">⏱️ タイムアタック</label>
@@ -552,6 +578,14 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
     </div>
 
     <div class="card">
+      <div class="setting-box-title">🔗 共有・公開カテゴリーの管理</div>
+      <div id="mySharedDocsList" class="hint-small">読み込み中...</div>
+      <div class="form-row" style="margin-top:10px;">
+        <button class="btn btn-secondary" onclick="openPage('pgPublicCategories'); loadPublicCategories(); loadMyPublicCategories();">🌐 公開カテゴリー一覧</button>
+      </div>
+    </div>
+
+    <div class="card">
       <div class="setting-box-title">📦 バックアップ（JSON / CSV）</div>
       <div class="form-row" style="margin-bottom:10px;">
         <button class="btn btn-secondary" onclick="exportJSON()">📤 JSON出力</button>
@@ -664,6 +698,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
     <h2 id="sharedTitle">🌐 共有カテゴリー</h2>
     <div class="card" style="margin-bottom: 15px;">
       <div style="font-size:0.85rem; color:var(--text2); margin-bottom: 10px;">作成者: <span id="sharedOwnerName" style="color:var(--text); font-weight:bold;">--</span></div>
+      <div id="sharedCodeRow" style="font-size:0.85rem; color:var(--text2); margin-bottom:10px; display:none;">🔑 共有コード: <span id="sharedCodeText" style="font-family:'JetBrains Mono',monospace; font-weight:700; color:var(--text); letter-spacing:0.1em;"></span> <button class="chip" onclick="copySharedCode()">📋 コピー</button></div>
       <button class="btn btn-success" onclick="importCurrentShared()">📥 購読してインポート</button>
       <button class="btn btn-secondary" style="margin-top:10px;" onclick="exitSharedMode()">🏠 閉じてホームに戻る</button>
     </div>
@@ -783,6 +818,13 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
       <input type="text" id="searchPublicCategories" class="form-control" placeholder="カテゴリー検索..." oninput="filterPublicCategories()">
       <button class="btn btn-secondary" style="width:auto; padding:12px 20px;" onclick="openPage('pgBox')">戻る</button>
     </div>
+    <div class="card" style="margin-bottom:15px;">
+      <div class="setting-box-title">🔑 共有コードで参加</div>
+      <div class="form-row">
+        <input type="text" id="txtShareCode" class="form-control" placeholder="6文字のコード（例: K7Q2ZP）または共有URL" autocomplete="off" style="text-transform:uppercase;">
+        <button class="btn" style="width:auto; padding:0 16px;" onclick="joinByShareCode()">開く</button>
+      </div>
+    </div>
     <div id="myPublicCategoriesSection" style="display:none; margin-bottom:20px;">
       <div class="card" style="border-color:var(--accent);">
         <div class="setting-box-title" style="color:var(--accent);">📤 自分が公開中のカテゴリー</div>
@@ -879,6 +921,11 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
         <img id="cardAImagePreview" style="max-width:100%; max-height:150px; border-radius:8px; display:block; margin-bottom:6px;">
         <button type="button" class="chip" onclick="removeCardImage('answer')">🗑️ 画像を削除</button>
       </div>
+    </div>
+
+    <div class="form-group" style="margin-top:15px;">
+      <label class="section-label">🔢 問題番号（フォルダー内の並び順・番号順の出題に使います）</label>
+      <input type="number" id="numCardNo" class="form-control" min="1" placeholder="空欄なら最後の番号の次">
     </div>
 
     <div class="form-group" style="margin-top:15px;">

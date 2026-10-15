@@ -16,7 +16,7 @@ function openPage(pageId) { executePageTransition(pageId, false); }
 // ★【0.03.00】ホーム画面上部の学習状況サマリー
 function updateHomeSummary() {
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.innerText = v; };
-  const isGrad = q => q.level >= 5 && (q.level5Correct || 0) >= 5;
+  const isGrad = isGraduated;
   set('homeSumTotal', db.length);
   set('homeSumWeak', db.filter(q => !isGrad(q) && ((q.level === 0 && (q.correct + q.incorrect) > 0) || q.level === -1)).length);
   set('homeSumUnseen', db.filter(q => q.correct === 0 && q.incorrect === 0 && q.level >= 0).length);
@@ -97,7 +97,7 @@ function executePageTransition(pageId, isBackAction) {
   if(pageId==='pgOnlineMatch') { const el = document.getElementById('navOnlineMatch'); if(el) el.classList.add('active'); initOnlineMatchPage(); }
   if(pageId==='pgPublicCategories') { loadPublicCategories(); loadMyPublicCategories(); }
   if(pageId==='pgCompareStats') { loadFriendsForComparison(); }
-  if(pageId==='pgBackup') { const el = document.getElementById('navBackup'); if(el) el.classList.add('active'); }
+  if(pageId==='pgBackup') { const el = document.getElementById('navBackup'); if(el) el.classList.add('active'); if (typeof renderMySharedDocsSettings === 'function') renderMySharedDocsSettings(); }
   if(pageId==='pgTutorial') { fetchAndRenderTutorial(); }
   
   closeMenu();

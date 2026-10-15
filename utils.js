@@ -15,6 +15,43 @@ function escAttr(v) {
   return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '&#39;');
 }
 
+// ================================================================
+// ★【0.03.03】番号順の並べ替え・卒業基準・ひらがな/カタカナの同一視
+// ================================================================
+// 「#9」「#10」「第2章」などの数字を数として比べる（追加した順ではなく番号順に並べる）
+const _naturalCollator = (typeof Intl !== 'undefined' && Intl.Collator) ? new Intl.Collator('ja', { numeric: true, sensitivity: 'base' }) : null;
+function naturalCompare(a, b) {
+  a = String(a == null ? '' : a); b = String(b == null ? '' : b);
+  return _naturalCollator ? _naturalCollator.compare(a, b) : (a < b ? -1 : a > b ? 1 : 0);
+}
+// フォルダー名を番号順に並べる（「未分類」は最後）
+function sortCategoryNames(names) {
+  return [...(names || [])].sort((a, b) => (a === '未分類') - (b === '未分類') || naturalCompare(a, b));
+}
+// 卒業認定正解数（設定で変更可。レベルの上がり下がりの回数もこれに比例して変わる）
+function getGradThreshold() {
+  let v = 5;
+  try { v = parseInt(localStorage.getItem('susuru_anki_grad_threshold'), 10); } catch (e) {}
+  return Number.isFinite(v) && v >= 1 && v <= 30 ? v : 5;
+}
+function isGraduated(q) { return !!q && q.level >= 5 && (q.level5Correct || 0) >= getGradThreshold(); }
+function srsParams() {
+  const f = getGradThreshold() / 5;
+  return {
+    upStreak: Math.max(1, Math.round(2 * f)),     // 連続正解でレベルアップ
+    downEvery: Math.max(1, Math.round(2 * f)),    // 不正解この回数ごとにレベルダウン
+    shikkariAt: Math.max(2, Math.round(4 * f)),   // 連続不正解でしっかり(Lv-1)
+    recoverAt: Math.max(1, Math.round(5 * f)),    // しっかりから復帰する連続正解
+    level5Down: Math.max(1, Math.round(2 * f)),   // Lv5未卒業がLv4に下がる連続不正解
+    ungradAt: Math.max(1, Math.round(5 * f)),     // 卒業取り消しの連続不正解
+    grad: getGradThreshold()
+  };
+}
+// カタカナをひらがなにそろえる（採点でひらがな・カタカナを同一視するため）
+function foldKana(s) {
+  return String(s || '').replace(/[ァ-ヶ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x60));
+}
+
 function toggleLightMode(forceOn = false) {
   const isLight = forceOn || !document.body.classList.contains('light-mode');
   if(isLight) document.body.classList.add('light-mode'); else document.body.classList.remove('light-mode');
@@ -89,7 +126,7 @@ function parseStructuredAnswer(answerText) {
 // カッコ内の補足・「～」「…」は無視して比べる
 function normalizeStructuredToken(str) {
   if (!str) return '';
-  let s = String(str).replace(/[Ａ-Ｚａ-ｚ０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)).toLowerCase().trim();
+  let s = foldKana(String(str).replace(/[Ａ-Ｚａ-ｚ０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)).toLowerCase().trim());
   s = s.replace(/擦/g, 'こす');
   s = s.replace(/\([^()]*\)|（[^（）]*）/g, '');
   s = s.replace(/[～〜~…]|\.\.\./g, '');

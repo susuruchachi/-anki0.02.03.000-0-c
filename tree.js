@@ -2,7 +2,15 @@
 function getTopLevelCategories() {
   const children = new Set();
   for (const parent in categoryTree) { (categoryTree[parent] || []).forEach(c => children.add(c)); }
-  return categories.filter(c => !children.has(c));
+  return sortCategoryNames(categories.filter(c => !children.has(c)));
+}
+// ★【0.03.03】サブフォルダーを番号順に返す（追加した順ではなく）
+function getChildCategories(catName) { return sortCategoryNames(categoryTree[catName] || []); }
+// フォルダーを「ツリーの表示順」に並べたときの位置（カードの並べ替え・番号順の出題に使う）
+function getCategoryOrderIndex() {
+  const idx = {}; let i = 0;
+  getSortedCategoriesForMenu().forEach(c => { idx[c] = i++; });
+  return idx;
 }
 function getAllSubcategories(catName, result = new Set()) {
   if (result.has(catName)) return [...result];
@@ -19,8 +27,7 @@ function getSortedCategoriesForMenu() {
     if (visited.has(catName)) return;
     visited.add(catName);
     result.push(catName);
-    const children = categoryTree[catName] || [];
-    children.forEach(child => addCategoryAndChildren(child));
+    getChildCategories(catName).forEach(child => addCategoryAndChildren(child));
   }
   
   getTopLevelCategories().forEach(topCat => addCategoryAndChildren(topCat));
@@ -42,7 +49,7 @@ function createTreeNode(catName, depth) {
   if (depth > 0) { header.style.background = 'var(--bg4)'; header.style.padding = '10px 14px'; }
 
   const directCount = db.filter(q => q.category === catName).length;
-  const children = categoryTree[catName] || [];
+  const children = getChildCategories(catName);
   const isExpanded = localStorage.getItem(`cat_exp_${catName}`) === 'true';
   if (isExpanded) card.classList.add('expanded');
 

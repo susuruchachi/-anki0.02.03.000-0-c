@@ -84,7 +84,7 @@ function buildCategoryOptionsHTML(excludeSet, extraTop) {
   let html = extraTop ? `<option value="__top__">⬆️ 一番上の階層</option>` : '';
   const walk = (cat, depth) => {
     if (!excludeSet.has(cat)) html += `<option value="${escapeHtml(cat)}">${'　'.repeat(depth)}${depth ? '└ ' : ''}${escapeHtml(cat)}</option>`;
-    (categoryTree[cat] || []).forEach(c => walk(c, depth + 1));
+    getChildCategories(cat).forEach(c => walk(c, depth + 1));
   };
   getTopLevelCategories().forEach(c => walk(c, 0));
   return html;
@@ -157,6 +157,7 @@ function openCategoryEditor(catName) {
       ${btn('move', '↪️', '別の場所へ移動', { disabled: lock })}
       ${btn('merge', '🔀', '他のフォルダーに統合', { disabled: lock })}
       ${btn('reset', '🔄', '成績をリセット')}
+      ${btn('renumber', '🔢', '問題番号を振り直す', { disabled: ro })}
     </div>
     <div id="catEditPanel"></div>
     <div class="cat-edit-sec">共有</div>
@@ -208,6 +209,17 @@ function runCategoryAction(catName, act, info) {
       saveData(true);
       alert(`✅ ${resetCount}件の成績をリセットしました！`);
       if (document.getElementById('pgStats') && document.getElementById('pgStats').classList.contains('active')) renderStatsAndCharts();
+      return;
+    }
+    case 'renumber': {
+      const cards = sortCardsByNumber(db.filter(q => q.category === catName));
+      if (!cards.length) return alert('このフォルダーの直下に問題がありません。');
+      if (!confirm(`「${catName}」の直下の問題 ${cards.length} 問に、今の並び順で 1 から番号を振り直しますか？`)) return;
+      cards.forEach((q, i) => { if (q.no !== i + 1) { q.no = i + 1; touchCard(q); } });
+      saveData(true);
+      if (info.shared && info.canEdit) pushSharedDocFromLocal(info.docId);
+      if (document.getElementById('pgBox').classList.contains('active')) renderBox();
+      alert('✅ 番号を振り直しました。');
       return;
     }
     case 'sub': {
@@ -326,6 +338,9 @@ function mergeCategoryInto(src, dst) {
   if (isSharedDocRoot(src)) { alert('共有・公開カテゴリーの一番上のフォルダーは統合できません。\n（名前の変更や移動はできます）'); return false; }
   const sInfo = getCategoryShareInfo(src), dInfo = getCategoryShareInfo(dst);
   if ((sInfo.shared && sInfo.readOnly) || (dInfo.shared && dInfo.readOnly)) { alert('🔒 閲覧専用の共有カテゴリーは統合できません。'); return false; }
+  // 統合したカードは、統合先の最後の番号の次から元の順番で並べる
+  let nextNo = Math.max(0, ...db.filter(q => q.category === dst).map(q => Number(q.no) || 0));
+  sortCardsByNumber(db.filter(q => q.category === src)).forEach(q => { q.no = ++nextNo; });
   db.forEach(q => {
     if (q.category === src) {
       q.category = dst;

@@ -83,12 +83,12 @@ function detachSharedDoc(docId) {
 // 共有ドキュメントに保存するカードの形（成績は含めない）
 function toSharedCard(card) {
   const o = { id: card.id, question: card.question, answer: card.answer, category: card.category, updatedAt: card.updatedAt || Date.now() };
-  ['note', 'questionImage', 'answerImage', 'choices', 'kind'].forEach(f => { if (card[f] !== undefined && card[f] !== null && card[f] !== '') o[f] = card[f]; });
+  ['note', 'questionImage', 'answerImage', 'choices', 'kind', 'no'].forEach(f => { if (card[f] !== undefined && card[f] !== null && card[f] !== '') o[f] = card[f]; });
   return o;
 }
-const SHARED_CONTENT_FIELDS = ['question', 'answer', 'category', 'questionImage', 'answerImage', 'choices', 'kind'];
+const SHARED_CONTENT_FIELDS = ['question', 'answer', 'category', 'questionImage', 'answerImage', 'choices', 'kind', 'no'];
 function sharedCardDiffers(lq, cq) {
-  return SHARED_CONTENT_FIELDS.some(f => JSON.stringify(lq[f] === undefined ? null : lq[f]) !== JSON.stringify(cq[f] === undefined ? null : cq[f]));
+  return SHARED_CONTENT_FIELDS.some(f => !(f === 'no' && cq.no === undefined) && JSON.stringify(lq[f] === undefined ? null : lq[f]) !== JSON.stringify(cq[f] === undefined ? null : cq[f]));
 }
 
 // ★ 定期同期＆起動時同期ロジック
@@ -141,14 +141,14 @@ async function syncSubscriptions() {
             const preferLocal = canEdit && (lu > cu || (isOwner && lu === cu));
             if (preferLocal) { localWins = true; }
             else {
-              SHARED_CONTENT_FIELDS.forEach(f => { if (cq[f] !== undefined) lq[f] = cq[f]; else delete lq[f]; });
+              SHARED_CONTENT_FIELDS.forEach(f => { if (cq[f] !== undefined) lq[f] = cq[f]; else if (f !== 'no') delete lq[f]; });
               touchCard(lq); changed = true;
             }
           }
           if (lq.sharedDocId !== docId) { lq.sharedDocId = docId; touchCard(lq); changed = true; }
         } else {
           const newLocalCard = { id: cq.id, question: cq.question, answer: cq.answer, category: cq.category, sharedDocId: docId, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 };
-          ['note', 'questionImage', 'answerImage', 'choices', 'kind'].forEach(f => { if (cq[f] !== undefined) newLocalCard[f] = cq[f]; });
+          ['note', 'questionImage', 'answerImage', 'choices', 'kind', 'no'].forEach(f => { if (cq[f] !== undefined) newLocalCard[f] = cq[f]; });
           touchCard(newLocalCard);
           db.push(newLocalCard);
           changed = true;
@@ -294,7 +294,11 @@ async function shareCategory(catName) {
     db.forEach(q => { if (ids.has(q.id)) { q.sharedDocId = docRef.id; touchCard(q); } });
     saveData(); syncSubscriptions();
     
-    const shareUrl = window.location.origin + window.location.pathname + "?share_id=" + docRef.id; await navigator.clipboard.writeText(shareUrl); alert(`✅ URLを発行・コピーしました！\nURL: ${shareUrl}\n\n（※今後、あなたがこのカテゴリー内の問題を編集・追加すると、全員に自動同期されます）`);
+    const code = generateShareCode();
+    await docRef.update({ shareCode: code }).catch(() => {});
+    const shareUrl = window.location.origin + window.location.pathname + "?share_id=" + docRef.id;
+    try { await navigator.clipboard.writeText(shareUrl); } catch (e) {}
+    alert(`✅ 共有URLを発行・コピーしました！\nURL: ${shareUrl}\n🔑 共有コード: ${code}\n（相手は「🌐 公開カテゴリー」画面の「共有コードで参加」にコードを入力しても開けます）\n\n（※今後、あなたがこのカテゴリー内の問題を編集・追加すると、全員に自動同期されます）`);
   } catch(err) { alert("⚠️ URLの発行に失敗しました。ルールの確認を。"); }
 }
 
@@ -340,6 +344,13 @@ function renderSharedPage() {
   document.getElementById('sharedTitle').innerText = `🌐 ${escapeHtml(data.catName)}`; 
   document.getElementById('sharedOwnerName').innerText = escapeHtml(data.ownerName); 
   document.getElementById('sharedCardCount').innerText = data.cards.length;
+  const codeRow = document.getElementById('sharedCodeRow');
+  if (codeRow) {
+    const owner = currentUser && currentUser.uid === data.ownerId;
+    if (data.shareCode) { codeRow.style.display = 'block'; document.getElementById('sharedCodeText').innerText = data.shareCode; }
+    else if (owner) { codeRow.style.display = 'none'; ensureShareCode(currentSharedDocId).catch(() => {}); } // 発行すると onSnapshot で再描画される
+    else codeRow.style.display = 'none';
+  }
   
   const isOwner = currentUser && currentUser.uid === data.ownerId; 
   const isFriend = currentUser && data.friends && data.friends.includes(currentUser.uid); 
@@ -458,7 +469,7 @@ function subscribeToSharedData(docId, data) {
     if (existing) { existing.sharedDocId = docId; touchCard(existing); }
     else {
       const c = { id: q.id, question: q.question, answer: q.answer, category: q.category, sharedDocId: docId, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 };
-      ['note', 'questionImage', 'answerImage', 'choices', 'kind'].forEach(f => { if (q[f] !== undefined) c[f] = q[f]; });
+      ['note', 'questionImage', 'answerImage', 'choices', 'kind', 'no'].forEach(f => { if (q[f] !== undefined) c[f] = q[f]; });
       reviveCard(c); // 以前に購読解除したカードも取り込み直せるように（削除の記録より新しくする）
       db.push(c); count++;
     }
@@ -704,4 +715,60 @@ async function syncNewCategoryToShared(parentCatName, newCatName) {
   if (!parentCatName) return;
   const docId = findEditableSharedDocForCat(parentCatName);
   if (docId) await pushSharedDocFromLocal(docId);
+}
+
+
+// ================================================================
+// ★【0.03.03】共有コード（6文字）・設定画面の共有カテゴリー管理
+// ================================================================
+function generateShareCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 紛らわしい 0/O/1/I は使わない
+  let c = ''; for (let i = 0; i < 6; i++) c += chars[Math.floor(Math.random() * chars.length)];
+  return c;
+}
+// 既存の共有ドキュメントにコードが無ければ発行する（作成者のみ）
+async function ensureShareCode(docId) {
+  const ref = firestore.collection('susuru_anki_shared').doc(docId);
+  const snap = await ref.get();
+  if (!snap.exists) return null;
+  if (snap.data().shareCode) return snap.data().shareCode;
+  const code = generateShareCode();
+  await ref.update({ shareCode: code });
+  return code;
+}
+async function joinByShareCode() {
+  const raw = (document.getElementById('txtShareCode').value || '').trim();
+  if (!raw) return;
+  const m = raw.match(/share_id=([A-Za-z0-9]+)/);
+  let docId = m ? m[1] : null;
+  try {
+    if (!docId) {
+      const code = raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      if (code.length === 6) {
+        const snap = await firestore.collection('susuru_anki_shared').where('shareCode', '==', code).limit(1).get();
+        if (!snap.empty) docId = snap.docs[0].id;
+      } else if (code.length >= 15) docId = raw.trim();
+    }
+    if (!docId) return alert('⚠️ そのコードの共有カテゴリーが見つかりませんでした。');
+    document.getElementById('txtShareCode').value = '';
+    openPage('pgShared'); listenToSharedDoc(docId);
+  } catch (e) { alert('⚠️ 検索に失敗しました: ' + (e.code || e.message)); }
+}
+function copySharedCode() {
+  const t = (document.getElementById('sharedCodeText') || {}).innerText || '';
+  if (t && navigator.clipboard) navigator.clipboard.writeText(t).then(() => alert('📋 コピーしました: ' + t));
+}
+// 設定画面：自分が作った・購読している共有カテゴリーの一覧（共同編集者の設定へ）
+function renderMySharedDocsSettings() {
+  const el = document.getElementById('mySharedDocsList');
+  if (!el) return;
+  const ids = knownSharedDocIds();
+  if (ids.length === 0) { el.innerHTML = '共有・公開・購読しているカテゴリーはありません。フォルダーを長押し →「🔗 共有URLを発行」「🌐 公開カテゴリーにする」で共有できます。'; return; }
+  el.innerHTML = ids.map(id => {
+    const acc = getSharedAccess(id);
+    const name = (sharedMeta[id] && sharedMeta[id].root) || '（名前を確認中）';
+    const role = acc.isOwner ? '👑 作成者' : acc.canEdit ? '🤝 共同編集者' : '📖 購読中';
+    return `<div class="shared-doc-row"><div style="flex:1; min-width:0;"><div style="font-weight:700; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(name)}</div><div>${role}</div></div>
+      <button class="chip" onclick="openPage('pgShared'); listenToSharedDoc(${jsArg(id)})">${acc.isOwner ? '👑 共同編集者の設定' : '🔍 詳細'}</button></div>`;
+  }).join('');
 }

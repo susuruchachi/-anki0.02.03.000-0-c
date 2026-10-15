@@ -30,7 +30,7 @@ const DEVICE_ID = (() => {
   } catch (e) { return 'dev_' + Math.random().toString(36).slice(2); }
 })();
 
-const CARD_CONTENT_FIELDS = ['question', 'answer', 'category', 'note', 'questionImage', 'answerImage', 'choices', 'kind', 'sharedDocId'];
+const CARD_CONTENT_FIELDS = ['question', 'answer', 'category', 'note', 'questionImage', 'answerImage', 'choices', 'kind', 'sharedDocId', 'no'];
 const CARD_STAT_FIELDS = ['level', 'correct', 'incorrect', 'streak', 'wrongStreak', 'shikkariStreak', 'level5Correct'];
 
 function newCardId() { return 'id_' + Math.random().toString(36).slice(2) + Date.now().toString(36); }
@@ -471,6 +471,22 @@ function ensureSystemSanity() {
     if(item.wrongStreak === undefined) item.wrongStreak = 0;
     if(item.shikkariStreak === undefined) item.shikkariStreak = 0;
     if(item.level5Correct === undefined) item.level5Correct = 0;
+  });
+  assignCardNumbers();
+}
+
+// ★【0.03.03】問題番号：フォルダーごとに 1,2,3… の番号を振る（番号が無いカードには、そのフォルダーの最後の番号の次を振る）
+function assignCardNumbers() {
+  const maxNo = {};
+  db.forEach(q => {
+    if (q.no !== undefined && q.no !== null && q.no !== '') {
+      const n = Number(q.no);
+      if (Number.isFinite(n) && n > 0) { q.no = Math.floor(n); maxNo[q.category] = Math.max(maxNo[q.category] || 0, q.no); }
+      else delete q.no;
+    }
+  });
+  db.forEach(q => {
+    if (q.no === undefined || q.no === null || q.no === '') { q.no = (maxNo[q.category] || 0) + 1; maxNo[q.category] = q.no; }
   });
 }
 

@@ -18,8 +18,8 @@ function importJSON(e) {
   }; r.readAsText(e.target.files[0]);
 }
 function exportCSV() {
-  let lines = [["問題", "答え", "フォルダー", "メモ", "選択肢", "形式", "レベル", "正解数", "不正解数"]];
-  db.forEach(q => lines.push([q.question, q.answer, getCategoryPathString(q.category), q.note || '', Array.isArray(q.choices) ? q.choices.join(' / ') : '', q.kind === 'test' ? 'テスト' : q.kind === 'cloze' ? '例文' : '', q.level, q.correct, q.incorrect]));
+  let lines = [["問題", "答え", "フォルダー", "番号", "メモ", "選択肢", "形式", "レベル", "正解数", "不正解数"]];
+  sortCardsByNumber([...db]).forEach(q => lines.push([q.question, q.answer, getCategoryPathString(q.category), q.no || '', q.note || '', Array.isArray(q.choices) ? q.choices.join(' / ') : '', q.kind === 'test' ? 'テスト' : q.kind === 'cloze' ? '例文' : '', q.level, q.correct, q.incorrect]));
   const csv = lines.map(l => l.map(t => `"${String(t === undefined || t === null ? '' : t).replace(/"/g, '""')}"`).join(",")).join("\n");
   const b = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csv], { type: 'text/csv;charset=utf-8;' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = `susuru_anki_${Date.now()}.csv`; a.click();
@@ -86,7 +86,7 @@ function importCSV(e) {
       if(rows.length < 2) return alert("データがありません。");
       const h = rows[0].map(x=>x.trim());
       let iQ = h.indexOf("問題"), iA = h.indexOf("答え"), iC = h.indexOf("フォルダー");
-      const iN = h.indexOf("メモ"), iCh = h.indexOf("選択肢"), iK = h.indexOf("形式");
+      const iN = h.indexOf("メモ"), iCh = h.indexOf("選択肢"), iK = h.indexOf("形式"), iNo = h.indexOf("番号");
       if(iQ===-1) iQ=0; if(iA===-1) iA=1; if(iC===-1) iC=2;
       let added = 0, updated = 0;
       const touchedCats = new Set();
@@ -100,6 +100,8 @@ function importCSV(e) {
         const choices = iCh !== -1 ? parseChoicesCell(c[iCh]) : null;
         const kindRaw = iK !== -1 ? String(c[iK] || '').trim() : '';
         const kind = /テスト|test/i.test(kindRaw) ? 'test' : /例文|cloze/i.test(kindRaw) ? 'cloze' : '';
+        const noNum = iNo !== -1 ? parseInt(String(c[iNo] || '').replace(/[^0-9]/g, ''), 10) : NaN;
+        const no = Number.isFinite(noNum) && noNum > 0 ? noNum : null;
         // ★【0.03.02】同じフォルダーに同じ問題があれば、重複させずに答え・メモ等を更新する（成績はそのまま）
         // 同じ問題・同じ答え → それを更新。答えが違う場合は、同じ問題のカードが1枚だけで、この取込でまだ使っていなければ更新
         let ex = db.find(d => d.category === cat && String(d.question).trim() === q && String(d.answer).trim() === a && !usedIds.has(d.id));
@@ -109,18 +111,20 @@ function importCSV(e) {
         }
         if (ex) usedIds.add(ex.id);
         if (ex) {
-          const before = JSON.stringify([ex.answer, ex.note, ex.choices, ex.kind]);
+          const before = JSON.stringify([ex.answer, ex.note, ex.choices, ex.kind, ex.no]);
           ex.answer = a;
           if (iN !== -1) { if (note) ex.note = note; else delete ex.note; }
           if (iCh !== -1) { if (choices) ex.choices = choices; else delete ex.choices; }
           if (iK !== -1) { if (kind) ex.kind = kind; else delete ex.kind; }
-          if (JSON.stringify([ex.answer, ex.note, ex.choices, ex.kind]) !== before) { touchCard(ex); updated++; touchedCats.add(cat); }
+          if (no) ex.no = no;
+          if (JSON.stringify([ex.answer, ex.note, ex.choices, ex.kind, ex.no]) !== before) { touchCard(ex); updated++; touchedCats.add(cat); }
           continue;
         }
         const card = { id: newCardId(), question: q, answer: a, category: cat, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 };
         if (note) card.note = note;
         if (choices) card.choices = choices;
         if (kind) card.kind = kind;
+        if (no) card.no = no;
         const info = getCategoryShareInfo(cat);
         if (info.shared && info.canEdit) card.sharedDocId = info.docId;
         touchCard(card);
