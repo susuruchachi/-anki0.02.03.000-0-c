@@ -179,13 +179,14 @@ function normalizeStructuredToken(str) {
   s = s.replace(/擦/g, 'こす');
   s = s.replace(/\([^()]*\)|（[^（）]*）/g, '');
   s = s.replace(/[～〜~…]|\.\.\./g, '');
+  s = s.replace(/[\[\]［］【】]/g, ''); // ★【0.03.06】［ ］などの記号は入力しなくてよい（中身は必要）
   s = s.replace(/\s+/g, '');
   return s;
 }
 // 「～を考慮する」なら「考慮する」「を考慮する」のどちらで答えても正解にする
 function structuredTokenForms(str) {
   const base = String(str || '').replace(/\([^()]*\)|（[^（）]*）/g, '').trim();
-  const forms = [normalizeStructuredToken(str)];
+  const forms = [normalizeStructuredToken(str), normalizeStructuredToken(String(str || '').replace(/[\[［][^\]］]*[\]］]/g, ''))]; // ［ ］の言い換え部分を省いた形も正解
   const m = base.match(/^[～〜~]\s*[をにのとがへでやも]/);
   if (m) forms.push(normalizeStructuredToken(base.slice(m[0].length)));
   return forms.filter(f => f !== '');

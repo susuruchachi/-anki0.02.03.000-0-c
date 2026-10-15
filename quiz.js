@@ -205,16 +205,22 @@ function swapQuizEntry(q) {
   return { ...q, question: q.answer, answer: q.question, questionImage: q.answerImage, answerImage: q.questionImage, _swapped: true };
 }
 
+const ANSWER_SYMBOL_RE = /[\[\]［］【】～〜~…]|\.\.\./g;
+// ［ ］で囲んだ部分（言い換え）を省いた形
+function dropBracketParts(str) { return String(str || '').replace(/[\[［][^\]］]*[\]］]/g, ' '); }
 function normalizeAnswer(str) {
   if(!str) return '';
   let s = foldKana(String(str).replace(/[Ａ-Ｚａ-ｚ０-９]/g, c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0)).toLowerCase().trim());
   s = s.replace(/擦/g, 'こす');
+  // ★【0.03.06】［ ］・～・… などの記号は入力しなくてよい（中身だけ合っていれば正解）
+  s = s.replace(ANSWER_SYMBOL_RE, ' ');
   s = s.replace(/[、，＼＼ \u3000]+/g, ',');
   return s.split(',').map(x=>x.trim()).filter(x=>x!=='').sort().join(',');
 }
 function isAnswerCorrect(input, correctAnswer) {
   // ★【0.03.00】構造式(SMILESの「/」)や漢文ブロックを区切り文字として誤分割しないようにマスクしてから分割する
-  const norms = splitAnswerAlternatives(correctAnswer).map(a => normalizeAnswer(a));
+  // ［ ］の中身まで書いた答え・［ ］の部分を省いた答えのどちらでも正解
+  const norms = splitAnswerAlternatives(correctAnswer).flatMap(a => [normalizeAnswer(a), normalizeAnswer(dropBracketParts(a))]).filter(x => x !== '');
   const inNorm = normalizeAnswer(input);
   return norms.includes(inNorm);
 }
@@ -672,7 +678,7 @@ function sideCharsPool(cur) {
 
 let minhayaTarget = ""; let minhayaPos = 0;
 // ★【0.03.03】みんはや：スペース・読点・スラッシュ・カッコなどの区切り文字は自動で埋めて飛ばす
-const MINHAYA_SKIP_RE = /[\s\u3000、，,・／/()（）～〜]/;
+const MINHAYA_SKIP_RE = /[\s\u3000、，,・／/()（）～〜~\[\]［］【】…]/;
 function skipMinhayaSeparators() { while (minhayaPos < minhayaTarget.length && MINHAYA_SKIP_RE.test(minhayaTarget[minhayaPos])) minhayaPos++; }
 function buildMinhayaMode(cur) {
   minhayaTarget = getPrimaryAnswer(cur.answer); minhayaPos = 0; skipMinhayaSeparators(); renderMinhayaDisplay(cur);
@@ -806,7 +812,8 @@ function submitSelfMode(judge) {
 
 function passQuizQuestion() {
   stopQuizTimer();
-  evaluateRoundAnswer(false, "🏳️ パスしました（成績には記録しません）", { pass: true });
+  // ★【0.03.06】パスは不正解として記録する
+  evaluateRoundAnswer(false, "🏳️ パスしました（不正解として記録）");
 }
 
 function submitQuizAction() {
