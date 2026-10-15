@@ -1,11 +1,12 @@
 // ----------------- クイズ機能 -----------------
 
 // ----------------- ネイティブ発音対応 TTSエンジン -----------------
+const JA_CHAR_RE = /[　-ヿ㐀-鿿豈-﫿！-｠]/;
 function isEnglishText(text) {
   if (!text) return false;
-  const cleanText = text.trim();
-  // 英語のアルファベットや一般的な記号だけで構成されているか（日本語が含まれていないか）
-  return /^[A-Za-z0-9\s,.:;?!"'\-()]+$/.test(cleanText);
+  const t = text.trim();
+  // ★【0.03.02】日本語の文字が無く、アルファベットを含めば英語（[ ] / ～ などの記号が混ざっていても英語の声で読む）
+  return /[A-Za-z]/.test(t) && !JA_CHAR_RE.test(t);
 }
 
 function getBestVoice(langPrefix) {
@@ -21,6 +22,36 @@ function getBestVoice(langPrefix) {
   return bestVoice;
 }
 
+// 読み上げ用に記号を整える（[to be] → to be、空欄 ( ) → 「ブランク」など）
+function cleanTextForSpeech(text) {
+  return String(text || '')
+    .replace(/[\[\]［］]/g, ' ')
+    .replace(/\(\s*\)|（\s*）|\(　+\)|（　+）|_{2,}|＿{2,}/g, ' blank ')
+    .replace(/[～〜~]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+// ★【0.03.02】英語と日本語が混ざった文は、英語の部分は英語の声、日本語の部分は日本語の声で順番に読む
+function splitSpeechSegments(text) {
+  const segs = [];
+  const re = /[　-ヿ㐀-鿿豈-﫿！-｠]+/g;
+  let last = 0, m;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) segs.push({ ja: false, t: text.slice(last, m.index) });
+    segs.push({ ja: true, t: m[0] });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) segs.push({ ja: false, t: text.slice(last) });
+  // アルファベットを含まない部分（数字・記号）は前の部分にくっつける
+  const merged = [];
+  segs.forEach(sg => {
+    if (!sg.ja && !/[A-Za-z]/.test(sg.t)) { if (merged.length) merged[merged.length - 1].t += sg.t; else merged.push({ ja: true, t: sg.t }); }
+    else if (merged.length && merged[merged.length - 1].ja === sg.ja) merged[merged.length - 1].t += sg.t;
+    else merged.push({ ...sg });
+  });
+  return merged.filter(sg => sg.t.trim() !== '' && /[^\s.,。、・()（）\-]/.test(sg.t));
+}
+
 function speakText(text, options = {}) {
   if (!('speechSynthesis' in window) || localStorage.getItem('muteTTS') === 'true') return;
   window.speechSynthesis.cancel();
@@ -29,25 +60,21 @@ function speakText(text, options = {}) {
   const div = document.createElement('div');
   // ★【0.03.00】漢文は書き下し文で、構造式は「構造式」と読み上げる
   div.innerHTML = typeof richTextToSpeech === 'function' ? richTextToSpeech(text) : text;
-  const plainText = div.textContent || div.innerText || "";
+  const plainText = cleanTextForSpeech(div.textContent || div.innerText || "");
+  if (!plainText) return;
 
-  const utterance = new SpeechSynthesisUtterance(plainText);
-  utterance.rate = options.rate || 1.0;
-  utterance.pitch = options.pitch || 1.0;
-  utterance.volume = options.volume || 1.0;
-
-  if (isEnglishText(plainText)) {
-    const enVoice = getBestVoice('en');
-    if (enVoice) { utterance.voice = enVoice; utterance.lang = enVoice.lang; }
-    else { utterance.lang = 'en-US'; }
-  } else {
-    const jaVoice = getBestVoice('ja');
-    if (jaVoice) { utterance.voice = jaVoice; utterance.lang = jaVoice.lang; }
-    else { utterance.lang = 'ja-JP'; }
-  }
-  
-  utterance.onerror = (e) => console.error("TTSエラー:", e);
-  window.speechSynthesis.speak(utterance);
+  const segments = isEnglishText(plainText) ? [{ ja: false, t: plainText }] : splitSpeechSegments(plainText);
+  const enVoice = getBestVoice('en'), jaVoice = getBestVoice('ja');
+  segments.forEach(sg => {
+    const utterance = new SpeechSynthesisUtterance(sg.t.trim());
+    utterance.rate = options.rate || 1.0;
+    utterance.pitch = options.pitch || 1.0;
+    utterance.volume = options.volume || 1.0;
+    const v = sg.ja ? jaVoice : enVoice;
+    if (v) { utterance.voice = v; utterance.lang = v.lang; } else utterance.lang = sg.ja ? 'ja-JP' : 'en-US';
+    utterance.onerror = (e) => console.error("TTSエラー:", e);
+    window.speechSynthesis.speak(utterance);
+  });
 }
 
 if ('speechSynthesis' in window) {
@@ -68,22 +95,27 @@ function loadScopePath() {
 function buildQuizScopeDropdown() {
   const container = document.getElementById('scopeSelectors'); if(!container) return;
   loadScopePath();
-  container.innerHTML = ''; createScopeSelect(0, getTopLevelCategories());
-  // 保存されたパスを選択状態に復元
-  if (selectedScopePath.length > 0) {
-    const selects = container.querySelectorAll('select');
-    if (selectedScopePath[0] === 'all' && selects[0]) { selects[0].value = 'all'; }
-    else {
-      selectedScopePath.forEach((val, depth) => {
-        const sel = container.querySelectorAll('select')[depth];
-        if (sel) {
-          sel.value = val;
-          const children = categoryTree[val] || [];
-          if (children.length > 0 && depth === selectedScopePath.length - 1) createScopeSelect(depth + 1, children);
-        }
-      });
+  // ★【0.03.02】保存されたパスを「全階層」復元する（以前は最上位しか復元されず、クイズ後にトップだけの表示に戻っていた）
+  let path = [];
+  if (selectedScopePath[0] === 'all') path = ['all'];
+  else {
+    for (let d = 0; d < selectedScopePath.length; d++) {
+      const v = selectedScopePath[d];
+      const ok = d === 0 ? getTopLevelCategories().includes(v) : (categoryTree[path[d - 1]] || []).includes(v);
+      if (!ok) break;
+      path.push(v);
     }
   }
+  selectedScopePath = path;
+  container.innerHTML = ''; createScopeSelect(0, getTopLevelCategories());
+  if (path[0] === 'all') { const s0 = container.querySelector('select'); if (s0) s0.value = 'all'; return; }
+  path.forEach((val, depth) => {
+    const sel = container.querySelectorAll('select')[depth];
+    if (!sel) return;
+    sel.value = val;
+    const children = categoryTree[val] || [];
+    if (children.length > 0) createScopeSelect(depth + 1, children);
+  });
 }
 function createScopeSelect(depth, categoriesToShow) {
   if (categoriesToShow.length === 0) return;
@@ -118,6 +150,12 @@ function quitQuiz() {
   openPage('pgHome');
 }
 
+// ★【0.03.02】問題と解答の入れ替え。例文・テスト（選択肢つき）のカードは入れ替えない
+function swapQuizEntry(q) {
+  if (q.kind || (Array.isArray(q.choices) && q.choices.length)) return q;
+  return { ...q, question: q.answer, answer: q.question, questionImage: q.answerImage, answerImage: q.questionImage, _swapped: true };
+}
+
 function normalizeAnswer(str) {
   if(!str) return '';
   let s = String(str).replace(/[Ａ-Ｚａ-ｚ０-９]/g, c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0)).toLowerCase().trim();
@@ -127,8 +165,7 @@ function normalizeAnswer(str) {
 }
 function isAnswerCorrect(input, correctAnswer) {
   // ★【0.03.00】構造式(SMILESの「/」)や漢文ブロックを区切り文字として誤分割しないようにマスクしてから分割する
-  const mk = maskRichBlocks(correctAnswer);
-  const norms = mk.masked.split(/[/|]/).map(a => normalizeAnswer(mk.restore(a)));
+  const norms = splitAnswerAlternatives(correctAnswer).map(a => normalizeAnswer(a));
   const inNorm = normalizeAnswer(input);
   return norms.includes(inNorm);
 }
@@ -178,7 +215,7 @@ async function startQuiz(modeType = 'normal') {
           if(subset.length === 0) { alert("⚠️ 問題が見つかりません。"); return; }
           for (let i = subset.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [subset[i], subset[j]] = [subset[j], subset[i]]; }
           quizPool = subset.slice(0, limitCount);
-          if (document.getElementById('chkSwapQA').checked) quizPool = quizPool.map(q => ({ ...q, question: q.answer, answer: q.question, questionImage: q.answerImage, answerImage: q.questionImage }));
+          if (document.getElementById('chkSwapQA').checked) quizPool = quizPool.map(swapQuizEntry);
           // ★【0.02.65】選択式モードは品詞タグごとに独立した問題として連続出題する
           if (['choice', 'minhaya', 'tap'].includes(document.getElementById('selQuizMode').value)) {
             quizPool = expandStructuredForChoiceModes(quizPool);
@@ -218,7 +255,7 @@ async function startQuiz(modeType = 'normal') {
   subset.sort((a, b) => prioritize(a) - prioritize(b));
   quizPool = subset.slice(0, limitCount); quizIndex = 0;
 
-  if (document.getElementById('chkSwapQA').checked) quizPool = quizPool.map(q => ({ ...q, question: q.answer, answer: q.question, questionImage: q.answerImage, answerImage: q.questionImage }));
+  if (document.getElementById('chkSwapQA').checked) quizPool = quizPool.map(swapQuizEntry);
   // ★【0.02.65】選択式モードは品詞タグごとに独立した問題として連続出題する
   if (['choice', 'minhaya', 'tap'].includes(document.getElementById('selQuizMode').value)) {
     quizPool = expandStructuredForChoiceModes(quizPool);
@@ -242,6 +279,8 @@ function loadQuizQuestion() {
     let qDisplay = cur.question, qSpeech = cur.question;
     if (qStructuredSelf) { qDisplay = formatStructuredAnswerHTML(qStructuredSelf); qSpeech = qStructuredSelf.map(s => s.text).join('。'); }
     else if (aStructured) { qDisplay = stripParens(cur.question); qSpeech = qDisplay; }
+    // 例文・テスト問題は、問題文（1行目の英文）だけを読み上げる
+    if (cur.kind && /\n/.test(cur.question)) qSpeech = cur.question.split('\n')[0];
     qEl.innerHTML = renderRichText(qDisplay, { kanbunRows: 12 });
     if (cur._senseLabel) {
       const senseDiv = document.createElement('div');
@@ -257,10 +296,20 @@ function loadQuizQuestion() {
     }
     hydrateRich(qEl, { chemScale: 1.6 });
   document.getElementById('quizFeedback').style.display = 'none';
-  document.getElementById('txtQuickNote').value = cur.note || '';
+  const noteEl = document.getElementById('txtQuickNote');
+  noteEl.value = cur.note || ''; autoResizeNote(noteEl);
+  currentNoteCardId = cur._sourceId || cur.id;
+  const noteHint = document.getElementById('lblNoteTyping'); if (noteHint) noteHint.style.display = 'none';
 
   if(document.getElementById('chkTTS').checked) {
     speakText(qSpeech);
+  }
+  // ★【0.03.02】テスト形式で選択肢があるカードは、記述式でも選択肢を問題文の下に表示する
+  if (Array.isArray(cur.choices) && cur.choices.length) {
+    const chDiv = document.createElement('div');
+    chDiv.className = 'quiz-card-choices';
+    chDiv.innerText = cur.choices.join(' ／ ');
+    qEl.appendChild(chDiv);
   }
 
   let mode = document.getElementById('selQuizMode').value;
@@ -298,8 +347,16 @@ function loadQuizQuestion() {
   quizTimeLimit = base; quizTimeLeft = base;
   stopQuizTimer(); updateTimerUI();
   
-  let hintShown = false; document.getElementById('lblQuizHint').style.display = 'none';
+  // ★【0.03.02】解いている間にヒントを少しずつ出す
+  //  ①メモ（語源など。答えの部分は伏せ字）→ ②先頭の文字と文字数 → ③半分の文字
+  //  「💡ヒント」ボタンで次の段階をすぐに見ることもできる。対戦中はヒントなし
+  const hb = document.getElementById('lblQuizHint');
+  hb.style.display = 'none'; hb.innerHTML = '';
   const speed = document.getElementById('selQuizSpeed').value;
+  quizHintState = buildHintStages(cur, mode, aStructured, richAnswer);
+  const hintBtn = document.getElementById('btnQuizHint');
+  if (hintBtn) hintBtn.style.display = (quizHintState.stages.length && !window.currentOnlineMatch) ? 'inline-flex' : 'none';
+  const autoHintAt = speed === 'expert' ? [] : speed === 'easy' ? [0.15, 0.35, 0.6] : [0.25, 0.55, 0.8];
   const _timerStart = Date.now();
   const _timerBase = base;
   quizTimer = setInterval(() => {
@@ -310,22 +367,81 @@ function loadQuizQuestion() {
       evaluateRoundAnswer(false, "⏰ 時間切れ");
       return;
     }
-    if (speed !== 'expert' && !richAnswer && !hintShown && quizTimeLeft < (quizTimeLimit * (speed === 'easy' ? 0.7 : 0.4))) {
-      hintShown = true;
-      // ★【0.02.65】記述式モードで解答欄が複数に分かれている場合、欄ごとに1文字目のヒントを出す
-      if (mode === 'desc' && aStructured) {
-        aStructured.forEach((seg, i) => {
-          const hb = document.getElementById('structHint_' + i);
-          if (hb) { hb.innerHTML = `先頭:「${escapeHtml(seg.text.charAt(0))}」`; hb.style.display = 'inline'; }
-        });
-      } else {
-        const hb = document.getElementById('lblQuizHint');
-        const ans1 = getPrimaryAnswer(cur.answer);
-        hb.innerText = `ヒント: 先頭は「 ${ans1.charAt(0)} 」 ${ans1.length>3?`(全 ${ans1.length} 文字)`:''}`;
-        hb.style.display = 'inline-block';
-      }
+    if (window.currentOnlineMatch) return;
+    const elapsed = 1 - quizTimeLeft / quizTimeLimit;
+    while (quizHintState.shown < quizHintState.stages.length && autoHintAt[quizHintState.shown] !== undefined && elapsed >= autoHintAt[quizHintState.shown]) {
+      showNextHint();
     }
   }, 100);
+}
+
+let quizHintState = { stages: [], shown: 0 };
+let currentNoteCardId = null;
+
+// 答え（と、その言い換え）をメモから伏せ字にする
+function answerTokensForMask(answer) {
+  const mk = maskRichBlocks(String(answer || ''));
+  return mk.masked.split(/[\/|、,，\u3000]+/).map(t => mk.restore(t))
+    .map(t => t.replace(/\([^()]*\)|（[^（）]*）|[［\[][^\]］]*[\]］]/g, ' ').replace(/[～〜~…]/g, ' ').trim())
+    .flatMap(t => /[A-Za-z]/.test(t) ? t.split(/\s+/) : [t.replace(/\s+/g, '')])
+    .map(t => t.trim())
+    .filter(t => t && !/^[A-Ca-c]$/.test(t) && !/^(to|of|in|on|at|for|with|the|a|an|be|do|one's|oneself|that)$/i.test(t) && t.length >= (/[A-Za-z]/.test(t) ? 3 : 2));
+}
+function maskAnswerInText(text, answer) {
+  let out = String(text || '');
+  const toks = [...new Set(answerTokensForMask(answer))].sort((a, b) => b.length - a.length);
+  toks.forEach(t => {
+    if (/[A-Za-z]/.test(t)) {
+      const stem = t.length > 5 ? t.slice(0, Math.max(4, t.length - 3)) : t;
+      const re = new RegExp('\\b' + stem.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[A-Za-z]*', 'gi');
+      out = out.replace(re, m => m[0] + '＿'.repeat(Math.min(6, m.length - 1)));
+    } else {
+      out = out.split(t).join('〇'.repeat(Math.min(4, t.length)));
+    }
+  });
+  return out;
+}
+function buildHintStages(cur, mode, structured, richAnswer) {
+  const stages = [];
+  const note = String(cur.note || '').trim();
+  if (note) stages.push({ html: '📝 ' + escapeHtml(maskAnswerInText(note, cur.answer)).replace(/\n/g, '<br>') });
+  if (richAnswer || mode !== 'desc') return { stages, shown: 0 };
+  if (structured) {
+    stages.push({ structured: structured.map(seg => seg.text.charAt(0)) });
+  } else {
+    const ans = getPrimaryAnswer(cur.answer);
+    const chars = [...ans];
+    stages.push({ html: `🔤 先頭は「 ${escapeHtml(chars[0] || '')} 」 （全 ${chars.length} 文字）` });
+    if (chars.length >= 4) {
+      const n = Math.ceil(chars.length / 2);
+      const shown = chars.map((c, i) => i < n || /[\s　]/.test(c) ? c : '＿').join('');
+      stages.push({ html: `🔤 ${escapeHtml(shown)}` });
+    }
+  }
+  return { stages, shown: 0 };
+}
+function showNextHint() {
+  if (quizPhase !== 'q' || window.currentOnlineMatch) return;
+  const st = quizHintState;
+  if (st.shown >= st.stages.length) return;
+  const stage = st.stages[st.shown++];
+  if (stage.structured) {
+    stage.structured.forEach((c, i) => {
+      const el = document.getElementById('structHint_' + i);
+      if (el) { el.innerHTML = `先頭:「${escapeHtml(c)}」`; el.style.display = 'inline'; }
+    });
+  } else {
+    const hb = document.getElementById('lblQuizHint');
+    // 文字ヒントは最新のものだけ、メモは残す
+    hb.querySelectorAll('.hint-letter').forEach(e => e.remove());
+    const line = document.createElement('div');
+    if (stage.html.startsWith('🔤')) line.className = 'hint-letter';
+    line.innerHTML = stage.html;
+    hb.appendChild(line);
+    hb.style.display = 'block';
+  }
+  const btn = document.getElementById('btnQuizHint');
+  if (btn && st.shown >= st.stages.length) btn.style.display = 'none';
 }
 
 function updateTimerUI() {
@@ -342,8 +458,7 @@ function stopQuizTimer() {
 }
 
 function getPrimaryAnswer(ans) {
-  const mk = maskRichBlocks(ans);
-  const first = mk.restore(mk.masked.split(/[/|]/)[0].trim());
+  const first = splitAnswerAlternatives(ans)[0].trim();
   // ★【0.02.63】先頭が (タグ) から始まる場合はタグを除いた本文側を代表解答として使う
   // （4択・みんはや・文字タップ・自己申告モードや、ヒント表示等で使われる）
   const m = first.match(/^(?:\([^()]*\)\s*)+([\s\S]*)$/);
@@ -394,24 +509,60 @@ function setupDescAnswerArea(structured) {
   }
 }
 
+// ★【0.03.02】選択肢の候補は「正解と同じ側」から取る
+// （問題と解答を入れ替えたときに、正解だけ英語・ほかは日本語、のように一目で分かってしまう不具合の修正）
+function choiceSideText(q, swapped) {
+  return swapped ? getPrimaryAnswer(stripParens(q.question) || q.question) : getPrimaryAnswer(q.answer);
+}
+function choiceShape(t) {
+  const s = String(t || '');
+  return {
+    latin: /[A-Za-z]/.test(s) && !JA_CHAR_RE.test(s),
+    ph: /(^|[\s(（])[A-C](?=$|[\s)）.,])|[～〜~]|\.\.\./.test(s),
+    words: s.trim().split(/\s+/).length
+  };
+}
+function buildChoiceCandidates(cur, correctPrimary) {
+  const swapped = !!cur._swapped;
+  const want = choiceShape(correctPrimary);
+  const normCorrect = normalizeAnswer(correctPrimary);
+  const seen = new Set([normCorrect]);
+  const pool = [];
+  db.forEach(q => {
+    if (q.id === cur.id || q.id === cur._sourceId) return;
+    if (Array.isArray(q.choices) && q.choices.length) return; // テスト問題の Yes/No 等は混ぜない
+    const t = choiceSideText(q, swapped);
+    if (!t) return;
+    const n = normalizeAnswer(t);
+    if (seen.has(n)) return; seen.add(n);
+    const sh = choiceShape(t);
+    let score = 0;
+    if (sh.latin === want.latin) score += 8;           // 英語なら英語、日本語なら日本語
+    if (sh.ph === want.ph) score += 3;                 // 「A」「～」入りの熟語なら熟語どうし
+    if (Math.abs(sh.words - want.words) <= 1) score += 2;
+    if (q.category === cur.category) score += 2;
+    if (q.kind === cur.kind) score += 1;
+    pool.push({ t, score: score + Math.random() * 1.5 });
+  });
+  pool.sort((a, b) => b.score - a.score);
+  return pool.map(p => p.t);
+}
+
 function buildFourChoices(cur) {
   const area = document.getElementById('boxChoiceArea'); area.innerHTML = '';
   const correctPrimary = getPrimaryAnswer(cur.answer);
-  
-  let altCandidates = [];
-  // ★【0.02.65】センス分割された仮想エントリーの場合、元カード(_sourceId)自身は候補から除外する
-  const catAnswers = db.filter(q => q.category === cur.category && q.id !== cur._sourceId && getPrimaryAnswer(q.answer) !== correctPrimary).map(q => getPrimaryAnswer(q.answer));
-  altCandidates = [...new Set(catAnswers)];
-  if(altCandidates.length < 3) {
-    const globalAnswers = db.filter(q => q.id !== cur._sourceId && getPrimaryAnswer(q.answer) !== correctPrimary).map(q => getPrimaryAnswer(q.answer));
-    altCandidates = [...new Set([...altCandidates, ...globalAnswers])];
+  let options;
+  if (Array.isArray(cur.choices) && cur.choices.length >= 2) {
+    // ★【0.03.02】カードに選択肢が決まっている（テスト問題など）場合はそれを使う
+    options = [...cur.choices];
+    if (!options.some(o => normalizeAnswer(o) === normalizeAnswer(correctPrimary))) options.push(correctPrimary);
+  } else {
+    options = [correctPrimary, ...buildChoiceCandidates(cur, correctPrimary).slice(0, 3)];
+    while (options.length < 4) options.push(`選択肢_${Math.floor(Math.random()*1000)}`);
   }
-  altCandidates.sort(() => Math.random() - 0.5);
-  let finalFour = [correctPrimary, ...altCandidates.slice(0, 3)];
-  while (finalFour.length < 4) finalFour.push(`選択肢_${Math.floor(Math.random()*1000)}`);
-  finalFour.sort(() => Math.random() - 0.5);
+  options.sort(() => Math.random() - 0.5);
 
-  finalFour.forEach((text, i) => {
+  options.forEach((text, i) => {
     const btn = document.createElement('button'); btn.className = 'choice-btn';
     btn.innerHTML = `<div class="choice-idx">${i+1}</div><div style="flex:1;">${renderRichText(text, { escape: true, kanbunRows: 8 })}</div>`;
     hydrateRich(btn, { chemScale: 1.1 });
@@ -422,6 +573,12 @@ function buildFourChoices(cur) {
     };
     area.appendChild(btn);
   });
+}
+
+// みんはや・文字タップのダミー文字も、正解と同じ側（入れ替え時は問題側）の文字から取る
+function sideCharsPool(cur) {
+  const swapped = !!cur._swapped;
+  return db.map(q => choiceSideText(q, swapped).replace(RICH_BLOCK_RE, ''));
 }
 
 let minhayaTarget = ""; let minhayaPos = 0;
@@ -458,7 +615,7 @@ function renderMinhayaDisplay(cur) {
   const targetChars = minhayaTarget.split('');
   
   // ★【0.03.00】構造式・漢文などの埋め込みブロックの記号を選択肢の文字に混ぜない
-  db.forEach(q => getPrimaryAnswer(q.answer).replace(RICH_BLOCK_RE, '').split('').forEach(c => { 
+  sideCharsPool(cur).forEach(t => t.split('').forEach(c => { 
     if (!/[\s,、，。・/|]/.test(c) && !targetChars.includes(c)) distChars.push(c); 
   }));
   distChars = [...new Set(distChars)].sort(() => Math.random() - 0.5);
@@ -498,8 +655,9 @@ function buildTapChoices(cur) {
   inArea.innerHTML = ''; chArea.innerHTML = '';
   
   let chars = currentTapTarget.split('');
-  let allChars = db.map(q => getPrimaryAnswer(q.answer).replace(RICH_BLOCK_RE, '')).join('').replace(/[、，／/ \u3000,\da-zA-Z|]/g, '').split('');
-  if(allChars.length===0) allChars='あいうえおかきくけこ'.split('');
+  const latinTarget = /[A-Za-z]/.test(currentTapTarget) && !JA_CHAR_RE.test(currentTapTarget);
+  let allChars = sideCharsPool(cur).join('').replace(latinTarget ? /[^A-Za-z]/g : /[、，／/ \u3000,\da-zA-Z|]/g, '').split('');
+  if(allChars.length===0) allChars=(latinTarget ? 'abcdefghijklmnopqrstuvwxyz' : 'あいうえおかきくけこ').split('');
   for(let i=0;i<2;i++) chars.push(allChars[Math.floor(Math.random()*allChars.length)]);
   chars.sort(() => Math.random() - 0.5);
   
@@ -677,8 +835,10 @@ function evaluateRoundAnswer(isCorrect, head) {
         }
       }
     }
+    touchStats(m);
     saveData();
   }
+  const _hintBtn = document.getElementById('btnQuizHint'); if (_hintBtn) _hintBtn.style.display = 'none';
   
   const fb = document.getElementById('quizFeedback');
   document.getElementById('feedbackResultText').innerText = head;
@@ -710,9 +870,16 @@ function evaluateRoundAnswer(isCorrect, head) {
     clearTimeout(autoNextTimeout);
     // ★【0.02.63】構造化解答は読む量が多いので、センス数に応じて自動送りまでの時間を延長する
     const advanceDelay = currentStructuredAnswer ? Math.min(15000, 3000 + currentStructuredAnswer.length * 2000) : 3000;
-    autoNextTimeout = setTimeout(() => {
-      if (quizPhase === 'a') submitQuizAction();
-    }, advanceDelay);
+    // ★【0.03.02】クイックメモを入力中は自動で次へ進まない（入力が終わるまで待つ）
+    const scheduleAdvance = (delay) => {
+      autoNextTimeout = setTimeout(() => {
+        if (quizPhase !== 'a') return;
+        const ae = document.activeElement;
+        if (ae && ae.id === 'txtQuickNote') { scheduleAdvance(1500); return; }
+        submitQuizAction();
+      }, delay);
+    };
+    scheduleAdvance(advanceDelay);
   }
 }
 
@@ -722,8 +889,34 @@ function showComboAnim() {
   cd.classList.remove('pop'); void cd.offsetWidth; cd.classList.add('pop');
 }
 
+// ★【0.03.02】クイックメモは入力するたびに保存する（どのカードのメモかは出題時に記録したIDで決める）
+let _noteSaveTimer = null;
 function saveQuickNote(val) {
-  const m = db.find(q=>q.id === quizPool[quizIndex].id); if(m) { m.note = val; saveData(); }
+  const id = currentNoteCardId || (quizPool[quizIndex] && (quizPool[quizIndex]._sourceId || quizPool[quizIndex].id));
+  const m = db.find(q => q.id === id);
+  if (!m) return;
+  const v = String(val || '').trim();
+  if ((m.note || '') === v) return;
+  if (v) m.note = v; else delete m.note;
+  quizPool.forEach(q => { if (q.id === id || q._sourceId === id) { if (v) q.note = v; else delete q.note; } });
+  touchCard(m); saveData();
+}
+function onQuickNoteInput(el) {
+  autoResizeNote(el);
+  clearTimeout(_noteSaveTimer);
+  _noteSaveTimer = setTimeout(() => saveQuickNote(el.value), 600);
+}
+function onQuickNoteFocus() {
+  const lbl = document.getElementById('lblNoteTyping'); if (lbl) lbl.style.display = 'inline';
+}
+function onQuickNoteBlur(el) {
+  clearTimeout(_noteSaveTimer); saveQuickNote(el.value);
+  const lbl = document.getElementById('lblNoteTyping'); if (lbl) lbl.style.display = 'none';
+}
+function autoResizeNote(el) {
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = Math.min(160, Math.max(38, el.scrollHeight + 2)) + 'px';
 }
 
 async function recordDailyLog(isCorrect) {

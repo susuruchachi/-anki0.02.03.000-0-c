@@ -33,14 +33,28 @@ function stripParens(text) {
 // ・2パート未満（「/」が無い）場合は、先頭のタグが品詞名（名詞・他動詞・熟語 など）のときだけ対象にする
 //   （数式の "(a+b)^2" 等の誤検知防止のため。★【0.03.01】単語帳取込の「(形容詞)合理的な　理性的な」のような1品詞のカード用）
 // ・ラベルはタグ内のテキストをそのまま連結したもの（自動整形はしない＝カードの書き方がそのまま反映される）
+// ★【0.03.02】「/」「|」で解答を区切るとき、[ ]・( ) の中の「/」は区切りとみなさない
+// 例: be reminded of A [that ... / to do] は1つの解答
+function splitAnswerAlternatives(text, sepChars = '/|') {
+  const mk = maskRichBlocks(String(text == null ? '' : text));
+  const src = mk.masked;
+  const out = []; let cur = '', depth = 0;
+  for (const ch of src) {
+    if ('[［(（'.includes(ch)) depth++;
+    else if (']］)）'.includes(ch)) depth = Math.max(0, depth - 1);
+    if (depth === 0 && sepChars.includes(ch)) { out.push(mk.restore(cur)); cur = ''; continue; }
+    cur += ch;
+  }
+  out.push(mk.restore(cur));
+  return out;
+}
 const KNOWN_POS_TAGS = ['名詞', '動詞', '他動詞', '自動詞', '形容詞', '副詞', '前置詞', '接続詞', '代名詞', '助動詞', '間投詞', '熟語', '句', '成句'];
 function isKnownPosTag(label) {
   return KNOWN_POS_TAGS.includes(String(label || '').replace(/[①-⑳0-9０-９]/g, '').trim());
 }
 function parseStructuredAnswer(answerText) {
   if (!answerText) return null;
-  const mk = maskRichBlocks(answerText);
-  const rawSegments = mk.masked.split('/').map(mk.restore);
+  const rawSegments = splitAnswerAlternatives(answerText, '/');
   if (rawSegments.length < 2) {
     const single = String(rawSegments[0] || '').match(/^\s*\(([^()]*)\)/);
     if (!single || !isKnownPosTag(single[1])) return null;
@@ -85,9 +99,14 @@ function isStructuredSegmentCorrect(input, correctText) {
   const mk = maskRichBlocks(correctText);
   const candidates = mk.masked.split(/[\u3000,、/|]+/).map(s => mk.restore(s).trim()).filter(s => s !== '');
   if (candidates.length === 0) return false;
+  const forms = new Set(candidates.flatMap(c => structuredTokenForms(c)));
   const inNorm = normalizeStructuredToken(input);
   if (inNorm === '') return false;
-  return candidates.some(c => structuredTokenForms(c).includes(inNorm));
+  if (forms.has(inNorm)) return true;
+  // ★【0.03.02】「野蛮な 残忍な」「野蛮な、残忍な」のように複数の訳を区切って書いた場合も、
+  // 区切った一つ一つがすべて正解の訳なら正解にする（以前は全体を1語として比べていたため不正解になっていた）
+  const parts = String(input).split(/[\s\u3000、,，・／/]+/).map(normalizeStructuredToken).filter(x => x !== '');
+  return parts.length > 1 && parts.every(p => forms.has(p));
 }
 
 // 構造化解答を表示用HTML（ラベル：本文、を1行ずつ）に整形する。

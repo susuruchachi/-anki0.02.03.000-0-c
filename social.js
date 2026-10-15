@@ -739,10 +739,16 @@ function renderOnlineQuestion(timeLimit) {
   
   if (fmt === 'choice') {
     const correctPrimary = (typeof getPrimaryAnswer === 'function') ? getPrimaryAnswer(q.answer) : q.answer.split(/[/|]/)[0].trim();
-    let dummys = [...new Set(db.filter(item => item.answer !== q.answer).map(item => (typeof getPrimaryAnswer === 'function') ? getPrimaryAnswer(item.answer) : item.answer.split(/[/|]/)[0].trim()))];
-    dummys.sort(() => Math.random() - 0.5);
-    let choices = [correctPrimary];
-    for (let i = 0; i < 3; i++) { if (dummys[i]) choices.push(dummys[i]); else choices.push(`ダミー候補 ${i+1}`); }
+    // ★【0.03.02】カードに選択肢があればそれを使い、無ければ正解と同じ側・同じ形の候補から選ぶ
+    let choices;
+    if (Array.isArray(q.choices) && q.choices.length >= 2) {
+      choices = [...q.choices];
+      if (!choices.includes(correctPrimary)) choices.push(correctPrimary);
+    } else {
+      const dummys = buildChoiceCandidates(q, correctPrimary);
+      choices = [correctPrimary];
+      for (let i = 0; i < 3; i++) { if (dummys[i]) choices.push(dummys[i]); else choices.push(`ダミー候補 ${i+1}`); }
+    }
     choices.sort(() => Math.random() - 0.5);
     gameView.innerHTML = headerHtml + `
       <div style="display:grid; grid-template-columns:1fr; gap:10px; margin-bottom:20px;">
