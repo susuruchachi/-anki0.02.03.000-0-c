@@ -116,6 +116,14 @@ function ensureCategoryEditorDom() {
   document.body.appendChild(ov);
   return ov;
 }
+// 教科タグの状態（自分で設定／親から引き継ぎ／なし）
+function subjectStatusHTML(cat) {
+  const own = getOwnSubject(cat), eff = getCategorySubject(cat);
+  if (own) return `<span class="hint-small">… ${subjectChipHTML(own, true)}${catSubjects && Object.prototype.hasOwnProperty.call(catSubjects, cat) ? '' : '（フォルダー名から）'}</span>`;
+  if (own === '') return '<span class="hint-small">… なし（親の教科を引き継がない）</span>';
+  if (eff) return `<span class="hint-small">… ${subjectChipHTML(eff, true)}（親フォルダーから）</span>`;
+  return '<span class="hint-small">… 未設定（サブフォルダーにも引き継がれます）</span>';
+}
 function closeCategoryEditor() { const ov = document.getElementById('catEditOverlay'); if (ov) ov.style.display = 'none'; }
 
 function openCategoryEditor(catName) {
@@ -160,6 +168,13 @@ function openCategoryEditor(catName) {
       ${btn('renumber', '🔢', '問題番号を振り直す', { disabled: ro })}
     </div>
     <div id="catEditPanel"></div>
+    <div class="cat-edit-sec">🏷️ 教科タグ ${subjectStatusHTML(catName)}</div>
+    <div class="subj-pick" id="catSubjPick">
+      ${SUBJECTS.map(sb => `<button type="button" class="chip subj-filter-chip${getOwnSubject(catName) === sb.name ? ' active' : ''}" data-subj="${escAttr(sb.name)}" style="--subj:${sb.color}">${escapeHtml(sb.name)}</button>`).join('')}
+      ${usedSubjects().filter(n => !SUBJECTS.some(s => s.name === n)).map(n => `<button type="button" class="chip subj-filter-chip${getOwnSubject(catName) === n ? ' active' : ''}" data-subj="${escAttr(n)}" style="--subj:${subjectColor(n)}">${escapeHtml(n)}</button>`).join('')}
+      <button type="button" class="chip" data-subj-custom="1">＋ 自分で入力</button>
+      <button type="button" class="chip" data-subj-clear="1">${catSubjects && Object.prototype.hasOwnProperty.call(catSubjects, catName) ? '↩️ 設定を外す' : '— なし'}</button>
+    </div>
     <div class="cat-edit-sec">共有</div>
     <div class="cat-act-grid">
       ${info.shared ? '' : btn('share', '🔗', '共有URLを発行', { disabled: isRoot })}
@@ -172,6 +187,29 @@ function openCategoryEditor(catName) {
     <button type="button" class="btn btn-secondary" style="margin-top:14px;" onclick="closeCategoryEditor()">閉じる</button>`;
 
   body.querySelectorAll('.cat-act').forEach(b => { b.onclick = () => runCategoryAction(catName, b.getAttribute('data-act'), info); });
+  // ★【0.03.07】教科タグ
+  const afterSubj = () => { afterCategoryChange(); openCategoryEditor(catName); };
+  body.querySelectorAll('[data-subj]').forEach(b => { b.onclick = () => {
+    const sb = b.getAttribute('data-subj');
+    setCategorySubject(catName, getOwnSubject(catName) === sb && Object.prototype.hasOwnProperty.call(catSubjects, catName) ? undefined : sb);
+    afterSubj();
+  }; });
+  const custom = body.querySelector('[data-subj-custom]');
+  if (custom) custom.onclick = () => {
+    const panel = showCategoryPanel(`<label class="section-label">教科名（例: 現代文、政治・経済）</label>
+      <input type="text" id="catEditInput" class="form-control" maxlength="12">
+      <div class="form-row" style="margin-top:8px;"><button type="button" class="btn" id="catEditOk">設定</button></div>`);
+    const ok = () => { const n = (document.getElementById('catEditInput').value || '').trim(); if (!n) return; setCategorySubject(catName, n); afterSubj(); };
+    panel.querySelector('#catEditOk').onclick = ok;
+    panel.querySelector('#catEditInput').onkeydown = e => { if (e.key === 'Enter') ok(); };
+  };
+  const clear = body.querySelector('[data-subj-clear]');
+  if (clear) clear.onclick = () => {
+    // 自分で付けた教科があれば外す（親から引き継ぐ）。無ければ「なし」を明示して、親の教科も引き継がない
+    if (catSubjects && Object.prototype.hasOwnProperty.call(catSubjects, catName)) setCategorySubject(catName, undefined);
+    else setCategorySubject(catName, '');
+    afterSubj();
+  };
   ov.style.display = 'flex';
 }
 
@@ -314,6 +352,7 @@ function renameCategory(oldName, newName) {
   if (categoryTree[oldName]) { categoryTree[newName] = categoryTree[oldName]; delete categoryTree[oldName]; }
   db.forEach(q => { if (q.category === oldName) { q.category = newName; touchCard(q); } });
   renameInSharedMeta(oldName, newName);
+  if (catSubjects && Object.prototype.hasOwnProperty.call(catSubjects, oldName)) { catSubjects[newName] = catSubjects[oldName]; delete catSubjects[oldName]; }
   markCatsDeleted([oldName]);
   markCatCreated(newName);
   replaceInScopePaths(oldName, newName);

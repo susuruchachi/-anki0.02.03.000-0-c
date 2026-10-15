@@ -98,6 +98,12 @@ h2 { font-size: 1.4rem; font-weight: 700; margin-bottom: 20px; display: flex; al
 .menu-sep { height: 1px; background: var(--border); margin: 6px 8px; }
 /* ★【0.03.02】フォルダー編集パネル */
 .cat-editor { padding: 16px; }
+.subj-chip { display: inline-block; font-size: 0.72rem; font-weight: 700; padding: 1px 8px; border-radius: 10px; margin-left: 6px; color: var(--subj); border: 1px solid var(--subj); background: color-mix(in srgb, var(--subj) 14%, transparent); vertical-align: middle; white-space: nowrap; }
+.subj-chip.small { font-size: 0.65rem; padding: 0 6px; }
+.subj-filter { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.chip.subj-filter-chip { border-color: var(--subj); color: var(--subj); }
+.chip.subj-filter-chip.active { background: var(--subj); border-color: var(--subj); color: #fff; }
+.subj-pick { display: flex; flex-wrap: wrap; gap: 6px; }
 .shared-doc-row { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.78rem; color: var(--text2); }
 .card-no { display: inline-block; font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; font-weight: 700; color: var(--text3); background: var(--bg3); border: 1px solid var(--border); border-radius: 6px; padding: 0 6px; margin-right: 6px; vertical-align: middle; }
 .quick-note { padding: 6px 8px; font-size: 0.85rem; resize: none; min-height: 38px; line-height: 1.45; font-family: inherit; }
@@ -355,6 +361,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
     <div class="card">
       <div class="form-group" id="scopeGroup">
         <label>🎯 出題範囲</label>
+        <select id="selScopeSubject" class="form-control" style="margin-bottom:8px; display:none;" onchange="onScopeSubjectChange(this.value)"></select>
         <div id="scopeSelectors" style="display:flex; flex-direction:column; gap:8px;"></div>
       </div>
       <div class="form-group" style="margin-bottom:0;">

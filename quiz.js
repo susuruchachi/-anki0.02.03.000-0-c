@@ -92,28 +92,48 @@ function loadScopePath() {
   try { const s = localStorage.getItem(SCOPE_STORAGE_KEY); if(s) selectedScopePath = JSON.parse(s); } catch(e) {}
 }
 
+// ★【0.03.07】教科で出題範囲を絞り込む
+function getScopeSubject() { try { return localStorage.getItem('susuru_anki_scope_subject') || ''; } catch (e) { return ''; } }
+function onScopeSubjectChange(v) {
+  try { localStorage.setItem('susuru_anki_scope_subject', v); } catch (e) {}
+  // 選んだ教科を含まないフォルダーが選ばれていたら、範囲を「全て」に戻す
+  if (v && selectedScopePath.length && selectedScopePath[0] !== 'all' && !categoryHasSubject(selectedScopePath[selectedScopePath.length - 1], v)) { selectedScopePath = []; saveScopePath(); }
+  buildQuizScopeDropdown();
+}
+function scopeVisible(cat) { const sb = getScopeSubject(); return !sb || categoryHasSubject(cat, sb); }
+function renderScopeSubjectSelect() {
+  const sel = document.getElementById('selScopeSubject'); if (!sel) return;
+  const subs = usedSubjects();
+  let cur = getScopeSubject();
+  if (cur && !subs.includes(cur)) { cur = ''; try { localStorage.setItem('susuru_anki_scope_subject', ''); } catch (e) {} }
+  sel.style.display = subs.length ? 'block' : 'none';
+  sel.innerHTML = `<option value="">🏷️ 教科：すべて</option>` + subs.map(sb => `<option value="${escAttr(sb)}">🏷️ ${escapeHtml(sb)}</option>`).join('');
+  sel.value = cur;
+}
+
 function buildQuizScopeDropdown() {
   const container = document.getElementById('scopeSelectors'); if(!container) return;
   loadScopePath();
+  renderScopeSubjectSelect();
   // ★【0.03.02】保存されたパスを「全階層」復元する（以前は最上位しか復元されず、クイズ後にトップだけの表示に戻っていた）
   let path = [];
   if (selectedScopePath[0] === 'all') path = ['all'];
   else {
     for (let d = 0; d < selectedScopePath.length; d++) {
       const v = selectedScopePath[d];
-      const ok = d === 0 ? getTopLevelCategories().includes(v) : (categoryTree[path[d - 1]] || []).includes(v);
+      const ok = (d === 0 ? getTopLevelCategories().includes(v) : (categoryTree[path[d - 1]] || []).includes(v)) && scopeVisible(v);
       if (!ok) break;
       path.push(v);
     }
   }
   selectedScopePath = path;
-  container.innerHTML = ''; createScopeSelect(0, getTopLevelCategories());
+  container.innerHTML = ''; createScopeSelect(0, getTopLevelCategories().filter(scopeVisible));
   if (path[0] === 'all') { const s0 = container.querySelector('select'); if (s0) s0.value = 'all'; return; }
   path.forEach((val, depth) => {
     const sel = container.querySelectorAll('select')[depth];
     if (!sel) return;
     sel.value = val;
-    const children = getChildCategories(val);
+    const children = getChildCategories(val).filter(scopeVisible);
     if (children.length > 0) createScopeSelect(depth + 1, children);
   });
 }
@@ -128,7 +148,7 @@ function createScopeSelect(depth, categoriesToShow) {
     const selects = Array.from(container.querySelectorAll('select')); selects.forEach((sel, idx) => { if (idx > depth) sel.remove(); });
     if (val === "all") { selectedScopePath = ["all"]; saveScopePath(); return; }
     selectedScopePath[depth] = val; selectedScopePath = selectedScopePath.slice(0, depth + 1); saveScopePath();
-    const children = getChildCategories(val); if (children.length > 0) createScopeSelect(depth + 1, children);
+    const children = getChildCategories(val).filter(scopeVisible); if (children.length > 0) createScopeSelect(depth + 1, children);
   };
   document.getElementById('scopeSelectors').appendChild(select);
 }
@@ -263,6 +283,9 @@ async function startQuiz(modeType = 'normal') {
     const targets = getAllSubcategories(cName);
     subset = subset.filter(q => targets.includes(q.category));
   }
+  // ★【0.03.07】教科で絞り込み中なら、その教科のフォルダーの問題だけ
+  const scopeSubject = getScopeSubject();
+  if (scopeSubject) { subset = subset.filter(q => getCategorySubject(q.category) === scopeSubject); scope = scope + '|' + scopeSubject; }
 
   // ★ オンライン対戦時はホスト（player1）が問題を生成して相手に共有する
   if (window.currentOnlineMatch) {

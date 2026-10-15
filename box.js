@@ -115,6 +115,11 @@ function renderBox() {
   // ★【0.03.03】フォルダーの番号順 → 問題番号順に並べる（追加した順ではなく）
   sortCardsByNumber(filtered);
   document.getElementById('boxTitle').innerText = titleString;
+  // ★【0.03.07】教科タグ
+  if (typeof currentViewContext === 'object' && currentViewContext.type === 'category') {
+    const sb = getCategorySubject(currentViewContext.value);
+    if (sb) document.getElementById('boxTitle').insertAdjacentHTML('beforeend', ' ' + subjectChipHTML(sb));
+  }
   document.getElementById('lblBoxCount').innerText = `${filtered.length} 件`;
   
   if (navContainer) container.appendChild(navContainer);

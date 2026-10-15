@@ -155,7 +155,7 @@ function factoryReset() {
   tombstoneCards(db.map(q => q.id));
   markCatsDeleted(categories.filter(c => c !== '未分類'));
   [...subscribedDocs, ...ownedDocs].forEach(id => markDocLeft(id));
-  db = []; categories = ["未分類"]; categoryTree = {}; subscribedDocs = []; ownedDocs = [];
+  db = []; categories = ["未分類"]; categoryTree = {}; subscribedDocs = []; ownedDocs = []; catSubjects = {};
   saveData(true); alert("💥 初期化完了。"); openPage('pgHome'); 
 }
 function escapeHtml(s) { if(!s) return ''; return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;"); }

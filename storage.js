@@ -13,6 +13,7 @@ let deletedCats = [];
 // ・クラウドへの保存は「丸ごと上書き」だけにせず、他の端末の変更を検知したら取り込んでから保存する
 // ================================================================
 let catStamps = {};   // { フォルダー名: { a: 作成(復活)時刻, d: 削除時刻 } }
+let catSubjects = {}; // ★【0.03.07】フォルダーの教科タグ { フォルダー名: '英語' }（'' は「なし（親から引き継がない）」）
 let deletedCardsAt = {}; // { カードID: 削除時刻 }（削除後に取り込み直したカードは updatedAt が新しいので復活できる）
 let docStamps = {};   // { 共有docId: { a: 購読時刻, d: 解除時刻 } }
 let structAt = 0;     // フォルダー構造・購読状態を最後に変更した時刻
@@ -106,6 +107,7 @@ function loadData() {
       if(p.deletedCards) deletedCards=p.deletedCards;
       if(p.deletedCats) deletedCats=p.deletedCats;
       if(p.catStamps) catStamps=p.catStamps;
+      if(p.catSubjects) catSubjects=p.catSubjects;
       if(p.deletedCardsAt) deletedCardsAt=p.deletedCardsAt;
       if(p.docStamps) docStamps=p.docStamps;
       if(p.structAt) structAt=p.structAt;
@@ -163,7 +165,9 @@ function repairInflatedStats(silent = false) {
 function structFingerprint() {
   const tree = {};
   Object.keys(categoryTree || {}).sort().forEach(k => { tree[k] = categoryTree[k]; });
-  return JSON.stringify([categories, tree, [...(subscribedDocs || [])].sort(), [...(ownedDocs || [])].sort()]);
+  const subj = {};
+  Object.keys(catSubjects || {}).sort().forEach(k => { subj[k] = catSubjects[k]; });
+  return JSON.stringify([categories, tree, [...(subscribedDocs || [])].sort(), [...(ownedDocs || [])].sort(), subj]);
 }
 // フォルダー構造が変わっていれば変更時刻を更新する（クラウドから取り込んだ変更では呼ばない）
 function updateStructStamp() {
@@ -173,7 +177,7 @@ function updateStructStamp() {
 }
 
 function buildSyncPayload() {
-  return { db, categories, categoryTree, subscribedDocs, ownedDocs, deletedCards, deletedCardsAt, deletedCats, catStamps, docStamps, structAt };
+  return { db, categories, categoryTree, subscribedDocs, ownedDocs, deletedCards, deletedCardsAt, deletedCats, catStamps, docStamps, structAt, catSubjects };
 }
 
 let _quotaWarned = false;
@@ -404,6 +408,8 @@ function mergeSyncStates(L, C) {
   return {
     db: mergedDb, categories: aliveNames, categoryTree: tree,
     deletedCards: delCards, deletedCardsAt: delAt, deletedCats: deadCats, catStamps: cs, docStamps: ds,
+    // 教科タグ：フォルダー構造を新しく変更した側を優先し、もう一方にしか無いものは足す
+    catSubjects: (() => { const o = Object.assign({}, older.catSubjects || {}, newer.catSubjects || {}); Object.keys(o).forEach(k => { if (!aliveSet.has(k)) delete o[k]; }); return o; })(),
     structAt: Math.max(L.structAt || 0, C.structAt || 0),
     subscribedDocs: subs, ownedDocs: owned
   };
@@ -414,7 +420,7 @@ function mergeIntoLocal(r) {
   const merged = mergeSyncStates(buildSyncPayload(), r);
   db = merged.db; categories = merged.categories; categoryTree = merged.categoryTree;
   deletedCards = merged.deletedCards; deletedCardsAt = merged.deletedCardsAt; deletedCats = merged.deletedCats;
-  catStamps = merged.catStamps; docStamps = merged.docStamps; structAt = merged.structAt;
+  catStamps = merged.catStamps; docStamps = merged.docStamps; structAt = merged.structAt; catSubjects = merged.catSubjects || {};
   subscribedDocs = merged.subscribedDocs; ownedDocs = merged.ownedDocs;
   ensureSystemSanity();
   autoMerge(true);
@@ -444,7 +450,7 @@ function syncFingerprint(p) {
   return stableStringify({
     db: dbSorted, categories: [...(p.categories || [])].sort(), categoryTree: p.categoryTree || {},
     deletedCards: [...(p.deletedCards || [])].sort(), deletedCardsAt: p.deletedCardsAt || {}, deletedCats: [...(p.deletedCats || [])].sort(),
-    catStamps: p.catStamps || {}, docStamps: p.docStamps || {}, structAt: p.structAt || 0,
+    catStamps: p.catStamps || {}, docStamps: p.docStamps || {}, structAt: p.structAt || 0, catSubjects: p.catSubjects || {},
     subscribedDocs: [...(p.subscribedDocs || [])].sort(), ownedDocs: [...(p.ownedDocs || [])].sort()
   });
 }
@@ -508,6 +514,7 @@ function ensureSystemSanity() {
     }
   });
   for (const p in categoryTree) { if (categoryTree[p].length === 0) delete categoryTree[p]; }
+  Object.keys(catSubjects || {}).forEach(k => { if (!categories.includes(k)) delete catSubjects[k]; });
 
   const knownDocs = new Set([...(subscribedDocs || []), ...(ownedDocs || [])]);
   const delSet = new Set(deletedCards);
@@ -591,7 +598,7 @@ function resolveAccountSwitch() {
     const merge = confirm('この端末には、別のGoogleアカウントで使っていたデータがあります。\n\nOK：この端末のデータを今のアカウントに統合する\nキャンセル：この端末のデータを今のアカウントのデータに置き換える（統合しない）');
     if (!merge) {
       db = []; categories = ['未分類']; categoryTree = {}; subscribedDocs = []; ownedDocs = [];
-      deletedCards = []; deletedCardsAt = {}; deletedCats = []; catStamps = {}; docStamps = {}; structAt = 0;
+      deletedCards = []; deletedCardsAt = {}; deletedCats = []; catStamps = {}; docStamps = {}; structAt = 0; catSubjects = {};
       sharedDocPermissions = {};
       _structHash = structFingerprint(); writeLocal();
     }
