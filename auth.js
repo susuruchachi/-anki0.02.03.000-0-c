@@ -58,6 +58,7 @@ auth.onAuthStateChanged(user => {
       checkOnlineMatchInvite(urlParams.get('match_room'));
     }
   } else {
+    if (typeof stopCloudListener === 'function') stopCloudListener();
     ls.innerHTML = `<span style="color:var(--warn);">未ログイン</span>`;
     const btnLogin = document.getElementById('btnFbLogin');
     const btnLogout = document.getElementById('btnFbLogout');

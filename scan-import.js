@@ -193,21 +193,24 @@ async function submitScanImport() {
 
   // ★ 権限チェック（一括追加・単発追加と同じロジック）
   let targetSharedDocId = null;
-  const existingCard = db.find(q => q.category === scanImportTargetCategory && q.sharedDocId);
-  if (existingCard) {
-    targetSharedDocId = existingCard.sharedDocId;
-    const perm = sharedDocPermissions[targetSharedDocId];
-    if (!perm || !perm.canEdit) return alert("🔒 この共有/公開カテゴリーは閲覧専用のため、問題を追加できません。");
+  const shareInfo = getCategoryShareInfo(scanImportTargetCategory);
+  if (shareInfo.shared) {
+    if (shareInfo.readOnly) return alert("🔒 この共有/公開カテゴリーは閲覧専用のため、問題を追加できません。");
+    targetSharedDocId = shareInfo.docId;
   }
 
   let count = 0;
+  const addedCards = [];
   scanImportEntries.forEach(entry => {
     const q = entry.question.trim(), a = entry.answer.trim();
     if (!q || !a) return;
-    const newCard = { id: 'id_' + Math.random().toString(36).slice(2) + Date.now().toString(36), question: q, answer: a, category: scanImportTargetCategory, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 };
-    if (targetSharedDocId) { newCard.sharedDocId = targetSharedDocId; updateCardInSharedDoc(targetSharedDocId, newCard, 'add'); }
-    db.push(newCard); count++;
+    const newCard = { id: newCardId(), question: q, answer: a, category: scanImportTargetCategory, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 };
+    if (entry.note) newCard.note = entry.note;
+    touchCard(newCard);
+    if (targetSharedDocId) newCard.sharedDocId = targetSharedDocId;
+    db.push(newCard); addedCards.push(newCard); count++;
   });
+  if (targetSharedDocId) addCardsToSharedDoc(targetSharedDocId, addedCards);
 
   saveData(true);
   if (typeof renderBox === 'function' && document.getElementById('pgBox').classList.contains('active')) renderBox();

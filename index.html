@@ -98,6 +98,8 @@ h2 { font-size: 1.4rem; font-weight: 700; margin-bottom: 20px; display: flex; al
 .menu-sep { height: 1px; background: var(--border); margin: 6px 8px; }
 /* ★【0.03.02】フォルダー編集パネル */
 .cat-editor { padding: 16px; }
+.q-card-note { margin: 0 0 8px; font-size: 0.8rem; color: var(--text2); background: var(--bg3); border-left: 3px solid var(--warn); border-radius: 0 6px 6px 0; padding: 5px 8px; line-height: 1.5; white-space: pre-wrap; cursor: pointer; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.q-card-note.expanded { display: block; -webkit-line-clamp: unset; }
 .cat-edit-head { margin-bottom: 6px; }
 .cat-edit-path { font-size: 0.72rem; color: var(--text3); word-break: break-all; }
 .cat-edit-title { font-size: 1.15rem; font-weight: 800; color: var(--text); word-break: break-all; margin: 2px 0 4px; }
@@ -556,7 +558,8 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
         <button class="btn btn-secondary" onclick="document.getElementById('fileCSV').click()">📥 CSV入力</button>
         <input type="file" id="fileCSV" accept=".csv, text/csv" style="display:none;" onchange="importCSV(event)">
       </div>
-      <div class="hint-small" style="margin-top:8px;">JSONは学習記録・画像も含む完全バックアップ、CSVはカードのみです。構造式・漢文はテキストなのでどちらにも含まれます。</div>
+      <div class="hint-small" style="margin-top:8px;">JSONは学習記録・画像も含む完全バックアップ、CSVはカードのみです。構造式・漢文はテキストなのでどちらにも含まれます。<br>CSVの列：問題・答え・フォルダー（「親>子」で入れ子）・メモ・選択肢（「a / b / c」）・形式（「例文」「テスト」）。同じフォルダーに同じ問題があれば、重複させずに答えやメモを更新します。</div>
+      <button class="btn btn-secondary" style="margin-top:10px;" onclick="repairInflatedStats()">🩹 異常な成績（正解数・誤答数が1000回以上）を修復</button>
     </div>
 
     <div class="card">
@@ -871,6 +874,11 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
         <img id="cardAImagePreview" style="max-width:100%; max-height:150px; border-radius:8px; display:block; margin-bottom:6px;">
         <button type="button" class="chip" onclick="removeCardImage('answer')">🗑️ 画像を削除</button>
       </div>
+    </div>
+
+    <div class="form-group" style="margin-top:15px;">
+      <label class="section-label">📝 クイックメモ（語源・ヒント・解説など／任意）</label>
+      <textarea id="txtCardNote" class="form-control" style="height:60px; font-size:0.9rem;" placeholder="解いている途中で、答えの部分を伏せたヒントとして少しずつ表示されます"></textarea>
     </div>
 
     <div id="cardPreviewWrap" class="card-preview" style="display:none;">

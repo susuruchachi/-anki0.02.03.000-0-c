@@ -109,7 +109,7 @@ function renderBox() {
   const sb = document.getElementById('txtSearchBox');
   if (sb && sb.value.trim() !== '') {
     const kw = sb.value.trim().toLowerCase();
-    filtered = filtered.filter(q => q.question.toLowerCase().includes(kw) || q.answer.toLowerCase().includes(kw));
+    filtered = filtered.filter(q => q.question.toLowerCase().includes(kw) || q.answer.toLowerCase().includes(kw) || String(q.note || '').toLowerCase().includes(kw));
   }
 
   document.getElementById('boxTitle').innerText = titleString;
@@ -135,15 +135,19 @@ function renderBox() {
     const badgeHTML = `<span class="badge ${isGrad ? 'badge-grad':'badge-level'}">${isGrad ? 'GRADUATE' : lvlStr}</span>`;
     
     const sharedIcon = item.sharedDocId ? `<span style="margin-left:6px; font-size:0.75rem; color:var(--accent);">🌐同期</span>` : '';
+    // ★【0.03.02】クイックメモを一覧にも表示する（長いものは折りたたみ）
+    const noteHTML = item.note ? `<div class="q-card-note" onclick="this.classList.toggle('expanded')" title="タップで全文表示">📝 ${escapeHtml(item.note)}</div>` : '';
+    const kindBadge = item.kind === 'test' ? '<span class="badge badge-level" style="margin-right:4px;">テスト</span>' : item.kind === 'cloze' ? '<span class="badge badge-level" style="margin-right:4px;">例文</span>' : '';
     // ★【0.02.63】問題に画像が添付されていればサムネイル表示
     const qImgHTML = item.questionImage ? `<img src="${item.questionImage}" alt="問題画像" style="max-width:100%; max-height:120px; border-radius:8px; margin-bottom:8px; display:block;">` : '';
     
     card.innerHTML = `
-      <div class="q-card-text">${renderRichText(item.question, { escape: true, kanbunRows: 10 })}</div>
+      <div class="q-card-text">${kindBadge}${renderRichText(item.question, { escape: true, kanbunRows: 10 })}</div>
       ${qImgHTML}
       <div style="font-size:0.85rem; color:var(--text2); margin-bottom:8px; cursor:pointer;" data-id="${escapeHtml(item.id)}" data-shown="0" onclick="toggleCardAnswer(this)">
         A: <span style="background:var(--bg4); color:var(--text2); padding:2px 8px; border-radius:6px; border:1px solid var(--border); display:inline-block; font-size:0.75rem;">👆 タップして答えを表示</span>
       </div>
+      ${noteHTML}
       <div class="q-card-sub">${badgeHTML}<span>正: ${item.correct} / 誤: ${item.incorrect}</span><span style="font-size:0.75rem; color:var(--text3);">📂 ${escapeHtml(item.category)}${sharedIcon}</span></div>
     `;
     container.appendChild(card);
@@ -164,35 +168,54 @@ function toggleCardAnswer(el) {
   }
 }
 
-function handleQuestionLongpress(item) {
-  if (item.sharedDocId) {
-    const perm = sharedDocPermissions[item.sharedDocId];
-    if (!perm || !perm.canEdit) {
-      return alert("🔒 【閲覧専用】\nこのカードは購読している共有カテゴリーのため、作成者または許可された共同編集者のみ編集・削除できます。\n(あなたの学習記録はあなた専用に保存されています)");
-    }
+function handleQuestionLongpress(itemRef) {
+  // 同期でカードのオブジェクトが差し替わっていても、IDで最新のものを使う
+  const cur = () => db.find(q => q.id === itemRef.id) || itemRef;
+  const item = cur();
+  const access = getSharedAccess(item.sharedDocId);
+  if (access.shared && access.readOnly) {
+    return alert("🔒 【閲覧専用】\nこのカードは購読している共有カテゴリーのため、作成者または許可された共同編集者のみ編集・削除できます。\n(あなたの学習記録はあなた専用に保存されています)");
   }
 
-  const sortedCategories = getSortedCategoriesForMenu();
-  let moveOptions = [];
-  sortedCategories.forEach(cat => {
-    if (cat !== item.category) { moveOptions.push({ html: `📂 フォルダー「${cat}」へ移動`, action: async () => { 
-      item.category = cat; 
-      if (item.sharedDocId) await updateCardInSharedDoc(item.sharedDocId, item, 'edit');
-      saveData(true); renderBox(); 
-    } }); }
-  });
-  
   openContextMenu("カード操作", [
-    { html: '✏️ 編集', action: () => { openCardModal('edit', item); } },
-    { type: 'separator' }, ...moveOptions, { type: 'separator' },
+    { html: '✏️ 編集（問題・答え・メモ）', action: () => { openCardModal('edit', cur()); } },
+    { html: '📂 別のフォルダーへ移動', action: () => { openCardMoveDialog(cur()); } },
+    { type: 'separator' },
     { html: '🗑️ 削除', danger: true, action: async () => { 
         if(!confirm("完全に消去しますか？")) return; 
-        deletedCards.push(item.id);
-        db = db.filter(q => q.id !== item.id); 
-        if (item.sharedDocId) await updateCardInSharedDoc(item.sharedDocId, item, 'delete');
+        const it = cur();
+        if (!deletedCards.includes(it.id)) deletedCards.push(it.id);
+        db = db.filter(q => q.id !== it.id); 
+        if (it.sharedDocId) await updateCardInSharedDoc(it.sharedDocId, it, 'delete');
         saveData(true); renderBox(); 
       } }
   ]);
+}
+
+// ★【0.03.02】カードの移動先をフォルダー一覧（階層つき）から選ぶ
+function openCardMoveDialog(item) {
+  document.getElementById('ctxHeader').innerText = '📂 移動先のフォルダー';
+  const body = document.getElementById('ctxBody');
+  body.innerHTML = `<div style="padding:8px;"><select id="cardMoveSelect" class="form-control">${buildCategoryOptionsHTML(new Set([item.category]), false)}</select>
+    <button type="button" class="btn" style="margin-top:10px; width:100%;" id="cardMoveOk">移動する</button></div>`;
+  document.getElementById('ctxOverlay').style.display = 'flex';
+  document.getElementById('cardMoveOk').onclick = async () => {
+    const cat = document.getElementById('cardMoveSelect').value;
+    closeContextMenu();
+    if (!cat) return;
+    const it = db.find(q => q.id === item.id); if (!it) return;
+    const dest = getCategoryShareInfo(cat);
+    if (dest.shared && dest.readOnly) return alert('🔒 閲覧専用の共有カテゴリーには移動できません。');
+    const oldDoc = it.sharedDocId;
+    it.category = cat; touchCard(it);
+    if (dest.shared && dest.docId !== oldDoc) {
+      if (oldDoc) await updateCardInSharedDoc(oldDoc, it, 'delete');
+      it.sharedDocId = dest.docId; await updateCardInSharedDoc(dest.docId, it, 'add');
+    } else if (!dest.shared && oldDoc) {
+      await updateCardInSharedDoc(oldDoc, it, 'delete'); delete it.sharedDocId;
+    } else if (oldDoc) await updateCardInSharedDoc(oldDoc, it, 'edit');
+    saveData(true); renderBox();
+  };
 }
 
 function showAddQModal() {
@@ -202,11 +225,10 @@ function showAddQModal() {
   }
   
   let targetSharedDocId = null;
-  const existingCard = db.find(q => q.category === defaultCat && q.sharedDocId);
-  if (existingCard) {
-    targetSharedDocId = existingCard.sharedDocId;
-    const perm = sharedDocPermissions[targetSharedDocId];
-    if (!perm || !perm.canEdit) return alert("🔒 【閲覧専用】\nこの共有カテゴリーは閲覧専用のため、新しい問題を追加できません。");
+  const shareInfo = getCategoryShareInfo(defaultCat);
+  if (shareInfo.shared) {
+    if (shareInfo.readOnly) return alert("🔒 【閲覧専用】\nこの共有カテゴリーは閲覧専用のため、新しい問題を追加できません。");
+    targetSharedDocId = shareInfo.docId;
   }
 
   openCardModal('add', { category: defaultCat, sharedDocId: targetSharedDocId });
@@ -230,6 +252,7 @@ function openCardModal(mode, itemOrDefaults) {
   document.getElementById('cardModalCatLabel').innerText = `📁 追加先: ${_cardModalState.category}`;
   document.getElementById('txtCardQuestion').value = mode === 'edit' ? (itemOrDefaults.question || '') : '';
   document.getElementById('txtCardAnswer').value = mode === 'edit' ? (itemOrDefaults.answer || '') : '';
+  document.getElementById('txtCardNote').value = mode === 'edit' ? (itemOrDefaults.note || '') : '';
   updateCardImagePreview('question');
   updateCardImagePreview('answer');
   document.getElementById('cardModalOverlay').style.display = 'flex';
@@ -267,18 +290,24 @@ function removeCardImage(which) {
 async function submitCardModal() {
   const q = document.getElementById('txtCardQuestion').value.trim();
   const a = document.getElementById('txtCardAnswer').value.trim();
+  const note = document.getElementById('txtCardNote').value.trim();
   if (!q) { alert('問題文を入力してください。'); document.getElementById('txtCardQuestion').focus(); return; }
   if (!a) { alert('答えを入力してください。'); document.getElementById('txtCardAnswer').focus(); return; }
 
   if (_cardModalState.mode === 'edit') {
-    const item = _cardModalState.item;
+    // 同期でオブジェクトが差し替わっていても、IDで最新のカードを更新する
+    const item = db.find(x => x.id === _cardModalState.item.id) || _cardModalState.item;
     item.question = q; item.answer = a;
+    if (note) item.note = note; else delete item.note;
+    touchCard(item);
     if (_cardModalState.qImage) item.questionImage = _cardModalState.qImage; else delete item.questionImage;
     if (_cardModalState.aImage) item.answerImage = _cardModalState.aImage; else delete item.answerImage;
     if (item.sharedDocId) await updateCardInSharedDoc(item.sharedDocId, item, 'edit');
     autoMerge(); renderBox();
   } else {
-    const newCard = { id: 'id_' + Math.random().toString(36).slice(2) + Date.now().toString(36), question: q, answer: a, category: _cardModalState.category, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 };
+    const newCard = { id: newCardId(), question: q, answer: a, category: _cardModalState.category, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 };
+    if (note) newCard.note = note;
+    touchCard(newCard);
     if (_cardModalState.qImage) newCard.questionImage = _cardModalState.qImage;
     if (_cardModalState.aImage) newCard.answerImage = _cardModalState.aImage;
     if (_cardModalState.sharedDocId) newCard.sharedDocId = _cardModalState.sharedDocId;

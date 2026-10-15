@@ -77,7 +77,8 @@ function addNewRootCategory() {
   const txt = document.getElementById('txtNewRoot').value.trim();
   if(!txt) return;
   if(categories.includes(txt)) return alert("既に使用されているフォルダー名です。");
+  if(txt.includes('>')) return alert("フォルダー名に「>」は使えません。");
+  markCatCreated(txt);
   categories.push(txt); document.getElementById('txtNewRoot').value = '';
-  deletedCats = deletedCats.filter(c => c !== txt);
   saveData(true); renderTree();
 }
