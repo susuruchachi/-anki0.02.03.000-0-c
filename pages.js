@@ -42,28 +42,7 @@ async function fetchAndRenderTutorial() {
 }
 
 function executePageTransition(pageId, isBackAction) {
-  // ★【0.02.50-g追加】オンライン対戦中の別ページ移動時の離脱・復帰用保存処理
-  if (typeof currentMatchId !== 'undefined' && currentMatchId && pageId !== 'pgOnlineMatch') {
-    if (typeof currentUser !== 'undefined' && currentUser) {
-      const matchRef = firestore.collection('susuru_anki_matches').doc(currentMatchId);
-      matchRef.get().then(doc => {
-        if (doc.exists) {
-          const data = doc.data();
-          let myRole = null;
-          if (data.player1 === currentUser.uid) myRole = 'player1';
-          if (data.player2 === currentUser.uid) myRole = 'player2';
-          
-          if (myRole) {
-            localStorage.setItem('susuru_anki_last_match', JSON.stringify({ matchId: currentMatchId, myRole: myRole }));
-            matchRef.update({
-              [`${myRole}Disconnected`]: true
-            }).catch(e => console.warn(e));
-          }
-        }
-      });
-    }
-  }
-
+  // ★【0.03.10】対戦中にほかの画面へ移っても対戦は続く（戻ると対戦画面に戻る）。接続切れの扱いは match.js
   stopQuizTimer(); clearTimeout(autoNextTimeout);
   const activeScreen = document.querySelector('.screen.active');
   const currentId = activeScreen ? activeScreen.id : 'pgHome';
