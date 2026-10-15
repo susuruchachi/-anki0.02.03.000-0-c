@@ -649,6 +649,19 @@ function choiceShape(t) {
     rich: hasRichBlock(s) || /\$[^$]+\$/.test(s)
   };
 }
+// ★【0.03.09】カードが多いと毎問すべてのカードを調べ直すのが重いので、カードごとの計算結果を覚えておく
+const _choiceInfoCache = new Map();
+function choiceInfoOf(q, swapped) {
+  const src = swapped ? q.question : q.answer;
+  const key = (swapped ? 's|' : 'a|') + q.id;
+  let c = _choiceInfoCache.get(key);
+  if (!c || c.src !== src) {
+    const t = choiceSideText(q, swapped);
+    c = { src, t, n: t ? normalizeAnswer(t) : '', sh: t ? choiceShape(t) : null };
+    _choiceInfoCache.set(key, c);
+  }
+  return c;
+}
 function buildChoiceCandidates(cur, correctPrimary) {
   const swapped = !!cur._swapped;
   const want = choiceShape(correctPrimary);
@@ -658,11 +671,12 @@ function buildChoiceCandidates(cur, correctPrimary) {
   db.forEach(q => {
     if (q.id === cur.id || q.id === cur._sourceId) return;
     if (Array.isArray(q.choices) && q.choices.length) return; // テスト問題の Yes/No 等は混ぜない
-    const t = choiceSideText(q, swapped);
+    const info = choiceInfoOf(q, swapped);
+    const t = info.t;
     if (!t) return;
-    const n = normalizeAnswer(t);
+    const n = info.n;
     if (seen.has(n)) return; seen.add(n);
-    const sh = choiceShape(t);
+    const sh = info.sh;
     let score = 0;
     if (sh.latin === want.latin) score += 8;           // 英語なら英語、日本語なら日本語
     if (sh.rich === want.rich) score += 6;             // 構造式つきの答えには構造式つきの選択肢

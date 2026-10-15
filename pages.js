@@ -85,7 +85,10 @@ function executePageTransition(pageId, isBackAction) {
   const navOwner = { pgUpdates: 'pgHome', pgTutorial: 'pgHome', pgPublicCategories: 'pgBox', pgShared: 'pgBox', pgMatchHistory: 'pgOnlineMatch', pgFriends: 'pgBackup', pgCompareStats: 'pgBackup' };
   const navPage = navOwner[pageId] || pageId;
   document.querySelectorAll('.bnav-item').forEach(b => b.classList.toggle('active', b.dataset.page === navPage));
+  const wasInQuiz = document.body.classList.contains('in-quiz');
   document.body.classList.toggle('in-quiz', pageId === 'pgQuizPlayer');
+  // ★【0.03.09】クイズ中にまとめていた保存を、クイズを出たらすぐ送る
+  if (wasInQuiz && pageId !== 'pgQuizPlayer' && typeof flushPendingSaves === 'function') flushPendingSaves();
 
   const tgt = document.getElementById(pageId);
   if(tgt) { tgt.style.display='flex'; tgt.classList.add('active'); }

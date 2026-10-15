@@ -515,7 +515,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
   <div id="pgBox" class="screen">
     <h2 id="boxTitle">📝 問題カード箱</h2>
     <div class="form-group form-row" style="margin-bottom: 12px;">
-      <input type="text" id="txtSearchBox" class="form-control" placeholder="🔍 問題・答えを検索..." oninput="renderBox()">
+      <input type="text" id="txtSearchBox" class="form-control" placeholder="🔍 問題・答えを検索..." oninput="scheduleBoxSearch()">
       <button class="btn btn-secondary" style="width:auto; padding:0 16px; white-space:nowrap;" onclick="showAllCards()">全表示</button>
     </div>
     <div class="list-header">

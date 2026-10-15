@@ -1,5 +1,8 @@
 // ----------------- 問題箱機能 -----------------
 let _boxAnswerCache = {};
+// ★【0.03.09】検索は打ち終わるまで少し待ってから絞り込む
+let _boxSearchTimer = null;
+function scheduleBoxSearch() { clearTimeout(_boxSearchTimer); _boxSearchTimer = setTimeout(renderBox, 250); }
 function showAllCards() { currentViewContext = 'all'; const sb = document.getElementById('txtSearchBox'); if(sb) sb.value = ''; renderBox(); }
 function filterBoxByStatus(statusType) { currentViewContext = statusType; openPage('pgBox'); }
 
@@ -79,13 +82,15 @@ function renderBox() {
       const subGrid = document.createElement('div');
       subGrid.style.cssText = 'display:grid; grid-template-columns:repeat(auto-fill, minmax(130px, 1fr)); gap:8px;';
       
+      const childCounts = {};
+      db.forEach(q => { childCounts[q.category] = (childCounts[q.category] || 0) + 1; });
       children.forEach(c => {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'btn btn-secondary';
         btn.style.cssText = 'padding:10px; font-size:0.9rem; text-align:left; justify-content:flex-start; height:auto; background:var(--bg3);';
         
-        const childCount = db.filter(q => q.category === c).length;
+        const childCount = childCounts[c] || 0;
         btn.innerHTML = `📁 ${escapeHtml(c)} <span style="font-size:0.7rem; color:var(--text3); float:right; margin-top:2px;">${childCount}</span>`;
         btn.onclick = (e) => { 
           e.preventDefault();
@@ -129,10 +134,49 @@ function renderBox() {
     emptyMsg.style.cssText = 'text-align:center; padding:40px; color:var(--text3);';
     emptyMsg.innerText = '問題がありません';
     container.appendChild(emptyMsg);
+    _boxRender = null;
     return; 
   }
 
-  filtered.forEach(item => {
+  // ★【0.03.09】カードが多いと一度に全部描くと固まるので、少しずつ（スクロールに合わせて）描く
+  _boxRender = { items: filtered, shown: 0, container };
+  appendBoxPage();
+}
+
+const BOX_PAGE_SIZE = 60;
+let _boxRender = null;
+let _boxObserver = null;
+function appendBoxPage() {
+  const st = _boxRender; if (!st) return;
+  const oldMore = st.container.querySelector('.box-more'); if (oldMore) oldMore.remove();
+  const end = Math.min(st.items.length, st.shown + BOX_PAGE_SIZE);
+  const cards = [];
+  for (let i = st.shown; i < end; i++) cards.push(buildBoxCard(st.items[i]));
+  const frag = document.createDocumentFragment();
+  cards.forEach(c => frag.appendChild(c));
+  st.container.appendChild(frag);
+  // ★【0.03.00】構造式・漢文・数式を描画（画面に入れてから）
+  cards.forEach(c => { const t = c.querySelector('.q-card-text'); if (t) hydrateRich(t, { chemScale: 1.1 }); });
+  st.shown = end;
+  if (_boxObserver) { _boxObserver.disconnect(); _boxObserver = null; }
+  if (end < st.items.length) {
+    const more = document.createElement('button');
+    more.type = 'button'; more.className = 'btn btn-secondary box-more';
+    more.style.cssText = 'margin:10px 0 20px;';
+    more.innerText = `⬇️ さらに表示（残り ${st.items.length - end} 件）`;
+    more.onclick = () => appendBoxPage();
+    st.container.appendChild(more);
+    if (typeof IntersectionObserver !== 'undefined') {
+      _boxObserver = new IntersectionObserver(entries => {
+        if (entries.some(e => e.isIntersecting) && _boxRender === st) appendBoxPage();
+      }, { rootMargin: '600px 0px' });
+      _boxObserver.observe(more);
+    }
+  }
+}
+
+function buildBoxCard(item) {
+  {
     const isGrad = isGraduated(item);
     const card = document.createElement('div'); card.className = 'q-card';
     setupLongpress(card, () => handleQuestionLongpress(item));
@@ -159,10 +203,8 @@ function renderBox() {
       ${noteHTML}
       <div class="q-card-sub">${badgeHTML}<span>正: ${item.correct} / 誤: ${item.incorrect}</span><span style="font-size:0.75rem; color:var(--text3);">📂 ${escapeHtml(item.category)}${sharedIcon}</span></div>
     `;
-    container.appendChild(card);
-    // ★【0.03.00】構造式・漢文・数式を描画
-    hydrateRich(card.querySelector('.q-card-text'), { chemScale: 1.1 });
-  });
+    return card;
+  }
 }
 
 function toggleCardAnswer(el) {

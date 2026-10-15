@@ -181,7 +181,9 @@ function buildSyncPayload() {
 }
 
 let _quotaWarned = false;
+let _localWriteTimer = null;
 function writeLocal() {
+  if (_localWriteTimer) { clearTimeout(_localWriteTimer); _localWriteTimer = null; }
   const payload = buildSyncPayload();
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(payload)); }
   catch (e) {
@@ -193,15 +195,24 @@ function writeLocal() {
   return payload;
 }
 
+// ★【0.03.09】カードが多いと保存（全データの書き出し）が重いので、続けて保存するときは少し待ってまとめて書く
+function flushLocalWrite() { if (_localWriteTimer) writeLocal(); }
+function flushPendingSaves() {
+  flushLocalWrite();
+  if (syncTimeout && currentUser && cloudReady) { clearTimeout(syncTimeout); syncTimeout = null; backgroundCloudSave(); }
+}
 function saveData(immediate = false) {
   ensureSystemSanity();
   updateStructStamp();
-  writeLocal();
+  if (immediate) writeLocal();
+  else if (!_localWriteTimer) _localWriteTimer = setTimeout(writeLocal, 400);
   if (currentUser && cloudReady) {
     clearTimeout(syncTimeout);
     setSyncStatus('saving', '🔄 保存中...');
-    if (immediate) backgroundCloudSave();
-    else syncTimeout = setTimeout(() => backgroundCloudSave(), 1000);
+    // クイズ中は解くたびにクラウドへ送ると重いので、間隔を空けてまとめて送る（画面を閉じる時・クイズ終了時にはすぐ送る）
+    const delay = document.body && document.body.classList.contains('in-quiz') ? 8000 : 1500;
+    if (immediate) { syncTimeout = null; backgroundCloudSave(); }
+    else syncTimeout = setTimeout(() => { syncTimeout = null; backgroundCloudSave(); }, delay);
   }
   if (typeof updateHomeSummary === 'function') { try { updateHomeSummary(); } catch (e) {} }
 }
@@ -226,8 +237,9 @@ const CLOUD_DOC_LIMIT = 1000000; // 余裕を見て約1MB未満に収める
 class CloudTooLargeError extends Error {}
 function utf8Bytes(str) { return (typeof TextEncoder !== 'undefined') ? new TextEncoder().encode(str).length : unescape(encodeURIComponent(str)).length; }
 function encodeCloudBody(payload) {
-  const body = JSON.parse(JSON.stringify(payload));
-  const dbJson = JSON.stringify(body.db || []);
+  // カード一覧の書き出しは1回だけにする（undefined は JSON.stringify で消える）
+  const dbJson = JSON.stringify(payload.db || []);
+  const body = JSON.parse(JSON.stringify(Object.assign({}, payload, { db: undefined })));
   let size;
   if (typeof pako !== 'undefined' && firebase.firestore && firebase.firestore.Blob) {
     const gz = pako.gzip(dbJson);
@@ -236,6 +248,7 @@ function encodeCloudBody(payload) {
     size = gz.length + utf8Bytes(JSON.stringify(body)) + 2000; // 圧縮データ以外の部分＋圧縮データの大きさ
     body.dbGz = firebase.firestore.Blob.fromUint8Array(gz);
   } else {
+    body.db = JSON.parse(dbJson);
     size = utf8Bytes(JSON.stringify(body)) + 2000;
   }
   if (size > CLOUD_DOC_LIMIT) {
@@ -288,8 +301,9 @@ async function backgroundCloudSave() {
     await firestore.runTransaction(async tx => {
       const snap = await tx.get(ref);
       if (snap.exists) {
-        const r = decodeCloudDoc(snap.data() || {});
-        if (!r.writeId || (r.writeId !== _lastSeenWriteId && !_myWriteIds.includes(r.writeId))) { mergeIntoLocal(r); merged = true; }
+        // 自分が最後に書いた内容のままなら、展開（重い）せずにそのまま上書きする
+        const raw = snap.data() || {};
+        if (!raw.writeId || (raw.writeId !== _lastSeenWriteId && !_myWriteIds.includes(raw.writeId))) { mergeIntoLocal(decodeCloudDoc(raw)); merged = true; }
       }
       writeId = newWriteId();
       // undefined を含むとFirestoreが拒否するので、JSONを通して取り除く。カード一覧は圧縮する
@@ -642,5 +656,6 @@ async function syncToCloud(isSilent = false) {
 if (typeof window !== 'undefined' && window.addEventListener) {
   const retrySync = () => { if (currentUser && !cloudReady) syncToCloud(true); };
   window.addEventListener('online', retrySync);
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') retrySync(); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') retrySync(); else flushPendingSaves(); });
+  window.addEventListener('pagehide', flushPendingSaves);
 }
