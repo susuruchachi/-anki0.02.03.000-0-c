@@ -139,7 +139,8 @@ function renderBox() {
     
     const sharedIcon = item.sharedDocId ? `<span style="margin-left:6px; font-size:0.75rem; color:var(--accent);">🌐同期</span>` : '';
     // ★【0.03.02】クイックメモを一覧にも表示する（長いものは折りたたみ）
-    const noteHTML = item.note ? `<div class="q-card-note" onclick="this.classList.toggle('expanded')" title="タップで全文表示">📝 ${escapeHtml(item.note)}</div>` : '';
+    // ★【0.03.04】メモの和訳（答えが英語のカードは英単語・語根）は隠し、タップで表示する
+    const noteHTML = item.note ? `<div class="q-card-note" onclick="this.classList.toggle('expanded')" title="タップで全文表示">📝 ${noteToSpoilerHTML(item.note, isLatinAnswer(getPrimaryAnswer(item.answer)))}</div>` : '';
     const kindBadge = item.kind === 'test' ? '<span class="badge badge-level" style="margin-right:4px;">テスト</span>' : item.kind === 'cloze' ? '<span class="badge badge-level" style="margin-right:4px;">例文</span>' : '';
     // ★【0.02.63】問題に画像が添付されていればサムネイル表示
     const qImgHTML = item.questionImage ? `<img src="${escAttr(item.questionImage)}" alt="問題画像" style="max-width:100%; max-height:120px; border-radius:8px; margin-bottom:8px; display:block;">` : '';

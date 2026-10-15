@@ -52,6 +52,51 @@ function foldKana(s) {
   return String(s || '').replace(/[ァ-ヶ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x60));
 }
 
+// ================================================================
+// ★【0.03.04】メモの中の「答えになってしまう部分」を隠す
+// ・答えが日本語のとき（英→日）：「…」で書かれた和訳と ①②… の訳語を隠す（語源の（変化する）〈否定〉などは残す）
+// ・答えが英語のとき（日→英。入れ替え・例文など）：英単語・語根（in- / -able / spect など）を隠す
+// ================================================================
+const NOTE_JA_RE = /[぀-ヿ㐀-鿿]/;
+// メモを [{t: 文字列, hide: 隠すかどうか}] に分ける
+function splitNoteForHiding(note, answerIsLatin) {
+  const s = String(note || '');
+  const re = answerIsLatin
+    ? /-?[A-Za-z][A-Za-z'’]*-?(?:[ \t]+(?:[A-Za-z][A-Za-z'’\-]*|\[[^\]\n]*\]|\.\.\.|…|[A-C](?![A-Za-z])))*/g
+    : /「[^」\n]*」|[①-⑳][^①-⑳\s。、「」()（）\/]+/g;
+  const parts = []; let last = 0, m;
+  while ((m = re.exec(s)) !== null) {
+    const txt = m[0];
+    // 英→日では、日本語を含む「…」・①… だけを隠す（「= suggest」のような英語は残す）
+    if (!answerIsLatin && !NOTE_JA_RE.test(txt)) continue;
+    if (answerIsLatin && /^[A-C]$/.test(txt)) continue; // 「A」「B」のような置き換え記号は残す
+    if (m.index > last) parts.push({ t: s.slice(last, m.index), hide: false });
+    parts.push({ t: txt, hide: true });
+    last = m.index + txt.length;
+  }
+  if (last < s.length) parts.push({ t: s.slice(last), hide: false });
+  return parts;
+}
+function isLatinAnswer(answer) {
+  const a = String(answer || '').replace(/\([^()]*\)/g, '');
+  return /[A-Za-z]/.test(a) && !NOTE_JA_RE.test(a);
+}
+// ヒント用：隠す部分を伏せ字にした文字列
+function hideNoteTranslations(note, answerIsLatin) {
+  return splitNoteForHiding(note, answerIsLatin).map(p => {
+    if (!p.hide) return p.t;
+    if (!answerIsLatin && p.t.startsWith('「')) return '「〇〇」';
+    if (!answerIsLatin && /^[①-⑳]/.test(p.t)) return p.t[0] + '〇〇';
+    return '＿＿';
+  }).join('');
+}
+// 一覧表示用：隠す部分をタップで表示できるHTMLにする
+function noteToSpoilerHTML(note, answerIsLatin) {
+  return splitNoteForHiding(note, answerIsLatin).map(p => p.hide
+    ? `<span class="note-spoiler" onclick="event.stopPropagation(); this.classList.toggle('shown')">${escapeHtml(p.t)}</span>`
+    : escapeHtml(p.t)).join('');
+}
+
 function toggleLightMode(forceOn = false) {
   const isLight = forceOn || !document.body.classList.contains('light-mode');
   if(isLight) document.body.classList.add('light-mode'); else document.body.classList.remove('light-mode');

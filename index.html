@@ -106,6 +106,8 @@ h2 { font-size: 1.4rem; font-weight: 700; margin-bottom: 20px; display: flex; al
 .quiz-card-choices { margin-top: 10px; font-size: 0.9rem; color: var(--text2); font-weight: 500; }
 .q-card-note { margin: 0 0 8px; font-size: 0.8rem; color: var(--text2); background: var(--bg3); border-left: 3px solid var(--warn); border-radius: 0 6px 6px 0; padding: 5px 8px; line-height: 1.5; white-space: pre-wrap; cursor: pointer; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .q-card-note.expanded { display: block; -webkit-line-clamp: unset; }
+.note-spoiler { background: var(--bg4); color: transparent; border-radius: 4px; padding: 0 3px; cursor: pointer; text-shadow: none; user-select: none; -webkit-user-select: none; }
+.note-spoiler.shown { color: inherit; background: rgba(245,166,35,0.12); user-select: text; -webkit-user-select: text; }
 .cat-edit-head { margin-bottom: 6px; }
 .cat-edit-path { font-size: 0.72rem; color: var(--text3); word-break: break-all; }
 .cat-edit-title { font-size: 1.15rem; font-weight: 800; color: var(--text); word-break: break-all; margin: 2px 0 4px; }
@@ -276,6 +278,8 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+<!-- ★【0.03.04】クラウド保存用の圧縮（Firestoreの1ドキュメント1MB上限対策） -->
+<script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
 <script src="version-info.js"></script>
 <script>
   document.title = "すするanki " + (typeof APP_VERSION !== 'undefined' ? APP_VERSION : '');

@@ -212,6 +212,60 @@ function setSyncStatus(state, text) {
 
 function userDocRef() { return firestore.collection("susuru_anki_users").doc(currentUser.uid); }
 
+// ================================================================
+// ★【0.03.04】クラウド保存の圧縮
+// Firestoreは1ドキュメント1MBまで。カードが3000枚ほどになるとそのままでは保存できず同期エラーになっていたため、
+// カード一覧(db)をgzipで圧縮してバイナリ(Blob)で保存する（だいたい1/5になる）。
+// フォルダー構造などの小さい情報は今まで通りそのまま保存する（旧バージョンの端末がフォルダーを消してしまわないように）
+// ================================================================
+const CLOUD_DOC_LIMIT = 1000000; // 余裕を見て約1MB未満に収める
+class CloudTooLargeError extends Error {}
+function utf8Bytes(str) { return (typeof TextEncoder !== 'undefined') ? new TextEncoder().encode(str).length : unescape(encodeURIComponent(str)).length; }
+function encodeCloudBody(payload) {
+  const body = JSON.parse(JSON.stringify(payload));
+  const dbJson = JSON.stringify(body.db || []);
+  let size;
+  if (typeof pako !== 'undefined' && firebase.firestore && firebase.firestore.Blob) {
+    const gz = pako.gzip(dbJson);
+    delete body.db;
+    body.dbFormat = 'gzip-json-v1';
+    size = gz.length + utf8Bytes(JSON.stringify(body)) + 2000; // 圧縮データ以外の部分＋圧縮データの大きさ
+    body.dbGz = firebase.firestore.Blob.fromUint8Array(gz);
+  } else {
+    size = utf8Bytes(JSON.stringify(body)) + 2000;
+  }
+  if (size > CLOUD_DOC_LIMIT) {
+    const err = new CloudTooLargeError('too_large'); err.size = size; throw err;
+  }
+  return body;
+}
+// クラウドのドキュメントを読み、圧縮されたカード一覧を元に戻す（旧形式の db もそのまま読める）
+function decodeCloudDoc(r) {
+  if (!r) return r;
+  if (r.dbGz) {
+    if (typeof pako === 'undefined') throw new Error('圧縮データを読むためのライブラリ(pako)を読み込めませんでした。通信状態を確認して再読み込みしてください。');
+    const bytes = typeof r.dbGz.toUint8Array === 'function' ? r.dbGz.toUint8Array() : r.dbGz;
+    const out = Object.assign({}, r);
+    out.db = JSON.parse(pako.ungzip(bytes, { to: 'string' }));
+    delete out.dbGz;
+    return out;
+  }
+  return r;
+}
+let _tooLargeWarned = false;
+function reportCloudSaveError(err) {
+  console.warn('クラウド保存エラー:', err);
+  if (err instanceof CloudTooLargeError) {
+    setSyncStatus('error', '⚠️ 容量オーバーで保存できません');
+    if (!_tooLargeWarned) {
+      _tooLargeWarned = true;
+      alert(`⚠️ データが大きすぎてクラウドに保存できません（約${Math.round(err.size / 1024)}KB / 上限 約1MB）。\n\nカードに添付した画像が容量の大部分を占めていることが多いです。画像付きのカードを減らすか、不要なカードを削除してください。\n（この端末には保存されています）`);
+    }
+  } else {
+    setSyncStatus('error', `⚠️ 保存エラー: ${err && (err.code || err.message) || ''}`.slice(0, 60));
+  }
+}
+
 let _cloudSaving = false, _cloudSaveAgain = false;
 function newWriteId() {
   const id = DEVICE_ID + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
@@ -230,12 +284,12 @@ async function backgroundCloudSave() {
     await firestore.runTransaction(async tx => {
       const snap = await tx.get(ref);
       if (snap.exists) {
-        const r = snap.data() || {};
+        const r = decodeCloudDoc(snap.data() || {});
         if (!r.writeId || (r.writeId !== _lastSeenWriteId && !_myWriteIds.includes(r.writeId))) { mergeIntoLocal(r); merged = true; }
       }
       writeId = newWriteId();
-      // undefined を含むとFirestoreが拒否するので、JSONを通して取り除く
-      const body = JSON.parse(JSON.stringify(buildSyncPayload()));
+      // undefined を含むとFirestoreが拒否するので、JSONを通して取り除く。カード一覧は圧縮する
+      const body = encodeCloudBody(buildSyncPayload());
       tx.set(ref, {
         ...body,
         version: typeof APP_VERSION !== 'undefined' ? APP_VERSION : "unknown",
@@ -247,8 +301,7 @@ async function backgroundCloudSave() {
     if (merged) refreshVisibleViews(true);
     setSyncStatus('success', '✅ 保存完了');
   } catch (err) {
-    console.warn('クラウド保存エラー:', err);
-    setSyncStatus('error', '⚠️ 保存エラー（次の保存時に再試行します）');
+    reportCloudSaveError(err);
   } finally {
     _cloudSaving = false;
     if (_cloudSaveAgain) { _cloudSaveAgain = false; backgroundCloudSave(); }
@@ -414,9 +467,11 @@ function startCloudListener() {
   if (cloudUnsubscribe) { cloudUnsubscribe(); cloudUnsubscribe = null; }
   cloudUnsubscribe = userDocRef().onSnapshot(snap => {
     if (!snap.exists || (snap.metadata && snap.metadata.hasPendingWrites)) return;
-    const r = snap.data() || {};
-    if (r.writeId && (_myWriteIds.includes(r.writeId) || r.writeId === _lastSeenWriteId)) return;
-    _lastSeenWriteId = r.writeId || null;
+    const raw = snap.data() || {};
+    if (raw.writeId && (_myWriteIds.includes(raw.writeId) || raw.writeId === _lastSeenWriteId)) return;
+    let r;
+    try { r = decodeCloudDoc(raw); } catch (e) { console.warn(e); setSyncStatus('error', '⚠️ 同期データを読めませんでした'); return; }
+    _lastSeenWriteId = raw.writeId || null;
     applyCloudState(r);
   }, err => { console.warn('クラウド監視エラー:', err); cloudReady = false; cloudUnsubscribe = null; });
 }
@@ -556,7 +611,7 @@ async function syncToCloud(isSilent = false) {
     // 最初の同期が終わるまではクラウドに書かない（古いデータでクラウドを上書きしないため）
     cloudReady = true;
     if (snap.exists) {
-      const r = snap.data() || {};
+      const r = decodeCloudDoc(snap.data() || {});
       _lastSeenWriteId = r.writeId || null;
       applyCloudState(r, { forcePush: true });
     } else {
@@ -567,7 +622,12 @@ async function syncToCloud(isSilent = false) {
     refreshVisibleViews();
     if (typeof syncSubscriptions === 'function') await syncSubscriptions();
     if (!isSilent) { alert(`☁️ 同期完了！`); openPage('pgHome'); }
-  } catch (err) { if (!isSilent) alert(`⚠️ 同期エラー: ${err.message}\n(Firebaseのルール設定などを確認してください)`); }
+  } catch (err) {
+    console.warn('同期エラー:', err);
+    cloudReady = false;
+    setSyncStatus('error', `⚠️ 同期エラー: ${err && (err.code || err.message) || ''}`.slice(0, 60));
+    if (!isSilent) alert(`⚠️ 同期エラー: ${err.message}\n(通信状態やFirebaseのルール設定などを確認してください)`);
+  }
   finally { _syncing = false; }
 }
 

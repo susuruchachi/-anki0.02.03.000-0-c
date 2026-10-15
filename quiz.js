@@ -483,7 +483,8 @@ function maskAnswerInText(text, answer) {
 function buildHintStages(cur, mode, structured, richAnswer) {
   const stages = [];
   const note = String(cur.note || '').trim();
-  if (note) stages.push({ html: '📝 ' + escapeHtml(maskAnswerInText(note, cur.answer)).replace(/\n/g, '<br>') });
+  // メモの和訳（答えが英語なら英単語・語根）を隠してから、さらに答えそのものも伏せ字にする
+  if (note) stages.push({ html: '📝 ' + escapeHtml(maskAnswerInText(hideNoteTranslations(note, isLatinAnswer(getPrimaryAnswer(cur.answer))), cur.answer)).replace(/\n/g, '<br>') });
   if (richAnswer || mode !== 'desc') return { stages, shown: 0 };
   if (structured) {
     stages.push({ structured: structured.map(seg => seg.text.charAt(0)) });
