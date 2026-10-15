@@ -158,7 +158,8 @@ h2 { font-size: 1.4rem; font-weight: 700; margin-bottom: 20px; display: flex; al
 .feedback-area.correct { display: flex; background: rgba(34,199,122,0.15); color: var(--success); border: 1px solid rgba(34,199,122,0.3); }
 .feedback-area.pass { display: flex; background: rgba(245,166,35,0.12); color: var(--warn); border: 1px solid rgba(245,166,35,0.3); }
 .feedback-area.incorrect { display: flex; background: rgba(255,79,106,0.15); color: var(--danger); border: 1px solid rgba(255,79,106,0.3); }
-.feedback-ans { font-size: 0.85rem; color: var(--text); font-weight: 400; margin-top: 2px; }
+.feedback-ans { font-size: 0.85rem; color: var(--text); font-weight: 400; margin-top: 2px; white-space: pre-line; }
+#selfAnswerDisplay, [data-shown="1"] { white-space: pre-line; }
 
 .choice-grid { display: grid; grid-template-columns: 1fr; gap: 10px; margin-bottom: 15px; }
 .choice-btn { background: var(--bg3); border: 1px solid var(--border); padding: 14px 16px; border-radius: 10px; text-align: left; font-size: 0.95rem; font-weight: 500; cursor: pointer; transition: 0.2s; display: flex; align-items: center; gap: 10px; color: var(--text); }

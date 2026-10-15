@@ -384,6 +384,8 @@ function loadQuizQuestion() {
   const _primary = getPrimaryAnswer(cur.answer);
   const richAnswer = hasRichBlock(_primary) || /\$[^$]+\$/.test(_primary);
   if (richAnswer && ['desc', 'minhaya', 'tap'].includes(mode)) mode = 'self';
+  // ★【0.03.05】「自己申告」形式のカード（答えが列挙などで文字入力に向かない）は、入力モードでは自己申告で出題する
+  if (cur.kind === 'self' && ['desc', 'minhaya', 'tap'].includes(mode)) mode = 'self';
   currentRoundMode = mode;
   ['boxChoiceArea','boxDescArea','boxMinhayaArea','boxSelfArea', 'boxTapArea'].forEach(id=>document.getElementById(id).style.display='none');
   document.getElementById('btnQuizAction').style.display='inline-flex'; document.getElementById('btnQuizPass').style.display='inline-flex';
@@ -604,7 +606,8 @@ function choiceShape(t) {
   return {
     latin: /[A-Za-z]/.test(s) && !JA_CHAR_RE.test(s),
     ph: /(^|[\s(（])[A-C](?=$|[\s)）.,])|[～〜~]|\.\.\./.test(s),
-    words: s.trim().split(/\s+/).length
+    words: s.trim().split(/\s+/).length,
+    rich: hasRichBlock(s) || /\$[^$]+\$/.test(s)
   };
 }
 function buildChoiceCandidates(cur, correctPrimary) {
@@ -623,6 +626,7 @@ function buildChoiceCandidates(cur, correctPrimary) {
     const sh = choiceShape(t);
     let score = 0;
     if (sh.latin === want.latin) score += 8;           // 英語なら英語、日本語なら日本語
+    if (sh.rich === want.rich) score += 6;             // 構造式つきの答えには構造式つきの選択肢
     if (sh.ph === want.ph) score += 3;                 // 「A」「～」入りの熟語なら熟語どうし
     if (Math.abs(sh.words - want.words) <= 1) score += 2;
     if (q.category === cur.category) score += 2;

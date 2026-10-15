@@ -49,7 +49,11 @@ function srsParams() {
 }
 // カタカナをひらがなにそろえる（採点でひらがな・カタカナを同一視するため）
 function foldKana(s) {
-  return String(s || '').replace(/[ァ-ヶ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x60));
+  return String(s || '').replace(/[\u30A1-\u30F6]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x60))
+    // ★【0.03.05】化学式の添字（H₂SO₄）・上付き・全角記号を、打ちやすい形（H2SO4）とそろえる
+    .replace(/[\u2080-\u2089]/g, c => String(c.charCodeAt(0) - 0x2080))
+    .replace(/[\u2070\u00B9\u00B2\u00B3\u2074-\u2079]/g, c => ({ '\u2070': '0', '\u00B9': '1', '\u00B2': '2', '\u00B3': '3' }[c] || String(c.charCodeAt(0) - 0x2070)))
+    .replace(/[\u207A\uFF0B]/g, '+').replace(/[\u207B\u2212\uFF0D]/g, '-').replace(/\uFF08/g, '(').replace(/\uFF09/g, ')');
 }
 
 // ================================================================
