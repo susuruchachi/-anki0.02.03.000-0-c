@@ -1,21 +1,83 @@
 // ----------------- JSON / CSV 管理 -----------------
 function exportJSON() {
-  const blob = new Blob([JSON.stringify({ db, categories, categoryTree }, null, 2)], { type: 'application/json' });
+  const blob = new Blob([JSON.stringify({ app: 'susuru_anki', version: typeof APP_VERSION !== 'undefined' ? APP_VERSION : '', exportedAt: Date.now(), db, categories, categoryTree, catSubjects }, null, 2)], { type: 'application/json' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `susuru_anki_${Date.now()}.json`; a.click();
 }
+// ★【0.03.12】JSONの取り込みは「今のデータに追加（統合）」か「置き換え」を選ぶ（以前は確認なしで全部置き換えていた）
 function importJSON(e) {
-  if(!e.target.files[0]) return;
+  const file = e.target.files[0];
+  if (!file) return;
+  e.target.value = ''; // 同じファイルをもう一度選べるように
   const r = new FileReader(); r.onload = function(evt) {
-    try {
-      const p = JSON.parse(evt.target.result);
-      if(p.db) db = p.db; if(p.categories) categories = p.categories; if(p.categoryTree) categoryTree = p.categoryTree;
-      // ★【0.03.02】バックアップから戻したフォルダー・カードが、同期の削除記録で消されないようにする
-      categories.forEach(c => markCatCreated(c));
-      const del = new Set(deletedCards);
-      db.forEach(q => { if (!q.id || del.has(q.id)) q.id = newCardId(); touchCard(q); touchStats(q); });
-      autoMerge(); alert("📦 インポート成功！"); openPage('pgHome');
-    } catch(err) { alert("無効なJSONです。"); }
-  }; r.readAsText(e.target.files[0]);
+    let p;
+    try { p = JSON.parse(evt.target.result); } catch (err) { alert("無効なJSONです。"); return; }
+    if (!p || !Array.isArray(p.db)) { alert("すするankiのバックアップ（JSON）ではないようです。"); return; }
+    const n = p.db.length, nc = (p.categories || []).filter(c => c !== '未分類').length;
+    openContextMenu(`📦 JSONの取り込み（カード${n}枚・フォルダー${nc}個）`, [
+      { html: '🔀 今のデータに追加する（統合・おすすめ）<br><span style="font-size:0.75rem; color:var(--text3);">今のカード・フォルダーは残したまま、バックアップの分を足します。同じカードは今のデータを優先します</span>', action: () => importBackupMerge(p) },
+      { html: '♻️ 今のデータを消して置き換える<br><span style="font-size:0.75rem; color:var(--text3);">今のカード・フォルダーはすべて消え、バックアップの内容だけになります（他の端末からも消えます）</span>', danger: true, action: () => {
+          if (confirm(`今のカード${db.length}枚・フォルダーをすべて消して、バックアップの内容に置き換えます。よろしいですか？`)) importBackupReplace(p);
+        } },
+      { type: 'separator' },
+      { html: 'キャンセル', action: () => {} }
+    ]);
+  }; r.readAsText(file);
+}
+// バックアップのカード・フォルダーを取り込める形にそろえる
+function normalizeBackup(p) {
+  const cats = (Array.isArray(p.categories) ? p.categories : []).filter(c => typeof c === 'string' && c.trim() && !invalidCategoryName(c));
+  const tree = {};
+  Object.keys(p.categoryTree || {}).forEach(k => { if (!invalidCategoryName(k) && Array.isArray(p.categoryTree[k])) tree[k] = p.categoryTree[k].filter(c => typeof c === 'string' && c.trim() && !invalidCategoryName(c)); });
+  const ids = new Set();
+  const cards = p.db.filter(q => q && typeof q === 'object' && q.question != null).map(q => {
+    const c = Object.assign({}, q);
+    if (!c.id || ids.has(c.id)) c.id = newCardId();
+    ids.add(c.id);
+    if (!c.category) c.category = '未分類';
+    ['level', 'correct', 'incorrect', 'streak', 'wrongStreak', 'shikkariStreak'].forEach(k => { if (typeof c[k] !== 'number') c[k] = 0; });
+    return c;
+  });
+  cards.forEach(c => { if (!cats.includes(c.category)) cats.push(c.category); });
+  if (!cats.includes('未分類')) cats.push('未分類');
+  return { db: cards, categories: cats, categoryTree: tree, catSubjects: (p.catSubjects && typeof p.catSubjects === 'object') ? p.catSubjects : {} };
+}
+// 統合：今のデータを残したまま足す（どちらかにあるカード・フォルダーは削除記録より優先して残す）
+function importBackupMerge(p) {
+  const b = normalizeBackup(p);
+  const localIds = new Set(db.map(q => q.id));
+  const before = db.length;
+  // 今の端末に無いカードは「今取り込んだ」ことにする（他の端末の削除記録で消されないように）
+  b.db.forEach(c => { if (!localIds.has(c.id)) { touchCard(c); touchStats(c); } });
+  let r = { db: b.db, categories: b.categories, categoryTree: b.categoryTree, catSubjects: b.catSubjects,
+    deletedCards: [], deletedCardsAt: {}, deletedCats: [], catStamps: {}, docStamps: {}, subscribedDocs: [], ownedDocs: [] };
+  r = reconcileUnionState(r);
+  r.structAt = -1; // 親子関係・教科タグが食い違うときは今のデータを優先する
+  mergeIntoLocal(r);
+  structAt = Date.now(); _structHash = structFingerprint();
+  autoMerge(true);
+  saveData(true);
+  if (typeof refreshVisibleViews === 'function') refreshVisibleViews(true);
+  alert(`📦 取り込みました（統合）。\nカード: ${before}枚 → ${db.length}枚\nフォルダー: ${categories.length}個`);
+  openPage('pgHome');
+}
+// 置き換え：今のカード・フォルダーを削除記録つきで消してから、バックアップの内容にする
+function importBackupReplace(p) {
+  const b = normalizeBackup(p);
+  const keepIds = new Set(b.db.map(c => c.id));
+  tombstoneCards(db.filter(q => !keepIds.has(q.id)).map(q => q.id));
+  const keepCats = new Set([...b.categories, ...Object.keys(b.categoryTree), ...Object.values(b.categoryTree).flat()]);
+  markCatsDeleted(categories.filter(c => !keepCats.has(c)));
+  b.db.forEach(c => { touchCard(c); touchStats(c); delete deletedCardsAt[c.id]; });
+  deletedCards = deletedCards.filter(id => !keepIds.has(id));
+  db = b.db; categories = b.categories; categoryTree = b.categoryTree; catSubjects = b.catSubjects;
+  categories.forEach(c => markCatCreated(c));
+  Object.keys(categoryTree).forEach(k => { markCatCreated(k); categoryTree[k].forEach(markCatCreated); });
+  structAt = Date.now();
+  ensureSystemSanity(); autoMerge(true);
+  saveData(true);
+  if (typeof refreshVisibleViews === 'function') refreshVisibleViews(true);
+  alert(`📦 取り込みました（置き換え）。\nカード: ${db.length}枚`);
+  openPage('pgHome');
 }
 function exportCSV() {
   let lines = [["問題", "答え", "フォルダー", "番号", "メモ", "選択肢", "形式", "レベル", "正解数", "不正解数"]];

@@ -629,7 +629,8 @@ function resolveAccountSwitch() {
 // 通常の同期は「削除の記録」も同期するため、そのままだと片方のアカウントで昔消したフォルダー・カードが
 // もう一方のデータまで消してしまう。統合のときは、どちらかに今あるものの削除記録を取り消してから合わせる。
 // フォルダーの親子関係が食い違うものは今のアカウント（クラウド）側を優先し、片方にしか無いフォルダーはその親の下に入れる。
-function prepareAccountMerge(r) {
+// r（取り込む側）と今の端末のデータの、どちらかに今あるものの削除記録を取り消す（JSONの統合取り込みでも使う）
+function reconcileUnionState(r) {
   const now = Date.now();
   r = Object.assign({}, r);
   const namesOf = (cats, tree) => {
@@ -661,6 +662,10 @@ function prepareAccountMerge(r) {
     r.docStamps[id] = Object.assign({}, r.docStamps[id] || {}, { a: now });
     docStamps[id] = Object.assign({}, docStamps[id] || {}, { a: now });
   });
+  return r;
+}
+function prepareAccountMerge(r) {
+  r = reconcileUnionState(r);
   // 親子関係・教科タグはクラウド（今のアカウント）を優先する
   structAt = 0;
   r.structAt = Math.max(1, r.structAt || 0);
