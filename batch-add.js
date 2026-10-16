@@ -12,12 +12,12 @@ function submitBulkAdd() {
   
   // ★ 権限チェック
   let targetSharedDocId = null;
-  const existingCard = db.find(q => q.category === targetBulkCategory && q.sharedDocId);
-  if (existingCard) {
-    targetSharedDocId = existingCard.sharedDocId;
-    const perm = sharedDocPermissions[targetSharedDocId];
-    if (!perm || !perm.canEdit) { closeBulkAdd(); return alert("🔒 この共有/公開カテゴリーは閲覧専用のため、問題を追加できません。"); }
+  const shareInfo = getCategoryShareInfo(targetBulkCategory);
+  if (shareInfo.shared) {
+    if (shareInfo.readOnly) { closeBulkAdd(); return alert("🔒 この共有/公開カテゴリーは閲覧専用のため、問題を追加できません。"); }
+    targetSharedDocId = shareInfo.docId;
   }
+  const addedCards = [];
   
   let count = 0;
   // 空行を除外して行の配列を作成
@@ -35,9 +35,10 @@ function submitBulkAdd() {
       if(idx !== -1) {
         const q = line.substring(0, idx).trim(), a = line.substring(idx + 1).trim();
         if(q && a) {
-          const newCard = { id: 'id_' + Math.random().toString(36).slice(2) + Date.now().toString(36), question: q, answer: a, category: targetBulkCategory, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 };
-          if (targetSharedDocId) { newCard.sharedDocId = targetSharedDocId; updateCardInSharedDoc(targetSharedDocId, newCard, 'add'); }
-          db.push(newCard); count++;
+          const newCard = { id: newCardId(), question: q, answer: a, category: targetBulkCategory, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 };
+          touchCard(newCard);
+          if (targetSharedDocId) newCard.sharedDocId = targetSharedDocId;
+          db.push(newCard); addedCards.push(newCard); count++;
         }
       }
     });
@@ -47,13 +48,15 @@ function submitBulkAdd() {
       const q = lines[i];
       const a = lines[i+1];
       if (q && a) {
-        const newCard = { id: 'id_' + Math.random().toString(36).slice(2) + Date.now().toString(36), question: q, answer: a, category: targetBulkCategory, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 };
-        if (targetSharedDocId) { newCard.sharedDocId = targetSharedDocId; updateCardInSharedDoc(targetSharedDocId, newCard, 'add'); }
-        db.push(newCard); count++;
+        const newCard = { id: newCardId(), question: q, answer: a, category: targetBulkCategory, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 };
+        touchCard(newCard);
+        if (targetSharedDocId) newCard.sharedDocId = targetSharedDocId;
+        db.push(newCard); addedCards.push(newCard); count++;
       }
     }
   }
   
+  if (targetSharedDocId) addCardsToSharedDoc(targetSharedDocId, addedCards);
   saveData(true); 
   if (typeof renderBox === 'function' && document.getElementById('pgBox').classList.contains('active')) renderBox(); 
   if (typeof renderTree === 'function' && document.getElementById('pgTree').classList.contains('active')) renderTree();

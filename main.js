@@ -2,7 +2,10 @@
 
 window.onload = function() {
   loadData(); ensureSystemSanity(); autoMerge();
+  if (typeof loadQuizPrefs === 'function') loadQuizPrefs(); // ★【0.03.03】詳細設定を復元
   buildQuizScopeDropdown(); 
+  if (typeof updateHomeSummary === 'function') updateHomeSummary(); // ★【0.03.00】
+  if (typeof showReleaseBannerIfNew === 'function') showReleaseBannerIfNew(); // ★【0.03.00】未読のお知らせバナー
   if(localStorage.getItem('theme_light')==='true') toggleLightMode(true);
   
   // 成績共有設定をUIに反映
@@ -31,48 +34,5 @@ window.onload = function() {
   // 起動時に共有カテゴリーの変更を同期する
   if (typeof syncSubscriptions === 'function') syncSubscriptions();
 
-  // ★【0.02.50-g追加】リロード・復帰時のオンライン対戦チェック
-  const lastMatchStr = localStorage.getItem('susuru_anki_last_match');
-  if (lastMatchStr) {
-    try {
-      const lastMatch = JSON.parse(lastMatchStr);
-      firestore.collection('susuru_anki_matches').doc(lastMatch.matchId).get().then(doc => {
-        // まだルームが playing で残っていれば復帰を確認
-        if (doc.exists && doc.data().status === 'playing') {
-          if (confirm("⚔️ 前回のオンライン対戦ルームが残っています。復帰しますか？")) {
-            currentMatchId = lastMatch.matchId;
-            // 切断フラグを解除して復帰
-            firestore.collection('susuru_anki_matches').doc(currentMatchId).update({
-              [`${lastMatch.myRole}Disconnected`]: false
-            }).then(() => {
-              if (typeof openPage === 'function') openPage('pgOnlineMatch');
-              if (typeof listenToMatch === 'function') listenToMatch();
-            });
-          }
-        }
-        localStorage.removeItem('susuru_anki_last_match');
-      }).catch(() => localStorage.removeItem('susuru_anki_last_match'));
-    } catch (e) {
-      localStorage.removeItem('susuru_anki_last_match');
-    }
-  }
+  // ★【0.03.10】対戦の復帰・招待リンクはログイン後に match.js の onMatchAuthReady() で確かめる
 };
-
-// ★【0.02.50-g追加】タブを閉じたりリロードした瞬間に切断フラグを送信
-window.addEventListener('beforeunload', () => {
-  if (typeof currentMatchId !== 'undefined' && currentMatchId && typeof currentUser !== 'undefined' && currentUser) {
-    let role = window.myMatchRole || 'player';
-    localStorage.setItem('susuru_anki_last_match', JSON.stringify({ matchId: currentMatchId, myRole: role }));
-    
-    // ベストエフォートで切断フラグ送信
-    firestore.collection('susuru_anki_matches').doc(currentMatchId).get().then(doc => {
-      if (doc.exists) {
-        let data = doc.data();
-        let myRole = data.player1 === currentUser.uid ? 'player1' : (data.player2 === currentUser.uid ? 'player2' : null);
-        if (myRole) {
-          firestore.collection('susuru_anki_matches').doc(currentMatchId).update({ [`${myRole}Disconnected`]: true });
-        }
-      }
-    });
-  }
-});

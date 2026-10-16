@@ -52,12 +52,10 @@ auth.onAuthStateChanged(user => {
     // ★ 管理者UI表示の更新
     if (typeof updateAdminUIVisibility === 'function') updateAdminUIVisibility();
     
-    // ★ 招待リンク（オンライン対戦）のチェック
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get('match_room') && typeof checkOnlineMatchInvite === 'function') {
-      checkOnlineMatchInvite(urlParams.get('match_room'));
-    }
+    // ★【0.03.10】招待リンク（オンライン対戦）・対戦途中からの復帰のチェック（ログインが終わってから）
+    if (typeof onMatchAuthReady === 'function') onMatchAuthReady();
   } else {
+    if (typeof stopCloudListener === 'function') stopCloudListener();
     ls.innerHTML = `<span style="color:var(--warn);">未ログイン</span>`;
     const btnLogin = document.getElementById('btnFbLogin');
     const btnLogout = document.getElementById('btnFbLogout');
