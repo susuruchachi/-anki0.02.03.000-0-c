@@ -603,21 +603,76 @@ function autoMerge(skipSave = false) {
 }
 
 const OWNER_UID_KEY = 'susuru_anki_owner_uid';
+let _accountMergePending = false; // 別アカウントのデータを今のアカウントに統合するところ
 // ★【0.03.02】この端末のデータが別のアカウントのものだった場合の扱いを決める
 function resolveAccountSwitch() {
   let owner = null;
   try { owner = localStorage.getItem(OWNER_UID_KEY); } catch (e) {}
   const hasLocal = db.length > 0 || categories.length > 1;
   if (owner && owner !== currentUser.uid && hasLocal) {
-    const merge = confirm('この端末には、別のGoogleアカウントで使っていたデータがあります。\n\nOK：この端末のデータを今のアカウントに統合する\nキャンセル：この端末のデータを今のアカウントのデータに置き換える（統合しない）');
+    const merge = confirm('この端末には、別のGoogleアカウントで使っていたデータがあります。\n\nOK：この端末のデータを今のアカウントに統合する（カード・フォルダー・教科タグ・購読をすべて両方残します）\nキャンセル：この端末のデータを今のアカウントのデータに置き換える（統合しない）');
     if (!merge) {
       db = []; categories = ['未分類']; categoryTree = {}; subscribedDocs = []; ownedDocs = [];
       deletedCards = []; deletedCardsAt = {}; deletedCats = []; catStamps = {}; docStamps = {}; structAt = 0; catSubjects = {};
       sharedDocPermissions = {};
       _structHash = structFingerprint(); writeLocal();
+    } else {
+      // 統合は、クラウドのデータを読んでから行う（同期が成功するまでは「前のアカウントのデータ」のまま）
+      _accountMergePending = true;
+      return;
     }
   }
   try { localStorage.setItem(OWNER_UID_KEY, currentUser.uid); } catch (e) {}
+}
+
+// ★【0.03.11】アカウントを変えて統合するときは、両方のデータをすべて残す
+// 通常の同期は「削除の記録」も同期するため、そのままだと片方のアカウントで昔消したフォルダー・カードが
+// もう一方のデータまで消してしまう。統合のときは、どちらかに今あるものの削除記録を取り消してから合わせる。
+// フォルダーの親子関係が食い違うものは今のアカウント（クラウド）側を優先し、片方にしか無いフォルダーはその親の下に入れる。
+function prepareAccountMerge(r) {
+  const now = Date.now();
+  r = Object.assign({}, r);
+  const namesOf = (cats, tree) => {
+    const set = new Set((cats || []).filter(Boolean));
+    Object.keys(tree || {}).forEach(p => { set.add(p); (tree[p] || []).forEach(c => set.add(c)); });
+    return set;
+  };
+  // カード：どちらかにあるカードの削除記録は消す
+  const localIds = new Set(db.map(q => q.id));
+  const cloudIds = new Set((r.db || []).map(q => q && q.id).filter(Boolean));
+  r.deletedCardsAt = Object.assign({}, r.deletedCardsAt || {});
+  localIds.forEach(id => { delete r.deletedCardsAt[id]; });
+  r.deletedCards = (r.deletedCards || []).filter(id => !localIds.has(id));
+  cloudIds.forEach(id => { delete deletedCardsAt[id]; });
+  deletedCards = deletedCards.filter(id => !cloudIds.has(id));
+  // フォルダー：どちらかにあるフォルダーは「今作った」ことにする（削除記録より新しくなる）
+  const aliveNames = new Set([...namesOf(categories, categoryTree), ...namesOf(r.categories, r.categoryTree)]);
+  r.catStamps = Object.assign({}, r.catStamps || {});
+  aliveNames.forEach(n => {
+    r.catStamps[n] = Object.assign({}, r.catStamps[n] || {}, { a: now });
+    catStamps[n] = Object.assign({}, catStamps[n] || {}, { a: now });
+  });
+  r.deletedCats = (r.deletedCats || []).filter(n => !aliveNames.has(n));
+  deletedCats = deletedCats.filter(n => !aliveNames.has(n));
+  // 購読・所有している共有カテゴリー
+  const aliveDocs = new Set([...(subscribedDocs || []), ...(ownedDocs || []), ...(r.subscribedDocs || []), ...(r.ownedDocs || [])]);
+  r.docStamps = Object.assign({}, r.docStamps || {});
+  aliveDocs.forEach(id => {
+    r.docStamps[id] = Object.assign({}, r.docStamps[id] || {}, { a: now });
+    docStamps[id] = Object.assign({}, docStamps[id] || {}, { a: now });
+  });
+  // 親子関係・教科タグはクラウド（今のアカウント）を優先する
+  structAt = 0;
+  r.structAt = Math.max(1, r.structAt || 0);
+  return r;
+}
+function finishAccountMerge(beforeLocal) {
+  _accountMergePending = false;
+  structAt = Date.now(); // 統合した構造を、このアカウントの他の端末にも反映させる
+  _structHash = structFingerprint();
+  try { localStorage.setItem(OWNER_UID_KEY, currentUser.uid); } catch (e) {}
+  saveData(true);
+  setTimeout(() => alert(`🔀 前のアカウントのデータを統合しました。\nカード: ${beforeLocal.cards}枚 ＋ ${beforeLocal.cloudCards}枚 → ${db.length}枚\nフォルダー: ${categories.length}個`), 0);
 }
 
 let _syncing = false;
@@ -631,14 +686,18 @@ async function syncToCloud(isSilent = false) {
     const snap = await userDocRef().get();
     // 最初の同期が終わるまではクラウドに書かない（古いデータでクラウドを上書きしないため）
     cloudReady = true;
+    const merging = _accountMergePending;
+    const mergeInfo = { cards: db.length, cloudCards: 0 };
     if (snap.exists) {
-      const r = decodeCloudDoc(snap.data() || {});
+      let r = decodeCloudDoc(snap.data() || {});
       _lastSeenWriteId = r.writeId || null;
+      if (merging) { mergeInfo.cloudCards = (r.db || []).length; r = prepareAccountMerge(r); }
       applyCloudState(r, { forcePush: true });
     } else {
       ensureSystemSanity(); autoMerge(true); writeLocal();
       await backgroundCloudSave();
     }
+    if (merging) finishAccountMerge(mergeInfo);
     startCloudListener();
     refreshVisibleViews();
     if (typeof syncSubscriptions === 'function') await syncSubscriptions();
