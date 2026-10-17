@@ -530,7 +530,7 @@ async function deletePublicCategory(docId, catName) {
 
 async function unsubscribeSharedCategory(catName) {
   const _root = (getCategoryShareInfo(catName).root) || catName;
-  if (!confirm("「" + _root + "」の購読を解除しますか？\n\n※このカテゴリーのフォルダーと中の問題がすべて削除されます。\n（学習成績も消えます）")) return;
+  if (!confirm("「" + _root + "」の購読を解除しますか？\n\n※このカテゴリーのフォルダーと中の問題がすべて削除されます（学習成績も消えます）。\n※解除する前の状態は、この端末の「復元ポイント」から戻せます（成績も戻ります）")) return;
   // ★【0.03.02】削除する前に docId を特定する（以前は削除後に探していたため見つからず、購読が残って次の同期で復活していた）
   const info = getCategoryShareInfo(catName);
   const docId = info.docId || (db.find(q => getAllSubcategories(catName).includes(q.category) && q.sharedDocId) || {}).sharedDocId || null;
@@ -541,6 +541,7 @@ async function unsubscribeSharedCategory(catName) {
 
 // 購読解除の共通処理：フォルダーと中身を削除記録つきで消し、購読リストからも外す
 async function leaveSharedCategory(docId, catName) {
+  takeSnapshot(`「${catName}」の購読解除`);
   // ★【0.03.02】サブフォルダーから解除しても、購読しているカテゴリー全体（一番上のフォルダーから）を解除する
   const root = (docId && sharedMeta[docId] && sharedMeta[docId].root && categories.includes(sharedMeta[docId].root)) ? sharedMeta[docId].root : catName;
   const allTarget = getAllSubcategories(root);

@@ -235,7 +235,8 @@ function runCategoryAction(catName, act, info) {
     case 'bulk': closeCategoryEditor(); showBulkAddModal(catName); return;
     case 'scan': closeCategoryEditor(); showScanImportModal(catName); return;
     case 'reset': {
-      if(!confirm(`⚠️ 「${catName}」とサブフォルダー内の全てのカードの成績（正解数・レベル等）をリセットしますか？\n（問題自体は消えません）`)) return;
+      if(!confirm(`⚠️ 「${catName}」とサブフォルダー内の全てのカードの成績（正解数・レベル等）をリセットしますか？\n（問題自体は消えません。リセット前の成績は「復元ポイント」から戻せます）`)) return;
+      takeSnapshot(`「${catName}」の成績リセット`);
       const targetCats = getAllSubcategories(catName);
       let resetCount = 0;
       db.forEach(q => {
@@ -253,6 +254,7 @@ function runCategoryAction(catName, act, info) {
       const cards = sortCardsByNumber(db.filter(q => q.category === catName));
       if (!cards.length) return alert('このフォルダーの直下に問題がありません。');
       if (!confirm(`「${catName}」の直下の問題 ${cards.length} 問に、今の並び順で 1 から番号を振り直しますか？`)) return;
+      takeSnapshot(`「${catName}」の番号振り直し`);
       cards.forEach((q, i) => { if (q.no !== i + 1) { q.no = i + 1; touchCard(q); } });
       saveData(true);
       if (info.shared && info.canEdit) pushSharedDocFromLocal(info.docId);
@@ -377,6 +379,7 @@ function mergeCategoryInto(src, dst) {
   if (isSharedDocRoot(src)) { alert('共有・公開カテゴリーの一番上のフォルダーは統合できません。\n（名前の変更や移動はできます）'); return false; }
   const sInfo = getCategoryShareInfo(src), dInfo = getCategoryShareInfo(dst);
   if ((sInfo.shared && sInfo.readOnly) || (dInfo.shared && dInfo.readOnly)) { alert('🔒 閲覧専用の共有カテゴリーは統合できません。'); return false; }
+  takeSnapshot(`「${src}」の統合`);
   // 統合したカードは、統合先の最後の番号の次から元の順番で並べる
   let nextNo = Math.max(0, ...db.filter(q => q.category === dst).map(q => Number(q.no) || 0));
   sortCardsByNumber(db.filter(q => q.category === src)).forEach(q => { q.no = ++nextNo; });
@@ -408,22 +411,28 @@ async function deleteCategoryTree(catName, info) {
   if (info.shared && info.readOnly) return alert("🔒 購読中のカテゴリーは削除ではなく「購読を解除」してください。");
   const toDelete = getAllSubcategories(catName);
   const count = db.filter(q => toDelete.includes(q.category)).length;
-  if(!confirm(`警告: 「${catName}」とサブフォルダー ${toDelete.length - 1} 個、問題 ${count} 問をすべて削除しますか？\n（元に戻せません）`)) return;
-  let stopDoc = false;
-  if (info.shared && info.isOwner && info.root === catName) {
-    stopDoc = confirm(`「${catName}」は共有・公開中です。\n共有・公開も停止して、クラウド上のデータも削除しますか？\n（キャンセルすると、手元のフォルダーだけ削除し、共有先からも中身が消えます）`);
-  } else if (info.shared && info.canEdit && !info.isOwner) {
-    if (!confirm(`⚠️ 「${catName}」は共同編集中の共有カテゴリーです。\n削除すると、共有している全員の手元からもこのフォルダーの問題が消えます。続けますか？\n（自分だけ使わなくなる場合は「購読を解除」を使ってください）`)) return;
+  // ★【0.03.13】共有・公開中のカテゴリーを消すときの扱いを分かりやすく
+  //  ・作成者が一番上のフォルダーを消す → 共有・公開を停止する（購読している人の手元には、同期が止まったフォルダーとして残る）
+  //    以前は「キャンセル」でも共有先の中身まで空にしていた
+  //  ・共有カテゴリーの中のフォルダーを消す（作成者・共同編集者）→ 共有している全員の手元から消える
+  const ownerRoot = info.shared && info.isOwner && info.root === catName;
+  let msg = `警告: 「${catName}」とサブフォルダー ${toDelete.length - 1} 個、問題 ${count} 問をすべて削除しますか？`;
+  if (ownerRoot) msg += `\n\n「${catName}」は共有・公開中です。共有・公開も停止します。\n（購読している人の手元には、同期が止まったフォルダーとして残ります）`;
+  else if (info.shared && info.canEdit && info.root === catName) msg += `\n\n⚠️ 共同編集中の共有カテゴリーです。共有している全員の手元からこのフォルダーの問題が消えます。\n（自分だけ使わなくなる場合は「購読を解除」を使ってください）`;
+  else if (info.shared && info.canEdit) msg += `\n\n⚠️ 共有カテゴリーの中のフォルダーなので、共有している全員の手元からも消えます。`;
+  msg += `\n\n（消す前の状態は、この端末の「復元ポイント」から戻せます）`;
+  if (!confirm(msg)) return;
+  takeSnapshot(`「${catName}」の削除`);
+  if (ownerRoot) {
+    // 先に共有を止めてから手元を消す（空になった状態を共有先へ書き戻さない）
+    try { await firestore.collection('susuru_anki_shared').doc(info.docId).delete(); } catch (e) { console.warn(e); }
+    detachSharedDoc(info.docId);
   }
   tombstoneCards(db.filter(q => toDelete.includes(q.category)).map(q => q.id));
   db = db.filter(q => !toDelete.includes(q.category));
   categories = categories.filter(c => !toDelete.includes(c));
   for(let p in categoryTree) { if(toDelete.includes(p)) delete categoryTree[p]; else if(categoryTree[p]) categoryTree[p] = categoryTree[p].filter(c => !toDelete.includes(c)); }
   markCatsDeleted(toDelete);
-  if (stopDoc) {
-    try { await firestore.collection('susuru_anki_shared').doc(info.docId).delete(); } catch (e) {}
-    detachSharedDoc(info.docId);
-  }
   afterCategoryChange();
-  if (!stopDoc && info.shared && info.canEdit) pushSharedDocFromLocal(info.docId);
+  if (!ownerRoot && info.shared && info.canEdit) pushSharedDocFromLocal(info.docId);
 }

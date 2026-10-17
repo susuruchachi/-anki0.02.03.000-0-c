@@ -112,7 +112,15 @@ function loadData() {
       if(p.docStamps) docStamps=p.docStamps;
       if(p.structAt) structAt=p.structAt;
     }
-  } catch(e){}
+  } catch(e){
+    // ★【0.03.13】保存データが壊れていて読めなかったときは、上書きして失う前に別の場所へ退避する
+    console.error('保存データを読めませんでした:', e);
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw && !localStorage.getItem(STORAGE_KEY + '_unreadable')) localStorage.setItem(STORAGE_KEY + '_unreadable', raw);
+    } catch (e2) {}
+    setTimeout(() => alert('⚠️ この端末の保存データを読み込めませんでした。\n読めなかったデータは別の場所に退避してあります。ログインしているならクラウドから復元されます。'), 0);
+  }
   migrateSyncMeta();
   try { shareStats = localStorage.getItem('shareStats') === 'true'; } catch(e){}
   // ★【0.02.58-g】カテゴリー選択と最終ページを復元
@@ -610,8 +618,9 @@ function resolveAccountSwitch() {
   try { owner = localStorage.getItem(OWNER_UID_KEY); } catch (e) {}
   const hasLocal = db.length > 0 || categories.length > 1;
   if (owner && owner !== currentUser.uid && hasLocal) {
-    const merge = confirm('この端末には、別のGoogleアカウントで使っていたデータがあります。\n\nOK：この端末のデータを今のアカウントに統合する（カード・フォルダー・教科タグ・購読をすべて両方残します）\nキャンセル：この端末のデータを今のアカウントのデータに置き換える（統合しない）');
+    const merge = confirm('この端末には、別のGoogleアカウントで使っていたデータがあります。\n\nOK：この端末のデータを今のアカウントに統合する（カード・フォルダー・教科タグ・購読をすべて両方残します）\nキャンセル：この端末のデータを今のアカウントのデータに置き換える（統合しない。この端末のデータは「復元ポイント」に保存されます）');
     if (!merge) {
+      takeSnapshot('アカウント変更（置き換え）');
       db = []; categories = ['未分類']; categoryTree = {}; subscribedDocs = []; ownedDocs = [];
       deletedCards = []; deletedCardsAt = {}; deletedCats = []; catStamps = {}; docStamps = {}; structAt = 0; catSubjects = {};
       sharedDocPermissions = {};

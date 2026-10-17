@@ -15,8 +15,8 @@ function importJSON(e) {
     const n = p.db.length, nc = (p.categories || []).filter(c => c !== '未分類').length;
     openContextMenu(`📦 JSONの取り込み（カード${n}枚・フォルダー${nc}個）`, [
       { html: '🔀 今のデータに追加する（統合・おすすめ）<br><span style="font-size:0.75rem; color:var(--text3);">今のカード・フォルダーは残したまま、バックアップの分を足します。同じカードは今のデータを優先します</span>', action: () => importBackupMerge(p) },
-      { html: '♻️ 今のデータを消して置き換える<br><span style="font-size:0.75rem; color:var(--text3);">今のカード・フォルダーはすべて消え、バックアップの内容だけになります（他の端末からも消えます）</span>', danger: true, action: () => {
-          if (confirm(`今のカード${db.length}枚・フォルダーをすべて消して、バックアップの内容に置き換えます。よろしいですか？`)) importBackupReplace(p);
+      { html: '♻️ 今のデータを消して置き換える<br><span style="font-size:0.75rem; color:var(--text3);">今のカード・フォルダーは消え、バックアップの内容だけになります（他の端末からも消えます）。共有・購読中のカテゴリーはそのまま残ります</span>', danger: true, action: () => {
+          if (confirm(`今のカード${db.filter(q => !isLiveSharedCard(q)).length}枚・フォルダーを消して、バックアップの内容に置き換えます。よろしいですか？\n（共有・購読中のカテゴリーはそのまま残ります。消す前の状態は「復元ポイント」から戻せます）`)) importBackupReplace(p);
         } },
       { type: 'separator' },
       { html: 'キャンセル', action: () => {} }
@@ -43,6 +43,7 @@ function normalizeBackup(p) {
 }
 // 統合：今のデータを残したまま足す（どちらかにあるカード・フォルダーは削除記録より優先して残す）
 function importBackupMerge(p) {
+  takeSnapshot('JSONの取り込み（統合）');
   const b = normalizeBackup(p);
   const localIds = new Set(db.map(q => q.id));
   const before = db.length;
@@ -60,16 +61,47 @@ function importBackupMerge(p) {
   alert(`📦 取り込みました（統合）。\nカード: ${before}枚 → ${db.length}枚\nフォルダー: ${categories.length}個`);
   openPage('pgHome');
 }
-// 置き換え：今のカード・フォルダーを削除記録つきで消してから、バックアップの内容にする
+// 共有・購読中のカテゴリーのカード（置き換え・全消去の対象にしない。消すと共有している全員の手元から消えてしまうため）
+function isLiveSharedCard(q) {
+  return !!(q && q.sharedDocId && ((subscribedDocs || []).includes(q.sharedDocId) || (ownedDocs || []).includes(q.sharedDocId)));
+}
+function liveSharedFolders() {
+  const set = new Set();
+  Object.keys(sharedMeta || {}).forEach(id => {
+    if (!(subscribedDocs || []).includes(id) && !(ownedDocs || []).includes(id)) return;
+    const root = sharedMeta[id] && sharedMeta[id].root;
+    if (root && categories.includes(root)) getAllSubcategories(root).forEach(c => set.add(c));
+  });
+  db.forEach(q => { if (isLiveSharedCard(q)) set.add(q.category); });
+  return set;
+}
+// 置き換え：今のカード・フォルダーを削除記録つきで消してから、バックアップの内容にする（共有・購読中のカテゴリーは残す）
 function importBackupReplace(p) {
+  takeSnapshot('JSONの取り込み（置き換え）');
   const b = normalizeBackup(p);
-  const keepIds = new Set(b.db.map(c => c.id));
+  const sharedCards = db.filter(isLiveSharedCard);
+  const sharedIds = new Set(sharedCards.map(q => q.id));
+  const sharedCats = liveSharedFolders();
+  b.db = b.db.filter(c => !sharedIds.has(c.id)); // 共有中のカードは今の方を使う
+  const keepIds = new Set([...b.db.map(c => c.id), ...sharedIds]);
   tombstoneCards(db.filter(q => !keepIds.has(q.id)).map(q => q.id));
-  const keepCats = new Set([...b.categories, ...Object.keys(b.categoryTree), ...Object.values(b.categoryTree).flat()]);
+  const keepCats = new Set([...b.categories, ...Object.keys(b.categoryTree), ...Object.values(b.categoryTree).flat(), ...sharedCats]);
   markCatsDeleted(categories.filter(c => !keepCats.has(c)));
   b.db.forEach(c => { touchCard(c); touchStats(c); delete deletedCardsAt[c.id]; });
   deletedCards = deletedCards.filter(id => !keepIds.has(id));
-  db = b.db; categories = b.categories; categoryTree = b.categoryTree; catSubjects = b.catSubjects;
+  // 共有中のフォルダーの親子関係は今のまま残す
+  const tree = Object.assign({}, b.categoryTree);
+  Object.keys(categoryTree).forEach(par => {
+    (categoryTree[par] || []).forEach(ch => {
+      if (!sharedCats.has(ch)) return;
+      Object.keys(tree).forEach(k => { tree[k] = tree[k].filter(x => x !== ch); });
+      (tree[par] = tree[par] || []).push(ch);
+    });
+  });
+  const cats = [...new Set([...b.categories, ...categories.filter(c => sharedCats.has(c)), ...Object.keys(tree).filter(k => sharedCats.has(k) || categories.includes(k))])];
+  const subj = Object.assign({}, b.catSubjects);
+  Object.keys(catSubjects || {}).forEach(k => { if (sharedCats.has(k) && subj[k] === undefined) subj[k] = catSubjects[k]; });
+  db = [...b.db, ...sharedCards]; categories = cats; categoryTree = tree; catSubjects = subj;
   categories.forEach(c => markCatCreated(c));
   Object.keys(categoryTree).forEach(k => { markCatCreated(k); categoryTree[k].forEach(markCatCreated); });
   structAt = Date.now();
@@ -140,74 +172,117 @@ function parseChoicesCell(v) {
   return arr.length >= 2 ? arr : null;
 }
 
+// ★【0.03.13】フォルダー欄の「親>子」から、作らずに一番下のフォルダー名だけを求める（確認前にフォルダーを作らないため）
+function categoryPathLeaf(path) {
+  const parts = String(path || '').split('>').map(x => x.trim()).filter(x => x !== '');
+  if (!parts.length) return '未分類';
+  let leaf = parts[parts.length - 1];
+  if (invalidCategoryName(leaf)) leaf = leaf.replace(/^__|__$/g, '_').slice(0, 100);
+  return leaf;
+}
+// ★【0.03.13】CSVの取り込み
+//  ・まず取り込んだ結果を計算し、既にあるカードが書き換わる場合は「更新する／追加だけ」を選んでから反映する
+//  ・メモ・選択肢・形式の欄が空のときは、手元のカードの内容を消さない（以前は、メモ欄が空のCSVを取り込むとクイズ中に書いたメモが消えていた）
+//  ・閲覧専用の共有カテゴリーのカードは書き換えない（次の同期で元に戻るだけなので）
 function importCSV(e) {
-  if(!e.target.files[0]) return;
+  const file = e.target.files[0];
+  if (!file) return;
+  e.target.value = '';
   const r = new FileReader(); r.onload = function(evt) {
-    try {
-      const rows = parseCSVText(evt.target.result);
-      if(rows.length < 2) return alert("データがありません。");
-      const h = rows[0].map(x=>x.trim());
-      let iQ = h.indexOf("問題"), iA = h.indexOf("答え"), iC = h.indexOf("フォルダー");
-      const iN = h.indexOf("メモ"), iCh = h.indexOf("選択肢"), iK = h.indexOf("形式"), iNo = h.indexOf("番号");
-      if(iQ===-1) iQ=0; if(iA===-1) iA=1; if(iC===-1) iC=2;
-      let added = 0, updated = 0;
-      const touchedCats = new Set();
-      const usedIds = new Set();
-      for(let i=1; i<rows.length; i++) {
-        const c = rows[i]; if(c.length <= Math.max(iQ, iA)) continue;
-        const q = c[iQ]?.trim(), a = c[iA]?.trim(); if(!q || !a) continue;
-        let cat = (iC !== -1 && c[iC]) ? c[iC].trim() : "未分類"; if(!cat) cat="未分類";
-        cat = ensureCategoryPath(cat);
-        const note = iN !== -1 ? String(c[iN] || '').trim() : '';
-        const choices = iCh !== -1 ? parseChoicesCell(c[iCh]) : null;
-        const kindRaw = iK !== -1 ? String(c[iK] || '').trim() : '';
-        const kind = /テスト|test/i.test(kindRaw) ? 'test' : /例文|cloze/i.test(kindRaw) ? 'cloze' : /自己申告|self/i.test(kindRaw) ? 'self' : '';
-        const noNum = iNo !== -1 ? parseInt(String(c[iNo] || '').replace(/[^0-9]/g, ''), 10) : NaN;
-        const no = Number.isFinite(noNum) && noNum > 0 ? noNum : null;
-        // ★【0.03.02】同じフォルダーに同じ問題があれば、重複させずに答え・メモ等を更新する（成績はそのまま）
-        // 同じ問題・同じ答え → それを更新。答えが違う場合は、同じ問題のカードが1枚だけで、この取込でまだ使っていなければ更新
-        let ex = db.find(d => d.category === cat && String(d.question).trim() === q && String(d.answer).trim() === a && !usedIds.has(d.id));
-        if (!ex) {
-          const sameQ = db.filter(d => d.category === cat && String(d.question).trim() === q);
-          if (sameQ.length === 1 && !usedIds.has(sameQ[0].id)) ex = sameQ[0];
-        }
-        if (!ex) {
-          // ★【0.03.08】問題文の「（2つ）」のような数の書き方だけが違うなら、同じカードとして問題文も更新する
-          const qKey = t => String(t).replace(/[（(][0-9０-９]+(?:つ|段階|種類|個)[）)]/g, '').trim();
-          const k = qKey(q);
-          ex = db.find(d => d.category === cat && !usedIds.has(d.id) && String(d.answer).trim() === a && qKey(d.question) === k);
-        }
-        if (ex) usedIds.add(ex.id);
-        if (ex) {
-          const before = JSON.stringify([ex.question, ex.answer, ex.note, ex.choices, ex.kind, ex.no]);
-          ex.question = q;
-          ex.answer = a;
-          if (iN !== -1) { if (note) ex.note = note; else delete ex.note; }
-          if (iCh !== -1) { if (choices) ex.choices = choices; else delete ex.choices; }
-          if (iK !== -1) { if (kind) ex.kind = kind; else delete ex.kind; }
-          if (no) ex.no = no;
-          if (JSON.stringify([ex.question, ex.answer, ex.note, ex.choices, ex.kind, ex.no]) !== before) { touchCard(ex); updated++; touchedCats.add(cat); }
-          continue;
-        }
-        const card = { id: newCardId(), question: q, answer: a, category: cat, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 };
-        if (note) card.note = note;
-        if (choices) card.choices = choices;
-        if (kind) card.kind = kind;
-        if (no) card.no = no;
-        const info = getCategoryShareInfo(cat);
-        if (info.shared && info.canEdit) card.sharedDocId = info.docId;
-        touchCard(card);
-        db.push(card); usedIds.add(card.id); added++; touchedCats.add(cat);
-      }
-      autoMerge();
-      if (typeof pushSharedDocsForCategories === 'function') pushSharedDocsForCategories([...touchedCats]);
-      alert(`📊 CSVを取り込みました。\n新規追加: ${added}件\n更新（メモ・答えなど）: ${updated}件`); openPage('pgHome');
-    } catch(err) { console.error(err); alert("CSV解析に失敗しました。"); }
-  }; r.readAsText(e.target.files[0]);
+    let plan;
+    try { plan = planCSVImport(parseCSVText(evt.target.result)); }
+    catch (err) { console.error(err); alert("CSV解析に失敗しました。"); return; }
+    if (!plan) return;
+    const adds = plan.filter(x => x.type === 'add').length;
+    const ups = plan.filter(x => x.type === 'update');
+    if (!adds && !ups.length) { alert('📊 新しいカードも、変更のあるカードもありませんでした。'); return; }
+    if (!ups.length) { applyCSVImport(plan, false); return; }
+    const ansCh = ups.filter(x => x.changes.includes('答え') || x.changes.includes('問題')).length;
+    const sample = ups.slice(0, 3).map(x => `・${escapeHtml(String(x.ex.question).slice(0, 18))}（${x.changes.join('・')}）`).join('<br>');
+    openContextMenu(`📊 CSV：新しいカード ${adds}枚／既にあるカードの変更 ${ups.length}枚`, [
+      { html: `🔄 追加して、既にあるカードも更新する<br><span style="font-size:0.75rem; color:var(--text3);">問題・答えが変わるカード ${ansCh}枚、メモ・選択肢などが変わるカード ${ups.length - ansCh}枚。成績はそのまま。CSVで空欄のメモは消しません<br>${sample}</span>`, action: () => applyCSVImport(plan, true) },
+      { html: `➕ 新しいカードだけ追加する（既にあるカードは変えない）`, action: () => applyCSVImport(plan, false) },
+      { type: 'separator' },
+      { html: 'キャンセル', action: () => {} }
+    ]);
+  }; r.readAsText(file);
+}
+
+function planCSVImport(rows) {
+  if (rows.length < 2) { alert("データがありません。"); return null; }
+  const h = rows[0].map(x => x.trim());
+  let iQ = h.indexOf("問題"), iA = h.indexOf("答え"), iC = h.indexOf("フォルダー");
+  const iN = h.indexOf("メモ"), iCh = h.indexOf("選択肢"), iK = h.indexOf("形式"), iNo = h.indexOf("番号");
+  if (iQ === -1) iQ = 0; if (iA === -1) iA = 1; if (iC === -1) iC = 2;
+  const usedIds = new Set();
+  const plan = [];
+  const qKey = t => String(t).replace(/[（(][0-9０-９]+(?:つ|段階|種類|個)[）)]/g, '').trim();
+  for (let i = 1; i < rows.length; i++) {
+    const c = rows[i]; if (c.length <= Math.max(iQ, iA)) continue;
+    const q = c[iQ]?.trim(), a = c[iA]?.trim(); if (!q || !a) continue;
+    let catPath = (iC !== -1 && c[iC]) ? c[iC].trim() : "未分類"; if (!catPath) catPath = "未分類";
+    const cat = categoryPathLeaf(catPath);
+    const note = iN !== -1 ? String(c[iN] || '').trim() : '';
+    const choices = iCh !== -1 ? parseChoicesCell(c[iCh]) : null;
+    const kindRaw = iK !== -1 ? String(c[iK] || '').trim() : '';
+    const kind = /テスト|test/i.test(kindRaw) ? 'test' : /例文|cloze/i.test(kindRaw) ? 'cloze' : /自己申告|self/i.test(kindRaw) ? 'self' : '';
+    const noNum = iNo !== -1 ? parseInt(String(c[iNo] || '').replace(/[^0-9]/g, ''), 10) : NaN;
+    const no = Number.isFinite(noNum) && noNum > 0 ? noNum : null;
+    // 同じフォルダーに同じ問題があれば、重複させずに更新する（同じ問題・同じ答え → 同じ問題が1枚だけ → 「（2つ）」などの数だけ違う）
+    let ex = db.find(d => d.category === cat && String(d.question).trim() === q && String(d.answer).trim() === a && !usedIds.has(d.id));
+    if (!ex) {
+      const sameQ = db.filter(d => d.category === cat && String(d.question).trim() === q);
+      if (sameQ.length === 1 && !usedIds.has(sameQ[0].id)) ex = sameQ[0];
+    }
+    if (!ex) { const k = qKey(q); ex = db.find(d => d.category === cat && !usedIds.has(d.id) && String(d.answer).trim() === a && qKey(d.question) === k); }
+    if (ex) {
+      usedIds.add(ex.id);
+      if (ex.sharedDocId && getSharedAccess(ex.sharedDocId).readOnly) { plan.push({ type: 'same' }); continue; }
+      const upd = {};
+      const changes = [];
+      if (String(ex.question) !== q) { upd.question = q; changes.push('問題'); }
+      if (String(ex.answer) !== a) { upd.answer = a; changes.push('答え'); }
+      if (note && note !== (ex.note || '')) { upd.note = note; changes.push('メモ'); }
+      if (choices && JSON.stringify(choices) !== JSON.stringify(ex.choices || null)) { upd.choices = choices; changes.push('選択肢'); }
+      if (kind && kind !== (ex.kind || '')) { upd.kind = kind; changes.push('形式'); }
+      if (no && no !== ex.no) { upd.no = no; changes.push('番号'); }
+      plan.push(changes.length ? { type: 'update', ex, upd, changes, cat } : { type: 'same' });
+      continue;
+    }
+    plan.push({ type: 'add', q, a, catPath, note, choices, kind, no });
+  }
+  return plan;
+}
+
+function applyCSVImport(plan, withUpdates) {
+  if (withUpdates) takeSnapshot('CSVの取り込み（更新）');
+  let added = 0, updated = 0;
+  const touchedCats = new Set();
+  plan.forEach(x => {
+    if (x.type === 'update' && withUpdates) {
+      const ex = db.find(d => d.id === x.ex.id); if (!ex) return;
+      Object.assign(ex, x.upd); touchCard(ex); updated++; touchedCats.add(ex.category);
+    } else if (x.type === 'add') {
+      const cat = ensureCategoryPath(x.catPath);
+      const card = { id: newCardId(), question: x.q, answer: x.a, category: cat, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 };
+      if (x.note) card.note = x.note;
+      if (x.choices) card.choices = x.choices;
+      if (x.kind) card.kind = x.kind;
+      if (x.no) card.no = x.no;
+      const info = getCategoryShareInfo(cat);
+      if (info.shared && info.canEdit) card.sharedDocId = info.docId;
+      touchCard(card);
+      db.push(card); added++; touchedCats.add(cat);
+    }
+  });
+  autoMerge();
+  if (typeof pushSharedDocsForCategories === 'function') pushSharedDocsForCategories([...touchedCats]);
+  alert(`📊 CSVを取り込みました。\n新規追加: ${added}件\n更新: ${updated}件`); openPage('pgHome');
 }
 
 window.resetScores = function resetScores() {
-  if(!confirm("⚠️ すべてのカードの成績（正解数・誤答数・レベル）をリセットしますか？\n\nカテゴリーと問題文は保持されます。")) return;
+  if(!confirm("⚠️ すべてのカードの成績（正解数・誤答数・レベル）をリセットしますか？\n\nカテゴリーと問題文は保持されます。\n（リセット前の成績は「復元ポイント」から戻せます）")) return;
+  takeSnapshot('成績のリセット');
   let resetCount = 0;
   db.forEach(q => {
     q.level = 0; q.correct = 0; q.incorrect = 0; q.streak = 0; q.wrongStreak = 0; q.shikkariStreak = 0; q.level5Correct = 0;
@@ -219,11 +294,15 @@ window.resetScores = function resetScores() {
 };
 
 function factoryReset() { 
-  if(!confirm("⚠️ 全消去します。よろしいですか？\n（ログイン中は、同期している他の端末やクラウドのデータも消えます）")) return; 
+  if(!confirm("⚠️ 全消去します。よろしいですか？\n（ログイン中は、同期している他の端末やクラウドのデータも消えます）\n\n※自分が共有・公開しているカテゴリーは、購読している人の手元にはそのまま残ります\n※消す前の状態は、この端末の「復元ポイント」から戻せます")) return; 
+  takeSnapshot('全消去');
   // ★【0.03.02】削除記録を残して消す（記録が無いと、他の端末との同期で元に戻ってしまう）
   tombstoneCards(db.map(q => q.id));
   markCatsDeleted(categories.filter(c => c !== '未分類'));
+  // 購読をやめてから消す（共有カテゴリーへ「全部消えた」状態を書き戻さないように）
   [...subscribedDocs, ...ownedDocs].forEach(id => markDocLeft(id));
+  Object.keys(sharedMeta || {}).forEach(id => { delete sharedMeta[id]; });
+  if (typeof saveSharedMeta === 'function') saveSharedMeta();
   db = []; categories = ["未分類"]; categoryTree = {}; subscribedDocs = []; ownedDocs = []; catSubjects = {};
   saveData(true); alert("💥 初期化完了。"); openPage('pgHome'); 
 }

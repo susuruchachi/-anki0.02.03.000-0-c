@@ -658,8 +658,14 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
         <button class="btn btn-secondary" onclick="document.getElementById('fileCSV').click()">📥 CSV入力</button>
         <input type="file" id="fileCSV" accept=".csv, text/csv" style="display:none;" onchange="importCSV(event)">
       </div>
-      <div class="hint-small" style="margin-top:8px;">JSONは学習記録・画像も含む完全バックアップ、CSVはカードのみです。構造式・漢文はテキストなのでどちらにも含まれます。<br>CSVの列：問題・答え・フォルダー（「親>子」で入れ子）・メモ・選択肢（「a / b / c」）・形式（「例文」「テスト」）。同じフォルダーに同じ問題があれば、重複させずに答えやメモを更新します。</div>
+      <div class="hint-small" style="margin-top:8px;">JSONは学習記録・画像も含む完全バックアップ、CSVはカードのみです。構造式・漢文はテキストなのでどちらにも含まれます。<br>CSVの列：問題・答え・フォルダー（「親>子」で入れ子）・メモ・選択肢（「a / b / c」）・形式（「例文」「テスト」）。同じフォルダーに同じ問題があれば、重複させずに更新するかどうかを確認します（空欄のメモは消しません）。</div>
       <button class="btn btn-secondary" style="margin-top:10px;" onclick="repairInflatedStats()">🩹 異常な成績（正解数・誤答数が1000回以上）を修復</button>
+    </div>
+
+    <div class="card">
+      <div class="setting-box-title">🛟 復元ポイント</div>
+      <div class="hint-small" style="margin-bottom:6px;">全消去・置き換え・フォルダーの削除・購読の解除・成績のリセットなどをする直前の状態が、この端末に自動で保存されます（新しい方から8つ）。「↩️ 戻す」でその時点のカード・フォルダー・成績に戻せます（その後に追加したカードは残ります）。📤 でJSONとして保存できます。</div>
+      <div id="snapshotList" class="hint-small">読み込み中...</div>
     </div>
 
     <div class="card">
@@ -1215,6 +1221,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 <script src="import-export.js"></script>
 <script src="social.js"></script>
 <script src="match.js"></script>
+<script src="safety.js"></script>
 <script src="shared.js"></script>
 <script src="main.js"></script>
 

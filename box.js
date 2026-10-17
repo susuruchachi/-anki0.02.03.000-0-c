@@ -233,8 +233,8 @@ function handleQuestionLongpress(itemRef) {
     { html: '📂 別のフォルダーへ移動', action: () => { openCardMoveDialog(cur()); } },
     { type: 'separator' },
     { html: '🗑️ 削除', danger: true, action: async () => { 
-        if(!confirm("完全に消去しますか？")) return; 
         const it = cur();
+        if (!confirm(it.sharedDocId ? "このカードを消去しますか？\n⚠️ 共有カテゴリーのカードなので、共有している全員の手元からも消えます。" : "このカードを消去しますか？")) return;
         tombstoneCards([it.id]);
         db = db.filter(q => q.id !== it.id); 
         if (it.sharedDocId) await updateCardInSharedDoc(it.sharedDocId, it, 'delete');
