@@ -2,7 +2,7 @@
 function renderStatsAndCharts() {
   const t = db.length;
   document.getElementById('statTotal').innerText = t;
-  const isGraduatedCard = q => q.level >= 5 && (q.level5Correct || 0) >= 5;
+  const isGraduatedCard = isGraduated;
   const cG = db.filter(q => isGraduatedCard(q)).length;
   const cM = db.filter(q => !isGraduatedCard(q) && q.level >= 3).length;
   const cN = db.filter(q => !isGraduatedCard(q) && q.level >= 1 && q.level <= 2).length;

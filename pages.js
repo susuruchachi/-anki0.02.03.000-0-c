@@ -13,6 +13,16 @@ function closeMenu() {
 
 function openPage(pageId) { executePageTransition(pageId, false); }
 
+// ★【0.03.00】ホーム画面上部の学習状況サマリー
+function updateHomeSummary() {
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.innerText = v; };
+  const isGrad = isGraduated;
+  set('homeSumTotal', db.length);
+  set('homeSumWeak', db.filter(q => !isGrad(q) && ((q.level === 0 && (q.correct + q.incorrect) > 0) || q.level === -1)).length);
+  set('homeSumUnseen', db.filter(q => q.correct === 0 && q.incorrect === 0 && q.level >= 0).length);
+  set('homeSumGrad', db.filter(isGrad).length);
+}
+
 async function fetchAndRenderTutorial() {
   const container = document.getElementById('tutorialContent');
   if (!container || container.getAttribute('data-loaded') === 'true') return; 
@@ -32,28 +42,7 @@ async function fetchAndRenderTutorial() {
 }
 
 function executePageTransition(pageId, isBackAction) {
-  // ★【0.02.50-g追加】オンライン対戦中の別ページ移動時の離脱・復帰用保存処理
-  if (typeof currentMatchId !== 'undefined' && currentMatchId && pageId !== 'pgOnlineMatch') {
-    if (typeof currentUser !== 'undefined' && currentUser) {
-      const matchRef = firestore.collection('susuru_anki_matches').doc(currentMatchId);
-      matchRef.get().then(doc => {
-        if (doc.exists) {
-          const data = doc.data();
-          let myRole = null;
-          if (data.player1 === currentUser.uid) myRole = 'player1';
-          if (data.player2 === currentUser.uid) myRole = 'player2';
-          
-          if (myRole) {
-            localStorage.setItem('susuru_anki_last_match', JSON.stringify({ matchId: currentMatchId, myRole: myRole }));
-            matchRef.update({
-              [`${myRole}Disconnected`]: true
-            }).catch(e => console.warn(e));
-          }
-        }
-      });
-    }
-  }
-
+  // ★【0.03.10】対戦中にほかの画面へ移っても対戦は続く（戻ると対戦画面に戻る）。接続切れの扱いは match.js
   stopQuizTimer(); clearTimeout(autoNextTimeout);
   const activeScreen = document.querySelector('.screen.active');
   const currentId = activeScreen ? activeScreen.id : 'pgHome';
@@ -71,18 +60,26 @@ function executePageTransition(pageId, isBackAction) {
 
   document.querySelectorAll('.screen').forEach(s => { s.classList.remove('active'); s.style.display='none'; });
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  // ★【0.03.00】下部ナビの選択状態と、クイズ中の表示切り替え
+  const navOwner = { pgUpdates: 'pgHome', pgTutorial: 'pgHome', pgPublicCategories: 'pgBox', pgShared: 'pgBox', pgMatchHistory: 'pgOnlineMatch', pgFriends: 'pgBackup', pgCompareStats: 'pgBackup' };
+  const navPage = navOwner[pageId] || pageId;
+  document.querySelectorAll('.bnav-item').forEach(b => b.classList.toggle('active', b.dataset.page === navPage));
+  const wasInQuiz = document.body.classList.contains('in-quiz');
+  document.body.classList.toggle('in-quiz', pageId === 'pgQuizPlayer');
+  // ★【0.03.09】クイズ中にまとめていた保存を、クイズを出たらすぐ送る
+  if (wasInQuiz && pageId !== 'pgQuizPlayer' && typeof flushPendingSaves === 'function') flushPendingSaves();
 
   const tgt = document.getElementById(pageId);
   if(tgt) { tgt.style.display='flex'; tgt.classList.add('active'); }
 
-  if(pageId==='pgHome') { const el = document.getElementById('navHome'); if(el) el.classList.add('active'); buildQuizScopeDropdown(); }
+  if(pageId==='pgHome') { const el = document.getElementById('navHome'); if(el) el.classList.add('active'); buildQuizScopeDropdown(); updateHomeSummary(); }
   if(pageId==='pgTree') { const el = document.getElementById('navTree'); if(el) el.classList.add('active'); renderTree(); }
   if(pageId==='pgBox') { const el = document.getElementById('navBox'); if(el) el.classList.add('active'); renderBox(); }
   if(pageId==='pgStats') { const el = document.getElementById('navStats'); if(el) el.classList.add('active'); renderStatsAndCharts(); }
   if(pageId==='pgOnlineMatch') { const el = document.getElementById('navOnlineMatch'); if(el) el.classList.add('active'); initOnlineMatchPage(); }
   if(pageId==='pgPublicCategories') { loadPublicCategories(); loadMyPublicCategories(); }
   if(pageId==='pgCompareStats') { loadFriendsForComparison(); }
-  if(pageId==='pgBackup') { const el = document.getElementById('navBackup'); if(el) el.classList.add('active'); }
+  if(pageId==='pgBackup') { const el = document.getElementById('navBackup'); if(el) el.classList.add('active'); if (typeof renderMySharedDocsSettings === 'function') renderMySharedDocsSettings(); if (typeof renderSnapshotList === 'function') renderSnapshotList(); if (typeof renderNotifySettings === 'function') renderNotifySettings(); }
   if(pageId==='pgTutorial') { fetchAndRenderTutorial(); }
   
   closeMenu();

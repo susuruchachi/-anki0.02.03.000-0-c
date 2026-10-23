@@ -1,0 +1,37 @@
+# ★【0.03.14】プッシュ通知の送信（学習の催促・アップデートのお知らせ）
+# 必要な設定：リポジトリの Settings → Secrets and variables → Actions に FIREBASE_SERVICE_ACCOUNT（docs/notifications-setup.md）
+# ※ 定期実行（schedule）はデフォルトブランチ（main）にこのファイルがあるときだけ動きます
+name: push-notifications
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'   # 15分ごと（GitHub の混み具合で数分〜十数分遅れることがあります）
+  push:
+    branches: [main]
+    paths: [version-info.js]  # バージョンが上がったらすぐにアップデートのお知らせを送る
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'all / reminders / update'
+        required: false
+        default: 'all'
+
+concurrency:
+  group: push-notifications
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install firebase-admin
+        run: npm install --no-save --no-audit --no-fund firebase-admin@12
+      - name: Send notifications
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: node tools/push-notify.js ${{ github.event_name == 'push' && 'update' || (github.event.inputs.mode || 'all') }}
