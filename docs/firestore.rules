@@ -1,0 +1,129 @@
+rules_version = '2';
+// すするanki の Firestore ルール（v0.03.15 時点のアプリの読み書きに合わせたもの）
+// Firebase コンソール →「Firestore Database」→「ルール」に、このファイルの中身をそのまま貼り付けて「公開」する
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthenticated() { return request.auth != null; }
+    function uid() { return request.auth.uid; }
+    // 管理者（お知らせの投稿・要望の確認）。updates.js の ADMIN_UID と同じ
+    function isAdmin() { return isAuthenticated() && uid() == 'gIAmjFfGLGWHyk6PZuP1q86mQ5x1'; }
+    // 書き込みで変わった項目
+    function changedKeys() { return request.resource.data.diff(resource.data).affectedKeys(); }
+
+    // 💾 自分のカード・フォルダー（本人だけ）
+    match /susuru_anki_users/{userId} {
+      allow read, write: if isAuthenticated() && uid() == userId;
+    }
+
+    // 👤 プロフィール（ログインした人は読める。書き換えは本人だけ。
+    //    ただし、フレンド登録で「相手のフレンド一覧に自分を足す」ことだけは、相手のプロフィールにもできる）
+    match /susuru_anki_profiles/{userId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAuthenticated() && uid() == userId;
+      allow update: if isAuthenticated() && uid() != userId
+        && changedKeys().hasOnly(['friends'])
+        && request.resource.data.friends.toSet().difference(resource.data.get('friends', []).toSet()) == [uid()].toSet()
+        && resource.data.get('friends', []).toSet().difference(request.resource.data.friends.toSet()).size() == 0;
+    }
+
+    // 📈 毎日の学習ログ（文書IDは「日付_UID」。本人の分だけ）
+    match /susuru_anki_logs/{docId} {
+      allow read, write: if isAuthenticated() && docId.split('_').size() == 2 && docId.split('_')[1] == uid();
+    }
+
+    // 🏆 デイリースコア（ランキングのため読むのはログインした人なら誰でも。書くのは本人の分だけ）
+    match /susuru_anki_daily_scores/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && docId.split('_').size() == 2 && docId.split('_')[1] == uid();
+    }
+
+    // 📊 カテゴリー別スコア（読むのはログインした人。書くのは本人の分だけ）
+    match /susuru_anki_category_scores/{docId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && request.resource.data.uid == uid();
+      allow delete: if isAuthenticated() && resource.data.uid == uid();
+    }
+
+    // 💬 フレンドとのチャット（文書IDは2人のUIDをつないだもの。その2人だけ）
+    match /susuru_anki_chats/{chatId} {
+      allow read, write: if isAuthenticated() && uid() in chatId.split('_');
+      match /messages/{messageId} {
+        allow read: if isAuthenticated() && uid() in chatId.split('_');
+        allow create: if isAuthenticated() && uid() in chatId.split('_') && request.resource.data.senderId == uid();
+        allow update, delete: if isAuthenticated() && resource.data.senderId == uid();
+      }
+    }
+
+    // 🤝 フレンド申請（文書IDは「送った人_受け取る人」）
+    match /susuru_anki_friend_requests/{reqId} {
+      allow create: if isAuthenticated() && request.resource.data.from == uid();
+      allow read, delete: if isAuthenticated() && uid() in [resource.data.from, resource.data.to];
+    }
+
+    // ⚔️ オンライン対戦（待っている部屋を探すため読むのはログインした人なら誰でも。
+    //    書き換えは対戦している2人だけ。待っている部屋に「2人目として入る」ことは誰でもできる）
+    match /susuru_anki_matches/{matchId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.player1 == uid();
+      allow update: if isAuthenticated() && (
+        uid() in [resource.data.player1, resource.data.player2] ||
+        (resource.data.status == 'waiting' && resource.data.player2 == null && request.resource.data.player2 == uid()
+          && request.resource.data.player1 == resource.data.player1)
+      );
+      allow delete: if isAuthenticated() && uid() in [resource.data.player1, resource.data.player2];
+    }
+
+    // 🌐 共有・公開カテゴリー
+    //   読む：誰でも（共有URLを開いた人がログイン前でも見られるように）
+    //   作る：自分を持ち主にして作る　消す：持ち主だけ
+    //   書き換え：持ち主は何でも（持ち主は変えられない）／共同編集者はカードとフォルダーだけ／
+    //            購読する人は「購読者一覧に自分を足す・外す」だけ
+    match /susuru_anki_shared/{docId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && request.resource.data.ownerId == uid();
+      allow delete: if isAuthenticated() && resource.data.ownerId == uid();
+      allow update: if isAuthenticated() && resource.data.ownerId == uid() && request.resource.data.ownerId == resource.data.ownerId;
+      allow update: if isAuthenticated() && uid() in resource.data.get('friends', [])
+        && changedKeys().hasOnly(['cards', 'categories', 'categoryTree', 'catName', 'updatedAt']);
+      allow update: if isAuthenticated() && changedKeys().hasOnly(['subscriberUids'])
+        && request.resource.data.subscriberUids.toSet().difference(resource.data.get('subscriberUids', []).toSet())
+             .union(resource.data.get('subscriberUids', []).toSet().difference(request.resource.data.subscriberUids.toSet()))
+             .hasOnly([uid()]);
+    }
+
+    // 📩 バグ報告・要望（送るのはログインした人なら誰でも。読む・消すのは管理者だけ）
+    match /susuru_anki_reports/{docId} {
+      allow create: if isAuthenticated();
+      allow read, update, delete: if isAdmin();
+    }
+
+    // 📢 お知らせ（読むのは誰でも。書くのは管理者だけ）
+    match /susuru_anki_updates/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // 🔔 通知の設定（本人だけ）
+    match /susuru_anki_push/{userId} {
+      allow read, write: if isAuthenticated() && uid() == userId;
+    }
+    // 🔔 通知の送信側が動いているかの確認用（読むのは誰でも。書くのは送信側＝管理者の鍵だけなのでルールでは許可しない）
+    match /susuru_anki_meta/{docId} {
+      allow read: if true;
+    }
+
+    // 🤖 自分の AI キー（本人だけ）
+    match /susuru_anki_ai/{userId} {
+      allow read, write: if isAuthenticated() && uid() == userId;
+    }
+    // 🤖 家族に共有する AI キー（持ち主と、持ち主が登録した家族だけ読める。書けるのは持ち主だけ）
+    match /susuru_anki_ai_family/{ownerId} {
+      allow read: if isAuthenticated() && (uid() == ownerId || uid() in resource.data.members);
+      allow create, update: if isAuthenticated() && uid() == ownerId && request.resource.data.owner == uid();
+      allow delete: if isAuthenticated() && uid() == ownerId;
+    }
+
+    // ここに書いていないコレクションは、読み書きできない
+  }
+}

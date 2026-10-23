@@ -6,23 +6,11 @@
 - AIヒント・間違えたときの解説
 - PDF・写真の読み取り
 
-## 1. Firestore のルールを追加する（必ず先に）
+## 1. Firestore のルールを入れる（必ず先に）
 
-API キーは Firestore に保存します。ルールが「誰でも読める」状態だとキーが漏れるので、次のルールを入れてください。既存のルールの `match /databases/{database}/documents { ... }` の中に入れます。
+アプリ全体のルールを `docs/firestore.rules` にまとめてあります。Firebase コンソール →「Firestore Database」→「ルール」で、**今のルールを全部消して、このファイルの中身をそのまま貼り付けて**「公開」してください。
 
-```
-// 自分の AI キー（本人だけ）
-match /susuru_anki_ai/{uid} {
-  allow read, write: if request.auth != null && request.auth.uid == uid;
-}
-// 家族に共有するキー（持ち主と、持ち主が登録した家族だけ読める。書けるのは持ち主だけ）
-match /susuru_anki_ai_family/{owner} {
-  allow read: if request.auth != null && (request.auth.uid == owner || request.auth.uid in resource.data.members);
-  allow write: if request.auth != null && request.auth.uid == owner;
-}
-```
-
-> ⚠️ Firestore を「テストモード」（`allow read, write: if true;` や、期限つきで全部許可するルール）のまま使っていると、キーを誰でも読めてしまいます。その場合は、ルール全体を「ログインした本人だけ」の形に直してからキーを保存してください。
+> 一部だけを貼り足すと、`match` の `{ }` の中に入ってしまい、別の場所のルールになって効かないことがあります（全部まとめて貼り替えるのが確実です）。
 
 ## 2. API キーを作る（無料）
 

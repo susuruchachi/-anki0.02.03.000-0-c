@@ -6,20 +6,11 @@
 
 ---
 
-## 1. Firestore のルールを追加する
+## 1. Firestore のルールを入れる
 
-Firebase コンソール →「Firestore Database」→「ルール」に、次の2つを追加して「公開」します（既存のルールの `match /databases/{database}/documents { ... }` の中に入れます）。
+アプリ全体のルールを `docs/firestore.rules` にまとめてあります。Firebase コンソール →「Firestore Database」→「ルール」で、**今のルールを全部消して、このファイルの中身をそのまま貼り付けて**「公開」してください。
 
-```
-// 通知の設定（自分のものだけ読み書きできる）
-match /susuru_anki_push/{uid} {
-  allow read, write: if request.auth != null && request.auth.uid == uid;
-}
-// 通知の送信側が動いているかの確認用（誰でも読める・書けるのは送信側だけ）
-match /susuru_anki_meta/{doc} {
-  allow read: if true;
-}
-```
+> 一部だけを貼り足すと、`match` の `{ }` の中に入ってしまい、別の場所のルールになって効かないことがあります（全部まとめて貼り替えるのが確実です）。
 
 ## 2. 送信用の鍵（サービスアカウント）を GitHub に登録する
 
