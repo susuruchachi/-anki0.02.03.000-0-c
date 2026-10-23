@@ -75,12 +75,14 @@ service cloud.firestore {
     }
 
     // 🌐 共有・公開カテゴリー
-    //   読む：誰でも（共有URLを開いた人がログイン前でも見られるように）
+    //   1件ずつ読む：誰でも（共有URL・共有コードを知っている人が、ログイン前でも見られるように）
+    //   一覧で読む：公開カテゴリーと、自分が作ったものだけ（URLだけで共有したカテゴリーは一覧に出ない）
     //   作る：自分を持ち主にして作る　消す：持ち主だけ
     //   書き換え：持ち主は何でも（持ち主は変えられない）／共同編集者はカードとフォルダーだけ／
     //            購読する人は「購読者一覧に自分を足す・外す」だけ
     match /susuru_anki_shared/{docId} {
-      allow read: if true;
+      allow get: if true;
+      allow list: if resource.data.isPublic == true || (isAuthenticated() && resource.data.ownerId == uid());
       allow create: if isAuthenticated() && request.resource.data.ownerId == uid();
       allow delete: if isAuthenticated() && resource.data.ownerId == uid();
       allow update: if isAuthenticated() && resource.data.ownerId == uid() && request.resource.data.ownerId == resource.data.ownerId;
@@ -90,6 +92,15 @@ service cloud.firestore {
         && request.resource.data.subscriberUids.toSet().difference(resource.data.get('subscriberUids', []).toSet())
              .union(resource.data.get('subscriberUids', []).toSet().difference(request.resource.data.subscriberUids.toSet()))
              .hasOnly([uid()]);
+    }
+
+    // 🔑 共有コード → 共有カテゴリーの対応表（コードを知っている人が1件ずつ取れるだけ。一覧は読めない）
+    //   登録できるのは、そのカテゴリーの持ち主だけ。登録したコードは書き換えられない（ほかの人に乗っ取られない）
+    match /susuru_anki_share_codes/{code} {
+      allow get: if true;
+      allow create: if isAuthenticated() && request.resource.data.owner == uid()
+        && get(/databases/$(database)/documents/susuru_anki_shared/$(request.resource.data.docId)).data.ownerId == uid();
+      allow delete: if isAuthenticated() && resource.data.owner == uid();
     }
 
     // 📩 バグ報告・要望（送るのはログインした人なら誰でも。読む・消すのは管理者だけ）

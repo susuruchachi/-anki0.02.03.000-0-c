@@ -425,7 +425,7 @@ async function deleteCategoryTree(catName, info) {
   takeSnapshot(`「${catName}」の削除`);
   if (ownerRoot) {
     // 先に共有を止めてから手元を消す（空になった状態を共有先へ書き戻さない）
-    try { await firestore.collection('susuru_anki_shared').doc(info.docId).delete(); } catch (e) { console.warn(e); }
+    try { await deleteSharedDocAndCode(info.docId); } catch (e) { console.warn(e); }
     detachSharedDoc(info.docId);
   }
   tombstoneCards(db.filter(q => toDelete.includes(q.category)).map(q => q.id));

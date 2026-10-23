@@ -186,6 +186,8 @@ async function syncSubscriptions() {
       }
       setSharedMeta(docId, data.catName, data.categories || [], [...cloudCardIds]);
       if (localWins) needPush.push(docId);
+      // ★【0.03.15】作成者：以前からの共有コードを、コードで探せる対応表に登録しておく
+      if (isOwner && data.shareCode && !registeredShareCodeDocs().includes(docId)) ensureShareCode(docId).catch(e => console.warn('共有コードの登録に失敗:', e));
     } catch (e) { console.warn("Sync error for doc:", docId, e); }
   }
   
@@ -294,8 +296,7 @@ async function shareCategory(catName) {
     db.forEach(q => { if (ids.has(q.id)) { q.sharedDocId = docRef.id; touchCard(q); } });
     saveData(); syncSubscriptions();
     
-    const code = generateShareCode();
-    await docRef.update({ shareCode: code }).catch(() => {});
+    const code = await assignNewShareCode(docRef.id).catch(() => null) || '（発行できませんでした）';
     const shareUrl = window.location.origin + window.location.pathname + "?share_id=" + docRef.id;
     try { await navigator.clipboard.writeText(shareUrl); } catch (e) {}
     alert(`✅ 共有URLを発行・コピーしました！\nURL: ${shareUrl}\n🔑 共有コード: ${code}\n（相手は「🌐 公開カテゴリー」画面の「共有コードで参加」にコードを入力しても開けます）\n\n（※今後、あなたがこのカテゴリー内の問題を編集・追加すると、全員に自動同期されます）`);
@@ -348,8 +349,9 @@ function renderSharedPage() {
   if (codeRow) {
     const owner = currentUser && currentUser.uid === data.ownerId;
     if (data.shareCode) { codeRow.style.display = 'block'; document.getElementById('sharedCodeText').innerText = data.shareCode; }
-    else if (owner) { codeRow.style.display = 'none'; ensureShareCode(currentSharedDocId).catch(() => {}); } // 発行すると onSnapshot で再描画される
     else codeRow.style.display = 'none';
+    // 作成者なら、コードが無ければ発行し、あれば「コードで探せる」ように登録しておく（発行すると onSnapshot で再描画される）
+    if (owner) ensureShareCode(currentSharedDocId).catch(() => {});
   }
   
   const isOwner = currentUser && currentUser.uid === data.ownerId; 
@@ -517,7 +519,7 @@ async function deletePublicCategory(docId, catName) {
     const docSnap = await firestore.collection("susuru_anki_shared").doc(docId).get();
     if (!docSnap.exists) return alert("カテゴリーが見つかりません");
     const data = docSnap.data(); if (data.ownerId !== currentUser.uid) return alert("削除権限がありません");
-    await firestore.collection("susuru_anki_shared").doc(docId).delete();
+    await deleteSharedDocAndCode(docId, data.shareCode);
     // ★【0.03.02】カードに残った共有の印も外す（残っていると「公開カテゴリーだから編集できない」状態のままになっていた）
     detachSharedDoc(docId);
     saveData(true);
@@ -667,7 +669,7 @@ async function deleteMyPublicCategory(docId, catName) {
   if (!currentUser) return alert('ログインしてください');
   if (!confirm(`「${catName}」をFirebaseから完全に削除しますか？\n\n※手元のフォルダーや問題データは消えずに残ります。`)) return;
   try {
-    await firestore.collection('susuru_anki_shared').doc(docId).delete();
+    await deleteSharedDocAndCode(docId);
     detachSharedDoc(docId);
     saveData(true);
     await loadMyPublicCategories();
@@ -727,15 +729,61 @@ function generateShareCode() {
   let c = ''; for (let i = 0; i < 6; i++) c += chars[Math.floor(Math.random() * chars.length)];
   return c;
 }
-// 既存の共有ドキュメントにコードが無ければ発行する（作成者のみ）
+// ★【0.03.15】共有コードは「コード → 共有カテゴリー」の対応表（susuru_anki_share_codes）で探す
+//   以前は共有カテゴリーの一覧からコードで検索していたため、共有カテゴリーの一覧を誰でも読める必要があった。
+//   対応表はコードを知っている人が1件ずつ取れるだけ（一覧は読めない）なので、URLだけで共有したカテゴリーを一覧から見られなくなる
+const SHARE_CODE_COL = 'susuru_anki_share_codes';
+// コードを登録する。すでに別のカテゴリーのコードとして使われていたら false
+async function registerShareCode(docId, code) {
+  const ref = firestore.collection(SHARE_CODE_COL).doc(code);
+  return firestore.runTransaction(async tx => {
+    const s = await tx.get(ref);
+    if (s.exists) return s.data().docId === docId;
+    tx.set(ref, { docId, owner: currentUser.uid, createdAt: Date.now() });
+    return true;
+  });
+}
+// 新しいコードを発行して登録する（重なったら作り直す）
+async function assignNewShareCode(docId) {
+  if (!currentUser) return null;
+  for (let i = 0; i < 6; i++) {
+    const code = generateShareCode();
+    if (await registerShareCode(docId, code)) {
+      await firestore.collection('susuru_anki_shared').doc(docId).update({ shareCode: code });
+      markShareCodeRegistered(docId);
+      return code;
+    }
+  }
+  throw new Error('共有コードを発行できませんでした');
+}
+function registeredShareCodeDocs() { try { return JSON.parse(localStorage.getItem('susuru_anki_share_codes_ok') || '[]'); } catch (e) { return []; } }
+function markShareCodeRegistered(docId) {
+  const list = registeredShareCodeDocs();
+  if (!list.includes(docId)) { list.push(docId); try { localStorage.setItem('susuru_anki_share_codes_ok', JSON.stringify(list.slice(-200))); } catch (e) {} }
+}
+// 既存の共有ドキュメントにコードが無ければ発行する。あれば対応表に登録されているか確かめる（作成者のみ）
 async function ensureShareCode(docId) {
+  if (!currentUser) return null;
   const ref = firestore.collection('susuru_anki_shared').doc(docId);
   const snap = await ref.get();
-  if (!snap.exists) return null;
-  if (snap.data().shareCode) return snap.data().shareCode;
-  const code = generateShareCode();
-  await ref.update({ shareCode: code });
-  return code;
+  if (!snap.exists || snap.data().ownerId !== currentUser.uid) return snap.exists ? (snap.data().shareCode || null) : null;
+  const code = snap.data().shareCode;
+  if (!code) return assignNewShareCode(docId);
+  if (registeredShareCodeDocs().includes(docId)) return code;
+  if (await registerShareCode(docId, code)) { markShareCodeRegistered(docId); return code; }
+  return assignNewShareCode(docId); // 前のコードがほかのカテゴリーと重なっていたら、新しいコードにする
+}
+// 共有ドキュメントを消すときは、コードの対応表も消す
+async function deleteSharedDocAndCode(docId, knownCode) {
+  let code = knownCode;
+  if (!code) { try { const s = await firestore.collection('susuru_anki_shared').doc(docId).get(); code = s.exists ? s.data().shareCode : null; } catch (e) {} }
+  await firestore.collection('susuru_anki_shared').doc(docId).delete();
+  if (code) {
+    try {
+      const m = await firestore.collection(SHARE_CODE_COL).doc(code).get();
+      if (m.exists && m.data().docId === docId) await firestore.collection(SHARE_CODE_COL).doc(code).delete();
+    } catch (e) {}
+  }
 }
 async function joinByShareCode() {
   const raw = (document.getElementById('txtShareCode').value || '').trim();
@@ -746,8 +794,13 @@ async function joinByShareCode() {
     if (!docId) {
       const code = raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
       if (code.length === 6) {
-        const snap = await firestore.collection('susuru_anki_shared').where('shareCode', '==', code).limit(1).get();
-        if (!snap.empty) docId = snap.docs[0].id;
+        const m2 = await firestore.collection(SHARE_CODE_COL).doc(code).get().catch(() => null);
+        if (m2 && m2.exists) docId = m2.data().docId;
+        else {
+          // まだ対応表に登録されていない、以前からの公開カテゴリー
+          const snap = await firestore.collection('susuru_anki_shared').where('isPublic', '==', true).where('shareCode', '==', code).limit(1).get().catch(() => null);
+          if (snap && !snap.empty) docId = snap.docs[0].id;
+        }
       } else if (code.length >= 15) docId = raw.trim();
     }
     if (!docId) return alert('⚠️ そのコードの共有カテゴリーが見つかりませんでした。');
