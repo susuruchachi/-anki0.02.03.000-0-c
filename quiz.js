@@ -193,7 +193,7 @@ function recordQuizOrderProgress(cur) {
 }
 
 const QUIZ_PREF_KEY = 'susuru_anki_quiz_prefs';
-const QUIZ_PREF_IDS = ['selQuizMode', 'selQuizSpeed', 'selHintMode', 'selQuizOrder', 'numQCount', 'numTimeLimit', 'numAutoNext', 'numGradThreshold', 'chkTTS', 'chkTimeAttack', 'chkIncludeGrad', 'chkSwapQA'];
+const QUIZ_PREF_IDS = ['selQuizMode', 'selQuizSpeed', 'selHintMode', 'chkFocusMode', 'selQuizOrder', 'numQCount', 'numTimeLimit', 'numAutoNext', 'numGradThreshold', 'chkTTS', 'chkTimeAttack', 'chkIncludeGrad', 'chkSwapQA'];
 function saveQuizPrefs() {
   const o = {};
   QUIZ_PREF_IDS.forEach(id => { const el = document.getElementById(id); if (el) o[id] = el.type === 'checkbox' ? el.checked : el.value; });
@@ -381,6 +381,8 @@ async function startQuiz(modeType = 'normal') {
 
 function loadQuizQuestion() {
   quizPhase='q'; selectedChoiceIdx=null; window.currentSelfJudge=null;
+  _focus = { attempts: 0 }; // ★【0.03.18】重点モードの答え直しの回数
+  const _fs = document.getElementById('lblFocusStatus'); if (_fs) { _fs.style.display = 'none'; _fs.textContent = ''; }
   const cur = quizPool[quizIndex];
 
   // ★【0.02.63】品詞タグ付き構造化解答の判定（このラウンドで使い回すのでキャッシュしておく）
@@ -504,6 +506,8 @@ function loadQuizQuestion() {
     updateTimerUI();
     if (quizTimeLeft <= 0) {
       stopQuizTimer();
+      // ★【0.03.18】重点モードなら、時間切れも「答えられなかった」としてヒントを出して答え直す
+      if (focusEnabled(quizPool[quizIndex])) { const c = quizPool[quizIndex]; concludeAttempt(c, false, { typed: currentRoundMode === 'desc', given: '', kind: 'blank', choice: currentRoundMode === 'choice', structuredWrong: currentStructuredAnswer ? currentStructuredAnswer.map((x, i) => i) : undefined }); return; }
       evaluateRoundAnswer(false, "⏰ 時間切れ");
       return;
     }
@@ -554,6 +558,11 @@ function buildHintStages(cur, mode, structured, richAnswer) {
   // ★【0.03.08】和訳・英単語を隠すのは英語（または教科なし）のフォルダーだけ。化学などでは化学式を隠さない
   const hidden = noteHidingApplies(cur.category) ? hideNoteTranslations(note, isLatinAnswer(getPrimaryAnswer(cur.answer))) : note;
   if (note) stages.push({ memo: true, html: '📝 ' + escapeHtml(maskAnswerInText(hidden, cur.answer)).replace(/\n/g, '<br>') });
+  // ★【0.03.18】何度も必要になった AI のヒント（この端末に覚えたもの）
+  if (typeof aiMemoryHintsFor === 'function' && !window.currentOnlineMatch) {
+    const mh = aiMemoryHintsFor(cur, 2);
+    if (mh.length) stages.push({ ai: true, html: mh.map(it => '🤖 ' + escapeHtml(it.h)).join('<br>') });
+  }
   if (richAnswer || mode !== 'desc') return { stages, shown: 0 };
   if (structured) {
     stages.push({ structured: structured.map(seg => seg.text.charAt(0)) });
@@ -737,9 +746,10 @@ function buildFourChoices(cur) {
     const btn = document.createElement('button'); btn.className = 'choice-btn';
     btn.innerHTML = `<div class="choice-idx">${i+1}</div><div style="flex:1;">${renderRichText(text, { escape: true, kanbunRows: 8 })}</div>`;
     hydrateRich(btn, { chemScale: 1.1 });
+    btn._choiceText = text;
     btn.onclick = () => {
-      if(quizPhase !== 'q') return;
-      document.querySelectorAll('.choice-btn').forEach(b => b.style.borderColor = 'var(--border)');
+      if(quizPhase !== 'q' || btn.disabled) return;
+      document.querySelectorAll('.choice-btn').forEach(b => { if (!b.disabled) b.style.borderColor = 'var(--border)'; });
       btn.style.borderColor = 'var(--primary)'; selectedChoiceIdx = text;
     };
     area.appendChild(btn);
@@ -921,36 +931,135 @@ function submitQuizAction() {
     return;
   }
   
-  if (_aiJudging) return; // AI の判定中
+  if (_aiJudging || _focusBusy) return; // AI の判定中・ヒントの用意中
   stopQuizTimer();
-  const cur = quizPool[quizIndex]; let isCorrect = false;
+  const cur = quizPool[quizIndex];
   const mode = currentRoundMode;
   if (mode === 'choice') {
-    if(!selectedChoiceIdx) return; isCorrect = isAnswerCorrect(selectedChoiceIdx, cur.answer);
-    evaluateRoundAnswer(isCorrect, isCorrect ? "🎉 正解！" : "❌ 不正解", { given: selectedChoiceIdx });
-    return;
+    if (!selectedChoiceIdx) return;
+    const given = selectedChoiceIdx;
+    return concludeAttempt(cur, isAnswerCorrect(given, cur.answer), { given, kind: 'wrong', choice: true });
   }
   if (currentStructuredAnswer) {
-    isCorrect = gradeStructuredAnswer(currentStructuredAnswer);
+    const ok = gradeStructuredAnswer(currentStructuredAnswer);
+    const vals = currentStructuredAnswer.map((seg, i) => (document.getElementById('structAns_' + i) || {}).value || '');
+    const givenAll = vals.join(' / ');
+    const wrong = currentStructuredAnswer.map((seg, i) => ({ i, seg, given: vals[i] })).filter(x => !isStructuredSegmentCorrect(x.given, x.seg.text));
     // ★【0.03.15】完全一致しなかった欄は、意味が同じかを AI に確かめる
-    if (!isCorrect && aiJudgeEnabled()) {
-      const wrong = currentStructuredAnswer.map((seg, i) => ({ i, seg, given: (document.getElementById('structAns_' + i) || {}).value || '' }))
-        .filter(x => !isStructuredSegmentCorrect(x.given, x.seg.text));
-      if (wrong.every(x => x.given.trim())) {
-        return aiJudgeAndEvaluate(cur, wrong.map(x => ({ label: x.seg.label, expected: x.seg.text, given: x.given })), results => {
-          results.forEach((r, k) => { if (!r.correct) return; const input = document.getElementById('structAns_' + wrong[k].i); if (input) { input.style.borderColor = 'var(--success)'; input.style.background = 'rgba(34,199,122,0.1)'; } });
+    if (!ok && aiJudgeEnabled() && wrong.every(x => x.given.trim())) {
+      aiJudgeItems(cur, wrong.map(x => ({ label: x.seg.label, expected: x.seg.text, given: x.given }))).then(r => {
+        if (quizPool[quizIndex] !== cur || quizPhase === 'a' || !document.getElementById('pgQuizPlayer').classList.contains('active')) return;
+        const stillWrong = [];
+        wrong.forEach((x, k) => {
+          const rr = r && r.results && r.results[k];
+          const input = document.getElementById('structAns_' + x.i);
+          if (rr && rr.correct) { if (input) { input.style.borderColor = 'var(--success)'; input.style.background = 'rgba(34,199,122,0.1)'; } }
+          else stillWrong.push(x.i);
         });
-      }
+        concludeAttempt(cur, stillWrong.length === 0, { typed: true, given: givenAll, ai: r, kind: aiVerdictKind(r), hint: aiFirstHint(r), structuredWrong: stillWrong });
+      });
+      return;
     }
-    evaluateRoundAnswer(isCorrect, isCorrect ? "🎉 正解！" : "❌ 不正解", { typed: true, given: currentStructuredAnswer.map((s2, i) => (document.getElementById('structAns_' + i) || {}).value || '').join(' / ') });
-    return;
+    return concludeAttempt(cur, ok, { typed: true, given: givenAll, kind: vals.every(v => !v.trim()) ? 'blank' : 'wrong', structuredWrong: wrong.map(x => x.i) });
   }
   const given = document.getElementById('txtDescAnswer').value;
   // 意味ごとの問題は、全角スペース・読点で区切った言い換えのどれか1つで正解
-  isCorrect = (cur._senseKey && !cur._swapped) ? isStructuredSegmentCorrect(given, cur.answer) : isAnswerCorrect(given, cur.answer);
+  const ok = (cur._senseKey && !cur._swapped) ? isStructuredSegmentCorrect(given, cur.answer) : isAnswerCorrect(given, cur.answer);
   // ★【0.03.15】完全一致しなくても、意味が同じなら正解にする（AI に確かめる）
-  if (!isCorrect && given.trim() && aiJudgeEnabled()) return aiJudgeAndEvaluate(cur, [{ label: cur._senseLabel && !cur._swapped ? cur._senseLabel : '', expected: cur.answer, given }]);
-  evaluateRoundAnswer(isCorrect, isCorrect ? "🎉 正解！" : "❌ 不正解", { typed: true, given });
+  if (!ok && given.trim() && aiJudgeEnabled()) {
+    aiJudgeItems(cur, [{ label: cur._senseLabel && !cur._swapped ? cur._senseLabel : '', expected: cur.answer, given }]).then(r => {
+      if (quizPool[quizIndex] !== cur || quizPhase === 'a' || !document.getElementById('pgQuizPlayer').classList.contains('active')) return;
+      concludeAttempt(cur, !!(r && r.results && r.results.length && r.results.every(x => x.correct)), { typed: true, given, ai: r, kind: aiVerdictKind(r), hint: aiFirstHint(r) });
+    });
+    return;
+  }
+  concludeAttempt(cur, ok, { typed: true, given, kind: given.trim() ? 'wrong' : 'blank' });
+}
+
+// ================================================================
+// ★【0.03.18】重点モード：間違えた・足りなかった・答えられなかったら、ヒントを見て答え直す
+//  1回目で正解 → 普通の正解
+//  ヒントを1回見てから正解 → ヒントを見た正解（レベルは上がりにくい）
+//  ヒントを2回以上見てから正解 → 正解にはせず、不正解寄りとして記録（不正解よりは軽い）
+// ================================================================
+const FOCUS_MAX_RETRY = 3; // 答え直せる回数（これを超えたら答えを表示）
+let _focus = { attempts: 0 };
+let _focusBusy = false;
+function focusEnabled(cur) {
+  const el = document.getElementById('chkFocusMode');
+  return !!(el && el.checked) && !window.currentOnlineMatch && ['desc', 'choice'].includes(currentRoundMode) && !(cur && cur.kind === 'self');
+}
+function aiVerdictKind(r) {
+  if (!r || !r.results) return 'wrong';
+  return r.results.some(x => x.verdict === 'wrong') ? 'wrong' : r.results.some(x => x.verdict === 'partial') ? 'partial' : 'wrong';
+}
+function aiFirstHint(r) { const x = r && r.results && r.results.find(y => !y.correct && y.hint); return x ? x.hint : ''; }
+
+// 1回の解答の結果を決める（重点モードなら、間違いのときは答え直しへ）
+function concludeAttempt(cur, ok, info) {
+  const attempt = _focus.attempts + 1;
+  if (!ok && focusEnabled(cur) && _focus.attempts < FOCUS_MAX_RETRY) { startFocusRetry(cur, info); return; }
+  const fs = document.getElementById('lblFocusStatus'); if (fs) fs.style.display = 'none';
+  // 普通のモードでも、AI が出した「答え直すためのヒント」は覚えておく
+  if (!ok && info.hint && typeof rememberAiHint === 'function') rememberAiHint(cur, info.kind, info.given, info.hint);
+  const opts = { typed: !!info.typed, given: info.given || '', ai: info.ai || null };
+  if (ok) {
+    if (attempt === 1) return evaluateRoundAnswer(true, info.ai && info.ai.results ? '🤖 正解（同じ意味）' : '🎉 正解！', opts);
+    if (attempt === 2) { quizHintState.aiUsed = true; return evaluateRoundAnswer(true, '🎯 ヒントのあとで正解', opts); }
+    return evaluateRoundAnswer(false, `△ ヒント${attempt - 1}回のあとで正解（不正解寄りとして記録）`, Object.assign(opts, { softWrong: true, focusLate: true }));
+  }
+  evaluateRoundAnswer(false, info.kind === 'partial' ? '△ 解答不足' : (attempt > 1 ? `❌ 不正解（ヒント${attempt - 1}回）` : '❌ 不正解'), opts);
+}
+
+async function startFocusRetry(cur, info) {
+  _focus.attempts++;
+  _focusBusy = true;
+  const btn = document.getElementById('btnQuizAction');
+  const prevText = btn ? btn.innerText : '';
+  if (btn) { btn.disabled = true; btn.innerText = '🎯 ヒントを用意中...'; }
+  const kind = info.kind || 'wrong', given = info.given || '';
+  let hint = typeof recallAiHint === 'function' ? recallAiHint(cur, kind, given) : null; // 前に同じ状況で出したヒント
+  if (!hint && info.hint) { hint = typeof maskAnswerInText === 'function' ? maskAnswerInText(info.hint, cur.answer) : info.hint; rememberAiHint(cur, kind, given, info.hint); }
+  if (!hint && typeof aiAvailable === 'function' && aiAvailable() && navigator.onLine !== false) {
+    try { hint = await aiRetryHint(cur, kind, given); if (hint) rememberAiHint(cur, kind, given, hint); } catch (e) { console.warn(e); }
+  }
+  _focusBusy = false;
+  if (btn) { btn.disabled = false; btn.innerText = prevText || '確定する'; }
+  if (quizPool[quizIndex] !== cur || quizPhase === 'a' || !document.getElementById('pgQuizPlayer').classList.contains('active')) return;
+  const hb = document.getElementById('lblQuizHint');
+  // 同じヒントがもう出ているときは、重ねて出さずに、いつものヒントを1段階進める
+  const already = hint && [...hb.querySelectorAll('.hint-focus, .hint-ai')].some(el => el.textContent.replace(/^\S+\s/, '') === hint);
+  if (hint && !already) {
+    const line = document.createElement('div'); line.className = 'hint-focus'; line.textContent = `🎯 ${hint}`;
+    hb.appendChild(line); hb.style.display = 'block';
+  } else {
+    // AI が使えないときは、いつものヒントを1段階（ヒントをオフにしていても、重点モードでは出す）
+    if (!quizHintState.stages.length && !quizHintState.aiUsed) {
+      const built = buildHintStages(cur, currentRoundMode, currentStructuredAnswer, false);
+      quizHintState.stages = built.stages; quizHintState.shown = 0;
+    }
+    // 覚えたヒントの段階が、いま出したものと同じなら飛ばす
+    const st = quizHintState, shownText = hb.innerText;
+    while (st.shown < st.stages.length && st.stages[st.shown].ai && st.stages[st.shown].html.split('<br>').every(h => shownText.includes(h.replace(/^\S+\s/, '').replace(/&[a-z]+;/g, '')))) st.shown++;
+    if (st.shown < st.stages.length) showNextHint();
+  }
+  const label = { blank: '答えが空欄です', partial: '足りない部分があります', wrong: '違います' }[kind] || '違います';
+  const st = document.getElementById('lblFocusStatus');
+  if (st) { st.style.display = 'block'; st.textContent = `🔁 ${label}。ヒントを見て、もう一度答えてください（あと${FOCUS_MAX_RETRY - _focus.attempts + 1}回）`; }
+  // 答え直せるようにする（制限時間は止めたまま）
+  const timerText = document.getElementById('lblQuizTimerText'); if (timerText) timerText.innerText = '🎯';
+  if (info.choice) {
+    document.querySelectorAll('.choice-btn').forEach(b => {
+      if (b._choiceText === given) { b.disabled = true; b.style.opacity = '0.45'; b.style.borderColor = 'var(--danger)'; }
+      else if (!b.disabled) b.style.borderColor = 'var(--border)';
+    });
+    selectedChoiceIdx = null;
+  } else if (currentStructuredAnswer) {
+    (info.structuredWrong || []).forEach(i => { const input = document.getElementById('structAns_' + i); if (input) { input.disabled = false; input.value = ''; input.style.borderColor = ''; input.style.background = ''; } });
+    const first = document.getElementById('structAns_' + ((info.structuredWrong || [])[0] || 0)); if (first) first.focus();
+  } else {
+    const inp = document.getElementById('txtDescAnswer'); if (inp) { inp.disabled = false; inp.value = ''; inp.focus(); }
+  }
 }
 
 // ================================================================
@@ -962,22 +1071,20 @@ let _aiExplainHold = false;
 function aiJudgeEnabled() {
   return typeof aiAvailable === 'function' && aiAvailable() && getAiPrefs().judge && !window.currentOnlineMatch && navigator.onLine !== false;
 }
-async function aiJudgeAndEvaluate(cur, items, applyFn) {
+async function aiJudgeItems(cur, items) {
   _aiJudging = true;
   const btn = document.getElementById('btnQuizAction');
   const prevText = btn ? btn.innerText : '';
   if (btn) { btn.innerText = '🤖 AIが意味を確認中...'; btn.disabled = true; }
-  document.querySelectorAll('#txtDescAnswer, #boxDescStructuredArea input').forEach(el => { el.disabled = true; });
+  const locked = [...document.querySelectorAll('#txtDescAnswer, #boxDescStructuredArea input')].filter(el => !el.disabled);
+  locked.forEach(el => { el.disabled = true; });
   let r;
   try { r = await aiJudgeAnswers(cur.question, items, cur.note); }
   catch (e) { r = { error: e.message }; }
   _aiJudging = false;
   if (btn) { btn.disabled = false; btn.innerText = prevText; }
   document.querySelectorAll('#txtDescAnswer').forEach(el => { el.disabled = false; });
-  if (quizPool[quizIndex] !== cur || quizPhase === 'a' || !document.getElementById('pgQuizPlayer').classList.contains('active')) return;
-  const ok = !!(r && r.results && r.results.length && r.results.every(x => x.correct));
-  if (r && r.results && applyFn) applyFn(r.results);
-  evaluateRoundAnswer(ok, ok ? '🤖 正解（同じ意味）' : '❌ 不正解', { typed: true, ai: r, given: items.map(i => i.given).join(' / ') });
+  return r;
 }
 
 // 採点をやり直す（AI の判定や、表記ちがいの答えを自分で直す）
@@ -1007,9 +1114,12 @@ function renderAiFeedbackBox(cur, isCorrect, opts) {
     if (reasons.length) parts.push(`<div>🤖 ${escapeHtml(reasons.join(' ／ '))}</div>`);
   } else if (ai && ai.error) parts.push(`<div class="ai-muted">🤖 AI の判定は使えませんでした（${escapeHtml(ai.error)}）</div>`);
   if (!isCorrect && ai && ai.tip) { parts.push(`<div>💡 ${escapeHtml(ai.tip)}</div>`); _aiExplainHold = true; }
+  // ★【0.03.18】足りない・違うときの手がかり（次に同じ問題で迷ったときにも出す）
+  const aiHint = !isCorrect && typeof aiFirstHint === 'function' ? aiFirstHint(ai) : '';
+  if (aiHint) parts.push(`<div>🎯 ${escapeHtml(maskAnswerInText(aiHint, cur.answer))}</div>`);
   const btns = [];
   if (isCorrect && ai && ai.results && !ai.overridden) btns.push(`<button type="button" class="chip" onclick="regradeLastAnswer(false)">🙅 やっぱり不正解</button>`);
-  if (!isCorrect && opts.typed && String(opts.given || '').trim()) btns.push(`<button type="button" class="chip" onclick="regradeLastAnswer(true)">🙆 合っているので正解にする</button>`);
+  if (!isCorrect && opts.typed && !opts.focusLate && String(opts.given || '').trim()) btns.push(`<button type="button" class="chip" onclick="regradeLastAnswer(true)">🙆 合っているので正解にする</button>`);
   const canExplain = !isCorrect && !opts.pass && typeof aiAvailable === 'function' && aiAvailable() && getAiPrefs().hint && !window.currentOnlineMatch && !(ai && ai.tip);
   if (canExplain) btns.push(`<button type="button" class="chip" id="btnAiExplain" onclick="showAiExplanation()">🤖 AIの解説</button>`);
   box.innerHTML = parts.join('') + (btns.length ? `<div class="ai-btns">${btns.join('')}</div>` : '') + '<div id="aiExplainArea"></div>';
@@ -1023,7 +1133,10 @@ async function showAiExplanation() {
   _aiExplainHold = true; // 読み終わるまで自動で次へ進まない
   area.innerHTML = '<div class="ai-muted">🤖 解説を考えています...</div>';
   try {
-    const r = await aiExplainMistake(cur, _lastEval && _lastEval.given);
+    const given = _lastEval && _lastEval.given;
+    const r = await aiExplainMistake({ question: cur.question + (cur._senseLabel ? `（${cur._senseLabel}）` : ''), answer: cur.answer, note: cur.note }, given);
+    // ★【0.03.18】次に同じ問題で迷ったときのヒントとして覚えておく
+    if (r.hint && typeof rememberAiHint === 'function') rememberAiHint(cur, String(given || '').trim() ? 'wrong' : 'blank', given, r.hint);
     if (quizPool[quizIndex] !== cur) return;
     area.innerHTML = (r.explain ? `<div>🤖 ${escapeHtml(r.explain)}</div>` : '') + (r.tip ? `<div>💡 ${escapeHtml(r.tip)}</div>` : '');
   } catch (e) { area.innerHTML = `<div class="ai-muted">⚠️ ${escapeHtml(e.message)}</div>`; }
@@ -1034,7 +1147,8 @@ async function showAiHint() {
   const btn = document.getElementById('btnQuizAiHint');
   if (btn) { btn.disabled = true; btn.innerText = '🤖 考え中...'; }
   try {
-    const h = await aiHintFor({ id: (cur._swapped ? 'swap:' : '') + (cur._sourceId || cur.id) + (cur._senseLabel ? ':' + cur._senseLabel : ''), question: cur.question + (cur._senseLabel ? `（${cur._senseLabel}）` : ''), answer: getPrimaryAnswer(cur.answer), note: cur.note });
+    let h = typeof recallAiHint === 'function' ? recallAiHint(cur, 'hint', '') : null;
+    if (!h) { h = await aiHintFor({ id: (cur._swapped ? 'swap:' : '') + (cur._sourceId || cur.id) + (cur._senseLabel ? ':' + cur._senseLabel : ''), question: cur.question + (cur._senseLabel ? `（${cur._senseLabel}）` : ''), answer: getPrimaryAnswer(cur.answer), note: cur.note }); rememberAiHint(cur, 'hint', '', h); }
     if (quizPool[quizIndex] !== cur || quizPhase !== 'q') return;
     quizHintState.aiUsed = true; // ヒントを見たのでレベルは上がりにくくなる
     const hb = document.getElementById('lblQuizHint');
@@ -1108,7 +1222,7 @@ function evaluateRoundAnswer(isCorrect, head, opts = {}) {
     const memoShown = hs.shown > 0 && hs.stages[0] && hs.stages[0].memo;
     const letterStages = Math.max(0, hs.shown - (hs.stages[0] && hs.stages[0].memo ? 1 : 0)) + (hs.aiUsed ? 1 : 0);
     const gain = W.up * srsHintFactor(memoShown, letterStages);
-    const loss = W.down;
+    const loss = W.down * (opts.softWrong ? 0.5 : 1); // ★【0.03.18】重点モードでヒント2回以上のあとの正解は、不正解より軽く
 
     if(t.level5Correct === undefined) t.level5Correct = 0;
     const isGrad = isGraduated(t);

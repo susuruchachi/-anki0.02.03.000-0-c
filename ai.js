@@ -211,8 +211,9 @@ const AI_JUDGE_SYSTEM = [
   '・意味が違う、反対の意味、大事な部分が欠けている、余計な誤りを含む答えは不正解。',
   '・化学・数学などは、物質・値・式が同じなら正解。',
   '・厳しすぎず、甘すぎず。迷ったら不正解。',
-  '出力は次のJSONだけ：{"results":[{"correct":true,"reason":"40字以内の理由"}],"tip":"不正解があるとき、次に覚えるための短い覚え方（60字以内。正解を含めてよい）。全部正解なら空文字"}',
-  'results は与えた項目と同じ順番・同じ数にすること。'
+  '・正しい内容だが一部しか答えていない（例：意味が2つある答えの片方だけ、必要な語句が欠けている）は "partial"（解答不足）。',
+  '出力は次のJSONだけ：{"results":[{"verdict":"correct か partial か wrong","correct":true,"reason":"40字以内の理由","hint":"正解でないとき、答えを言わずに、足りない部分・違う部分に気づかせる短いヒント（50字以内。正解の語・その一部・訳語は書かない）"}],"tip":"不正解があるとき、次に覚えるための短い覚え方（60字以内。正解を含めてよい）。全部正解なら空文字"}',
+  'correct は verdict が correct のときだけ true。results は与えた項目と同じ順番・同じ数にすること。'
 ].join('\n');
 // items: [{ label, expected, given }]
 async function aiJudgeAnswers(question, items, note) {
@@ -221,7 +222,11 @@ async function aiJudgeAnswers(question, items, note) {
   items.forEach((it, i) => lines.push(`項目${i + 1}${it.label ? `（${it.label}）` : ''}\n  正解：${it.expected}\n  解答者の答え：${it.given || '（空欄）'}`));
   const text = await aiRequest(AI_JUDGE_SYSTEM, [{ text: lines.join('\n') }], { json: true, maxTokens: 400, timeout: 12000, totalTimeout: 20000 });
   const j = parseAiJson(text);
-  const results = (Array.isArray(j.results) ? j.results : []).slice(0, items.length).map(r => ({ correct: r.correct === true || r.correct === 'true', reason: String(r.reason || '') }));
+  const results = (Array.isArray(j.results) ? j.results : []).slice(0, items.length).map(r => {
+    const v = String(r.verdict || '').toLowerCase();
+    const verdict = /correct/.test(v) ? 'correct' : /partial/.test(v) ? 'partial' : (r.correct === true || r.correct === 'true') && !v ? 'correct' : 'wrong';
+    return { verdict, correct: verdict === 'correct', reason: String(r.reason || ''), hint: String(r.hint || '') };
+  });
   if (results.length !== items.length) throw new Error('判定の数が合いません');
   return { results, tip: String(j.tip || ''), model: _aiLastModel };
 }
@@ -255,13 +260,83 @@ function saveAiHintCache(c) {
 
 const AI_EXPLAIN_SYSTEM = [
   'あなたは暗記カードの家庭教師です。解答者が間違えた問題について、短く解説します。',
-  '出力は次のJSONだけ：{"explain":"なぜ違うのか（解答者の答えがあれば、正解との違い）。60字以内","tip":"次に思い出すための覚え方・語源・語呂合わせなど。60字以内"}'
+  '出力は次のJSONだけ：{"explain":"なぜ違うのか（解答者の答えがあれば、正解との違い）。60字以内","tip":"次に思い出すための覚え方・語源・語呂合わせなど。60字以内","hint":"次に同じ問題で迷ったときの、答えを言わない手がかり（50字以内。正解の語・その一部・訳語は書かない）"}'
 ].join('\n');
 async function aiExplainMistake(card, given) {
   const lines = [`問題：${card.question}`, `正解：${card.answer}`, `解答者の答え：${given || '（答えられなかった）'}`];
   if (card.note) lines.push(`メモ：${String(card.note).slice(0, 300)}`);
   const j = parseAiJson(await aiRequest(AI_EXPLAIN_SYSTEM, [{ text: lines.join('\n') }], { json: true, maxTokens: 300, timeout: 12000, totalTimeout: 20000 }));
-  return { explain: String(j.explain || ''), tip: String(j.tip || ''), model: _aiLastModel };
+  return { explain: String(j.explain || ''), tip: String(j.tip || ''), hint: String(j.hint || ''), model: _aiLastModel };
+}
+
+// ================================================================
+// ★【0.03.18】AI のヒントの記憶（この端末にだけ保存）
+//  答えられなかった・間違えた・足りなかったときに AI が出したヒント（答えを伏せたもの）を、カード（意味）ごとに覚えておく。
+//  同じ状況（同じ間違い・また答えられない）になったら AI を呼ばずにそれを出す。
+//  何度も必要になったヒントは、次からは解いている途中のヒントにも出す。
+// ================================================================
+const AI_MEMORY_KEY = 'susuru_anki_ai_memory';
+const AI_MEMORY_KINDS = { blank: '答えられなかったとき', wrong: '間違えたとき', partial: '足りなかったとき', hint: 'ヒント' };
+function aiMemKey(cur) { return (cur._swapped ? 'swap:' : '') + (cur._sourceId || cur.id) + (cur._senseKey ? '\u0001' + cur._senseKey : ''); }
+function aiMemNorm(g) { try { return typeof normalizeAnswer === 'function' ? normalizeAnswer(g || '') : String(g || '').trim(); } catch (e) { return String(g || '').trim(); } }
+function loadAiMemory() { try { return JSON.parse(localStorage.getItem(AI_MEMORY_KEY) || '{}') || {}; } catch (e) { return {}; } }
+function saveAiMemory(m) {
+  const keys = Object.keys(m);
+  if (keys.length > 3000) keys.sort((a, b) => (m[a].t || 0) - (m[b].t || 0)).slice(0, keys.length - 3000).forEach(k => delete m[k]);
+  try { localStorage.setItem(AI_MEMORY_KEY, JSON.stringify(m)); } catch (e) {}
+}
+function aiMemEntry(mem, cur) {
+  const key = aiMemKey(cur);
+  const sig = String(cur.answer || '').slice(0, 80);
+  let e = mem[key];
+  if (!e || e.a !== sig) e = mem[key] = { a: sig, items: [], t: Date.now() }; // 答えを書き換えたら覚え直す
+  return e;
+}
+// 同じ状況のヒントを探す（答えられなかった・ヒントは1つ、間違い・不足は同じ答えのとき）
+function findAiMemItem(e, kind, given) {
+  const g = aiMemNorm(given);
+  return e.items.find(it => it.k === kind && (kind === 'blank' || kind === 'hint' || it.g === g));
+}
+// 覚えたヒントを使う（使った回数を数える）。無ければ null
+function recallAiHint(cur, kind, given) {
+  const mem = loadAiMemory();
+  const key = aiMemKey(cur);
+  const e = mem[key];
+  if (!e || e.a !== String(cur.answer || '').slice(0, 80)) return null;
+  const it = findAiMemItem(e, kind, given);
+  if (!it || !it.h) return null;
+  it.n = (it.n || 1) + 1; it.t = Date.now(); e.t = Date.now();
+  saveAiMemory(mem);
+  return it.h;
+}
+// AI が出したヒントを覚える
+function rememberAiHint(cur, kind, given, hint) {
+  if (!hint) return;
+  let h = String(hint).trim();
+  if (typeof maskAnswerInText === 'function') h = maskAnswerInText(h, cur.answer); // 念のため答えを伏せる
+  const mem = loadAiMemory();
+  const e = aiMemEntry(mem, cur);
+  const it = findAiMemItem(e, kind, given);
+  if (it) { it.h = h; it.n = (it.n || 1) + 1; it.t = Date.now(); }
+  else e.items.push({ k: kind, g: (kind === 'blank' || kind === 'hint') ? '' : aiMemNorm(given), h, n: 1, t: Date.now() });
+  e.items.sort((a, b) => (b.n || 1) - (a.n || 1) || (b.t || 0) - (a.t || 0));
+  e.items = e.items.slice(0, 6);
+  e.t = Date.now();
+  saveAiMemory(mem);
+}
+// 解いている途中に出す、覚えたヒント（何度も必要になったもの）
+function aiMemoryHintsFor(cur, minCount = 2) {
+  const e = loadAiMemory()[aiMemKey(cur)];
+  if (!e || e.a !== String(cur.answer || '').slice(0, 80)) return [];
+  return e.items.filter(it => it.h && (it.n || 1) >= minCount).slice(0, 2);
+}
+// 重点モード：間違えた（または答えられなかった）ときの、答え直すためのヒント
+async function aiRetryHint(cur, kind, given) {
+  if (kind === 'blank') return aiHintFor({ id: 'retry:' + aiMemKey(cur), question: cur.question + (cur._senseLabel ? `（${cur._senseLabel}）` : ''), answer: getPrimaryAnswer(cur.answer), note: cur.note });
+  const r = await aiExplainMistake({ question: cur.question + (cur._senseLabel ? `（${cur._senseLabel}）` : ''), answer: cur.answer, note: cur.note }, given);
+  let h = r.hint || '';
+  if (typeof maskAnswerInText === 'function') h = maskAnswerInText(h, cur.answer);
+  return h;
 }
 
 // PDF・画像をカード候補の文字（見出し語<TAB>答え）に変換する
