@@ -135,6 +135,30 @@ async function runScanOcr() {
   }
 }
 
+// ★【0.03.15】AI で読み取る（PDF・写真を、単語帳の形「見出し語<TAB>答え」にしてもらう）
+async function runScanAi() {
+  const files = document.getElementById('scanImportFileInput').files;
+  if (!files || files.length === 0) { alert('画像またはPDFを選択してください。'); return; }
+  if (typeof aiAvailable !== 'function' || !aiAvailable()) { alert('AI のキーが設定されていません。\n⚙️ 設定 →「🤖 AI」でキーを入れるか、家族にキーを共有してもらってください。'); return; }
+  const progressEl = document.getElementById('scanImportProgress');
+  const btn = document.getElementById('btnRunScanAi');
+  progressEl.style.display = 'block';
+  btn.disabled = true;
+  try {
+    let combined = document.getElementById('txtScanRaw').value;
+    for (let i = 0; i < files.length; i++) {
+      const text = await aiReadVocabFile(files[i], msg => { progressEl.innerText = `(${i + 1}/${files.length}) ` + msg; });
+      combined += (combined.trim() ? '\n' : '') + text;
+    }
+    document.getElementById('txtScanRaw').value = combined.trim();
+    const sel = document.getElementById('selScanFormat'); if (sel) sel.value = 'delimited';
+    progressEl.innerText = '✅ AIで読み取りました。内容を確認して「📑 カード候補を作る」を押してください。';
+  } catch (e) {
+    console.error('AI read error', e);
+    progressEl.innerText = '⚠️ ' + e.message;
+  } finally { btn.disabled = false; }
+}
+
 function scanSplitEntries() {
   const raw = document.getElementById('txtScanRaw').value;
   if (!raw.trim()) { alert('テキストがありません。'); return; }

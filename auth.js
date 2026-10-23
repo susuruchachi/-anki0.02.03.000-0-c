@@ -57,6 +57,7 @@ auth.onAuthStateChanged(user => {
     // ★【0.03.10】招待リンク（オンライン対戦）・対戦途中からの復帰のチェック（ログインが終わってから）
     if (typeof onMatchAuthReady === 'function') onMatchAuthReady();
     if (typeof onNotifyAuthReady === 'function') onNotifyAuthReady(); // ★【0.03.14】プッシュ通知の登録
+    if (typeof loadAiKeysFromCloud === 'function') loadAiKeysFromCloud(); // ★【0.03.15】AI のキー（自分の・家族の）
   } else {
     if (typeof stopCloudListener === 'function') stopCloudListener();
     ls.innerHTML = `<span style="color:var(--warn);">未ログイン</span>`;

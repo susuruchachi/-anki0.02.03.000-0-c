@@ -162,6 +162,11 @@ h2 { font-size: 1.4rem; font-weight: 700; margin-bottom: 20px; display: flex; al
 
 .combo-display { position: absolute; top: 30%; left: 50%; transform: translate(-50%, -50%) scale(0); font-size: 3rem; font-weight: 900; color: var(--warn); text-shadow: 0 4px 15px rgba(245,166,35,0.6); pointer-events: none; z-index: 50; opacity: 0; }
 .combo-display.pop { animation: comboPop 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+.ai-feedback { margin-top: 10px; padding: 8px 10px; border-radius: 8px; background: rgba(124,63,255,0.10); border: 1px solid rgba(124,63,255,0.35); text-align: left; font-size: 0.85rem; line-height: 1.6; color: var(--text); display: none; }
+.ai-feedback .ai-muted { color: var(--text3); font-size: 0.8rem; }
+.ai-feedback .ai-btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.quiz-hints .hint-ai { margin-top: 4px; color: var(--accent); }
+body.light-mode .quiz-hints .hint-ai { color: #5b2bd6; }
 .level-display { position: absolute; top: 56%; left: 50%; transform: translate(-50%, -50%); font-size: 1.7rem; font-weight: 900; white-space: nowrap; pointer-events: none; z-index: 50; opacity: 0; }
 .level-display.up { color: var(--success); text-shadow: 0 3px 12px rgba(34,199,122,0.55); }
 .level-display.down { color: var(--danger); text-shadow: 0 3px 12px rgba(255,79,106,0.45); font-size: 1.4rem; }
@@ -554,7 +559,10 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
         <div class="question-display-box">
           <div id="lblQuizQuestion" class="q-text">Loading...</div>
           <div id="lblQuizHint" class="hint-text quiz-hints" style="display:none;"></div>
-          <button type="button" id="btnQuizHint" class="chip" style="display:none; margin-top:8px;" onclick="showNextHint()">💡 ヒント</button>
+          <div style="display:flex; gap:6px; justify-content:center; flex-wrap:wrap;">
+            <button type="button" id="btnQuizHint" class="chip" style="display:none; margin-top:8px;" onclick="showNextHint()">💡 ヒント</button>
+            <button type="button" id="btnQuizAiHint" class="chip" style="display:none; margin-top:8px;" onclick="showAiHint()">🤖 AIヒント</button>
+          </div>
         </div>
 
         <div id="quizFeedback" class="feedback-area">
@@ -640,6 +648,11 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
         <button class="btn btn-success" onclick="syncToCloud(false)">☁️ 手動同期</button>
       </div>
       <div class="hint-small" style="margin-top:8px;">ログイン中はカードの追加・編集のたびに自動で同期されます。</div>
+    </div>
+
+    <div class="card">
+      <div class="setting-box-title">🤖 AI（意味で採点・ヒント・読み取り）</div>
+      <div id="aiSettings" class="hint-small">読み込み中...</div>
     </div>
 
     <div class="card">
@@ -1165,7 +1178,11 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
         <summary>📷 写真・PDFを文字認識(OCR)する</summary>
         <div class="hint-small" style="margin-bottom:8px;">ブラウザ内で文字認識します。精度は写真の鮮明さで変わるので、認識結果を必ず確認してください。狭い範囲を撮るほど精度が上がります。</div>
         <input type="file" accept="image/*,application/pdf" multiple id="scanImportFileInput" class="form-control" style="padding:8px;">
-        <button class="btn" style="margin-top:10px;" id="btnRunScanOcr" onclick="runScanOcr()">🔍 文字認識を実行</button>
+        <div class="form-row" style="margin-top:10px;">
+          <button class="btn" id="btnRunScanAi" onclick="runScanAi()">🤖 AIで読み取る（おすすめ）</button>
+          <button class="btn btn-secondary" id="btnRunScanOcr" onclick="runScanOcr()">🔍 文字認識（OCR）</button>
+        </div>
+        <div class="hint-small" style="margin-top:4px;">AIで読み取る：⚙️ 設定の「🤖 AI」でキーを設定すると使えます（PDF は Gemini のキー）。単語帳の形に整えてカード候補にします。</div>
         <div id="scanImportProgress" style="display:none; font-size:0.8rem; color:var(--primary); margin-top:8px; text-align:center;"></div>
       </details>
 
@@ -1238,6 +1255,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 <script src="safety.js"></script>
 <script src="notify-kv.js"></script>
 <script src="notify.js"></script>
+<script src="ai.js"></script>
 <script src="shared.js"></script>
 <script src="main.js"></script>
 
