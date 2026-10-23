@@ -58,7 +58,7 @@ function aiUsageToday() {
 }
 
 // ---------------- モデル一覧 ----------------
-const GEMINI_FALLBACK_MODELS = ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-lite-latest', 'gemini-flash-latest'];
+const GEMINI_FALLBACK_MODELS = ['gemini-flash-lite-latest', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-2.5-flash-lite', 'gemini-flash-latest'];
 let _geminiModels = null;
 async function geminiModels(key) {
   if (_geminiModels) return _geminiModels;
@@ -104,15 +104,19 @@ async function openrouterModels(needImage) {
   return _orModels.filter(m => !needImage || m.img).map(m => m.id);
 }
 
+// opts.signal を渡すと、外からも止められる（ほかのモデルが先に答えたとき）
 function fetchWithTimeout(url, opts, ms) {
   const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
   const t = ctl ? setTimeout(() => ctl.abort(), ms) : null;
-  return fetch(url, Object.assign({}, opts, ctl ? { signal: ctl.signal } : {})).finally(() => { if (t) clearTimeout(t); });
+  const outer = opts && opts.signal;
+  if (ctl && outer) { if (outer.aborted) ctl.abort(); else outer.addEventListener('abort', () => ctl.abort(), { once: true }); }
+  const o = Object.assign({}, opts); delete o.signal;
+  return fetch(url, Object.assign(o, ctl ? { signal: ctl.signal } : {})).finally(() => { if (t) clearTimeout(t); });
 }
 
 // ---------------- 呼び出し ----------------
 // parts: [{ text }] または [{ text }, { mime, data(base64) }]
-async function callGemini(key, model, system, parts, { json, maxTokens, timeout }) {
+async function callGemini(key, model, system, parts, { json, maxTokens, timeout, signal }) {
   const body = {
     systemInstruction: { parts: [{ text: system }] },
     contents: [{ role: 'user', parts: parts.map(p => p.data ? { inline_data: { mime_type: p.mime, data: p.data } } : { text: p.text }) }],
@@ -121,7 +125,7 @@ async function callGemini(key, model, system, parts, { json, maxTokens, timeout 
   if (json) body.generationConfig.responseMimeType = 'application/json';
   if (/2\.5-flash/.test(model)) body.generationConfig.thinkingConfig = { thinkingBudget: 0 }; // 考える時間を省いて速く返す
   const res = await fetchWithTimeout(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal
   }, timeout || 15000);
   if (!res.ok) { const e = new Error('Gemini ' + res.status); e.status = res.status; e.detail = await res.text().catch(() => ''); throw e; }
   const data = await res.json();
@@ -129,14 +133,15 @@ async function callGemini(key, model, system, parts, { json, maxTokens, timeout 
   if (!text.trim()) { const e = new Error('Gemini empty'); e.status = 0; throw e; }
   return text;
 }
-async function callOpenRouter(key, model, system, parts, { maxTokens, timeout }) {
+async function callOpenRouter(key, model, system, parts, { maxTokens, timeout, signal }) {
   const content = parts.some(p => p.data)
     ? parts.map(p => p.data ? { type: 'image_url', image_url: { url: `data:${p.mime};base64,${p.data}` } } : { type: 'text', text: p.text })
     : parts.map(p => p.text).join('\n');
   const res = await fetchWithTimeout('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}`, 'HTTP-Referer': location.origin, 'X-Title': 'susuru anki' },
-    body: JSON.stringify({ model, temperature: 0.2, max_tokens: maxTokens || 512, messages: [{ role: 'system', content: system }, { role: 'user', content }] })
+    body: JSON.stringify({ model, temperature: 0.2, max_tokens: maxTokens || 512, messages: [{ role: 'system', content: system }, { role: 'user', content }] }),
+    signal
   }, timeout || 20000);
   if (!res.ok) { const e = new Error('OpenRouter ' + res.status); e.status = res.status; e.detail = await res.text().catch(() => ''); throw e; }
   const data = await res.json();
@@ -146,6 +151,10 @@ async function callOpenRouter(key, model, system, parts, { maxTokens, timeout })
 }
 
 // キー・モデルを順番に試す。opts: { json, maxTokens, timeout, needPdf, needImage, totalTimeout }
+// ★【0.03.19】Gemini は、ふだん1秒ほどで返すのに、ときどき数十秒止まることがある。
+//  そこで、少し待っても返ってこなければ次のモデルにも同時に頼み、先に返ってきた方を使う（残りは止める）
+const AI_HEDGE_MS = 3500;       // 文字だけのとき、次のモデルにも頼むまでの時間
+const AI_HEDGE_FILE_MS = 25000; // PDF・写真のとき
 async function aiRequest(system, parts, opts = {}) {
   const keys = allAiKeys();
   const hasFile = parts.some(p => p.data);
@@ -153,42 +162,75 @@ async function aiRequest(system, parts, opts = {}) {
   const limit = opts.totalTimeout || 30000;
   const errors = [];
   const cooling = id => (_aiCooldown[id] || 0) > Date.now();
-  const tryOne = async (fn, key, model, label) => {
-    if (cooling(key) || cooling(key + '|' + model)) return null;
-    if (Date.now() - started > limit) return null;
+  const tryOne = async (fn, key, model, label, signal) => {
     try {
       const t = await fn();
       _aiLastModel = label;
       countAiUsage();
       return t;
     } catch (e) {
+      if (signal && signal.aborted) return null; // ほかのモデルが先に答えたので止めた
       errors.push(`${label}: ${e.message}`);
       const d = e.detail || '';
       if (e.status === 401 || e.status === 403 || (e.status === 400 && /API_KEY_INVALID|API key not valid/i.test(d))) _aiCooldown[key] = Date.now() + 3600 * 1000; // キーが使えない
-      else if (e.status === 402 || (e.status === 429 && /per-day|per day|daily/i.test(d))) _aiCooldown[key] = Date.now() + 3600 * 1000; // そのキーの1日の上限
-      else if (e.status === 429) _aiCooldown[key + '|' + model] = Date.now() + 60 * 1000; // そのモデルの回数の上限（1分休ませる）
+      else if (e.status === 402) _aiCooldown[key] = Date.now() + 3600 * 1000; // そのキーの上限
+      else if (e.status === 429) {
+        // Gemini の無料枠の上限はモデルごと（1分に15回・1日の回数）。OpenRouter の1日の上限はキーごと
+        const perDay = /PerDay|per-day|per day|daily/i.test(d);
+        const rd = Number((d.match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/) || [])[1]) || 0;
+        if (perDay && /^OpenRouter/.test(label)) _aiCooldown[key] = Date.now() + 3600 * 1000;
+        else _aiCooldown[key + '|' + model] = Date.now() + (perDay ? 3600 * 1000 : Math.min(120, Math.max(5, rd || 60)) * 1000);
+      }
+      else if (e.status === 503 || e.status === 500) _aiCooldown[key + '|' + model] = Date.now() + 30 * 1000; // 混んでいる
       else if (e.status === 404 || e.status === 400) _aiCooldown[key + '|' + model] = Date.now() + 3600 * 1000; // そのモデルは使えない
       return null;
     }
   };
-  for (const key of keys.gemini) {
-    const models = (await geminiModels(key)).slice();
-    if (opts.needPdf || hasFile) models.sort((a, b) => (/lite/.test(a) - /lite/.test(b))); // 読み取りは lite より通常版を先に
-    for (const m of models.slice(0, 5)) {
-      if (cooling(key)) break;
-      const t = await tryOne(() => callGemini(key, m, system, parts, opts), key, m, `Gemini ${m}`);
-      if (t) return t;
-    }
-  }
-  if (!opts.needPdf) {
-    for (const key of keys.openrouter) {
-      const models = await openrouterModels(hasFile);
-      for (const m of models.slice(0, 4)) {
-        if (cooling(key)) break;
-        const t = await tryOne(() => callOpenRouter(key, m, system, parts, opts), key, m, `OpenRouter ${m.replace(/:free$/, '')}`);
-        if (t) return t;
+  // 候補を順に始め、hedgeMs たっても返ってこなければ次の候補も同時に始める（同時に3つまで）
+  const race = (cands, hedgeMs) => new Promise(resolve => {
+    let idx = 0, running = 0, done = false, hedgeTimer = null;
+    const ctls = [];
+    const finish = v => { if (done) return; done = true; clearTimeout(hedgeTimer); clearTimeout(limitTimer); ctls.forEach(c => c.abort()); resolve(v); };
+    const limitTimer = setTimeout(() => finish(null), Math.max(0, limit - (Date.now() - started)));
+    const launch = () => {
+      if (done) return;
+      clearTimeout(hedgeTimer);
+      while (idx < cands.length) {
+        const c = cands[idx++];
+        if (cooling(c.key) || cooling(c.key + '|' + c.model)) continue;
+        const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        if (ctl) ctls.push(ctl);
+        running++;
+        tryOne(() => c.run(ctl ? ctl.signal : undefined), c.key, c.model, c.label, ctl && ctl.signal).then(t => {
+          running--;
+          if (done) return;
+          if (t) return finish(t);
+          launch(); // 失敗したらすぐ次へ
+        });
+        hedgeTimer = setTimeout(() => { if (running < 3) launch(); }, hedgeMs);
+        return;
       }
+      if (running === 0) finish(null);
+    };
+    launch();
+  });
+  const gem = [];
+  for (const key of keys.gemini) {
+    if (cooling(key)) continue;
+    const models = (await geminiModels(key)).slice(0, 5);
+    models.forEach(m => gem.push({ key, model: m, label: `Gemini ${m}`, run: signal => callGemini(key, m, system, parts, Object.assign({}, opts, { signal })) }));
+  }
+  let t = gem.length ? await race(gem, hasFile ? AI_HEDGE_FILE_MS : AI_HEDGE_MS) : null;
+  if (t) return t;
+  if (!opts.needPdf && Date.now() - started < limit) {
+    const or = [];
+    for (const key of keys.openrouter) {
+      if (cooling(key)) continue;
+      const models = (await openrouterModels(hasFile)).slice(0, 4);
+      models.forEach(m => or.push({ key, model: m, label: `OpenRouter ${m.replace(/:free$/, '')}`, run: signal => callOpenRouter(key, m, system, parts, Object.assign({}, opts, { signal })) }));
     }
+    t = or.length ? await race(or, hasFile ? AI_HEDGE_FILE_MS : AI_HEDGE_MS * 2) : null;
+    if (t) return t;
   }
   const err = new Error(keys.gemini.length + keys.openrouter.length ? 'AIに接続できませんでした（回数の上限・通信を確認してください）' : 'APIキーが設定されていません');
   err.details = errors;
@@ -225,7 +267,7 @@ async function aiJudgeAnswers(question, items, note) {
   const results = (Array.isArray(j.results) ? j.results : []).slice(0, items.length).map(r => {
     const v = String(r.verdict || '').toLowerCase();
     const verdict = /correct/.test(v) ? 'correct' : /partial/.test(v) ? 'partial' : (r.correct === true || r.correct === 'true') && !v ? 'correct' : 'wrong';
-    return { verdict, correct: verdict === 'correct', reason: String(r.reason || ''), hint: String(r.hint || '') };
+    return { verdict, correct: verdict === 'correct', reason: cleanAiHintText(r.reason), hint: cleanAiHintText(r.hint) };
   });
   if (results.length !== items.length) throw new Error('判定の数が合いません');
   return { results, tip: String(j.tip || ''), model: _aiLastModel };
@@ -245,10 +287,16 @@ async function aiHintFor(card) {
   const lines = [`問題：${card.question}`, `正解（参考。書いてはいけない）：${card.answer}`];
   if (card.note) lines.push(`メモ：${String(card.note).slice(0, 300)}`);
   let h = (await aiRequest(AI_HINT_SYSTEM, [{ text: lines.join('\n') }], { maxTokens: 200, timeout: 12000, totalTimeout: 20000 })).trim();
-  if (/^「[^「」]*」$/.test(h) || /^"[^"]*"$/.test(h)) h = h.slice(1, -1); // 全体がかぎかっこで囲まれていたら外す
+  h = cleanAiHintText(h);
   if (typeof maskAnswerInText === 'function') h = maskAnswerInText(h, card.answer); // 念のため答えを伏せる
   cache[card.id] = { h, a: sig, t: Date.now() };
   saveAiHintCache(cache);
+  return h;
+}
+// AI の文の後ろに付くことがある「（40字）」や、全体を囲むかぎかっこを外す
+function cleanAiHintText(h) {
+  h = String(h || '').trim().replace(/\s*[（(]\s*\d+\s*(文字|字)\s*(以内)?\s*[）)]\s*$/, '').trim();
+  if (/^「[^「」]*」$/.test(h) || /^"[^"]*"$/.test(h)) h = h.slice(1, -1);
   return h;
 }
 function loadAiHintCache() { try { return JSON.parse(localStorage.getItem(AI_HINT_CACHE_KEY) || '{}') || {}; } catch (e) { return {}; } }
@@ -266,7 +314,7 @@ async function aiExplainMistake(card, given) {
   const lines = [`問題：${card.question}`, `正解：${card.answer}`, `解答者の答え：${given || '（答えられなかった）'}`];
   if (card.note) lines.push(`メモ：${String(card.note).slice(0, 300)}`);
   const j = parseAiJson(await aiRequest(AI_EXPLAIN_SYSTEM, [{ text: lines.join('\n') }], { json: true, maxTokens: 300, timeout: 12000, totalTimeout: 20000 }));
-  return { explain: String(j.explain || ''), tip: String(j.tip || ''), hint: String(j.hint || ''), model: _aiLastModel };
+  return { explain: cleanAiHintText(j.explain), tip: cleanAiHintText(j.tip), hint: cleanAiHintText(j.hint), model: _aiLastModel };
 }
 
 // ================================================================
@@ -468,7 +516,7 @@ function renderAiSettings() {
     <details style="margin-top:10px;" ${mine.gemini.length || mine.openrouter.length ? '' : 'open'}>
       <summary class="hint-small" style="cursor:pointer;">🔑 自分のAPIキー</summary>
       <label class="section-label" style="margin-top:8px;">Google AI Studio（Gemini）<a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style="font-size:0.75rem; margin-left:6px;">キーを作る</a></label>
-      <textarea id="txtAiGemini" class="form-control" rows="2" placeholder="AIza...（複数なら1行に1つ）" autocomplete="off" spellcheck="false" style="font-family:'JetBrains Mono',monospace; font-size:0.8rem;">${escapeHtml(mine.gemini.join('\n'))}</textarea>
+      <textarea id="txtAiGemini" class="form-control" rows="2" placeholder="AIza... や AQ. で始まるキー（複数なら1行に1つ）" autocomplete="off" spellcheck="false" style="font-family:'JetBrains Mono',monospace; font-size:0.8rem;">${escapeHtml(mine.gemini.join('\n'))}</textarea>
       <label class="section-label" style="margin-top:8px;">OpenRouter<a href="https://openrouter.ai/keys" target="_blank" rel="noopener" style="font-size:0.75rem; margin-left:6px;">キーを作る</a></label>
       <textarea id="txtAiOpenRouter" class="form-control" rows="2" placeholder="sk-or-...（複数なら1行に1つ）" autocomplete="off" spellcheck="false" style="font-family:'JetBrains Mono',monospace; font-size:0.8rem;">${escapeHtml(mine.openrouter.join('\n'))}</textarea>
       <div class="form-row" style="margin-top:8px;">
