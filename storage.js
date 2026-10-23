@@ -32,7 +32,65 @@ const DEVICE_ID = (() => {
 })();
 
 const CARD_CONTENT_FIELDS = ['question', 'answer', 'category', 'note', 'questionImage', 'answerImage', 'choices', 'kind', 'sharedDocId', 'no'];
-const CARD_STAT_FIELDS = ['level', 'correct', 'incorrect', 'streak', 'wrongStreak', 'shikkariStreak', 'level5Correct'];
+const CARD_STAT_FIELDS = ['level', 'correct', 'incorrect', 'streak', 'wrongStreak', 'shikkariStreak', 'level5Correct', 'senses'];
+
+// ★【0.03.17】意味（品詞タグ）ごとの成績
+//  答えが「(他動詞)…/(自動詞)…」のように2つ以上の意味に分かれているカードは、意味ごとに成績（レベル・正誤数・連続記録）を持つ。
+//  card.senses = { 意味の名前: { level, correct, incorrect, streak, wrongStreak, shikkariStreak, level5Correct } }
+//  カード全体の成績は意味ごとの成績から決める（レベル＝いちばん低い意味のレベル、正誤数＝合計、全部の意味が卒業したら卒業）
+const SENSE_STAT_FIELDS = ['level', 'correct', 'incorrect', 'streak', 'wrongStreak', 'shikkariStreak', 'level5Correct'];
+function cardSenseList(card) {
+  if (!card || typeof parseStructuredAnswer !== 'function') return null;
+  const st = parseStructuredAnswer(card.answer);
+  if (!st || st.length < 2) return null;
+  const seen = {};
+  return st.map((seg, i) => {
+    let key = seg.label || ('#' + (i + 1));
+    seen[key] = (seen[key] || 0) + 1;
+    if (seen[key] > 1) key += '#' + seen[key];
+    return { key, label: seg.label, text: seg.text };
+  });
+}
+// 意味ごとの成績を読む（保存はしない）。まだ意味ごとの成績が無いカードは、今までのカードの成績を引き継いだものとして扱う
+function senseStatsView(card, list) {
+  list = list || cardSenseList(card);
+  if (!list) return null;
+  const out = {};
+  const n = list.length;
+  list.forEach((s, i) => {
+    if (card.senses && card.senses[s.key]) { out[s.key] = card.senses[s.key]; return; }
+    if (card.senses) { out[s.key] = { level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0, level5Correct: 0 }; return; } // 後から増えた意味
+    const o = {};
+    SENSE_STAT_FIELDS.forEach(f => { o[f] = Number(card[f]) || 0; });
+    // 正誤数は、合計が変わらないように分ける
+    ['correct', 'incorrect'].forEach(f => { const total = Math.max(0, Math.floor(Number(card[f]) || 0)); o[f] = Math.floor(total / n) + (i < total % n ? 1 : 0); });
+    out[s.key] = o;
+  });
+  return out;
+}
+// 意味ごとの成績をカードに保存できる形にする（その意味を解いたときだけ呼ぶ。データを無駄に増やさないため）
+function ensureSenseStats(card) {
+  const list = cardSenseList(card);
+  if (!list) return null;
+  const view = senseStatsView(card, list);
+  card.senses = Object.assign({}, card.senses || {});
+  list.forEach(s => { card.senses[s.key] = Object.assign({}, view[s.key]); });
+  return list;
+}
+function recomputeCardFromSenses(card) {
+  const list = cardSenseList(card);
+  if (!list || !card.senses) return;
+  const ss = list.map(s => card.senses[s.key]).filter(Boolean);
+  if (!ss.length) return;
+  const num = (s, f) => Number(s[f]) || 0;
+  card.level = Math.min(...ss.map(s => num(s, 'level')));
+  card.correct = ss.reduce((a, s) => a + num(s, 'correct'), 0);
+  card.incorrect = ss.reduce((a, s) => a + num(s, 'incorrect'), 0);
+  card.level5Correct = card.level >= 5 ? Math.min(...ss.map(s => num(s, 'level5Correct'))) : 0;
+  card.streak = Math.min(...ss.map(s => num(s, 'streak')));
+  card.wrongStreak = Math.max(...ss.map(s => num(s, 'wrongStreak')));
+  card.shikkariStreak = Math.min(...ss.map(s => num(s, 'shikkariStreak')));
+}
 
 function newCardId() { return 'id_' + Math.random().toString(36).slice(2) + Date.now().toString(36); }
 // カードの内容（問題・答え・フォルダー・メモ等）を変更したら呼ぶ
@@ -160,7 +218,7 @@ function repairInflatedStats(silent = false) {
   let fixed = 0;
   db.forEach(q => {
     if ((Number(q.correct) || 0) >= INFLATED_STATS_LIMIT || (Number(q.incorrect) || 0) >= INFLATED_STATS_LIMIT) {
-      q.correct = 0; q.incorrect = 0; touchStats(q); fixed++;
+      q.correct = 0; q.incorrect = 0; delete q.senses; touchStats(q); fixed++;
     }
   });
   if (!silent) {
@@ -594,7 +652,7 @@ function autoMerge(skipSave = false) {
       String(a.id).localeCompare(String(b.id)));
     const keep = Object.assign({}, sorted[0]);
     sorted.slice(1).forEach(dup => {
-      CARD_STAT_FIELDS.forEach(f => { keep[f] = Math.max(Number(keep[f]) || 0, Number(dup[f]) || 0); });
+      CARD_STAT_FIELDS.forEach(f => { if (f === 'senses') { if (!keep.senses && dup.senses) keep.senses = dup.senses; return; } keep[f] = Math.max(Number(keep[f]) || 0, Number(dup[f]) || 0); });
       if (!keep.note && dup.note) keep.note = dup.note;
       if (!keep.choices && dup.choices) keep.choices = dup.choices;
       if (!keep.kind && dup.kind) keep.kind = dup.kind;

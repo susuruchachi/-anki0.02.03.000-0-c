@@ -285,7 +285,7 @@ window.resetScores = function resetScores() {
   takeSnapshot('成績のリセット');
   let resetCount = 0;
   db.forEach(q => {
-    q.level = 0; q.correct = 0; q.incorrect = 0; q.streak = 0; q.wrongStreak = 0; q.shikkariStreak = 0; q.level5Correct = 0;
+    q.level = 0; q.correct = 0; q.incorrect = 0; q.streak = 0; q.wrongStreak = 0; q.shikkariStreak = 0; q.level5Correct = 0; delete q.senses;
     touchStats(q); resetCount++;
   });
   saveData(true);

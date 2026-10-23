@@ -185,6 +185,15 @@ function buildBoxCard(item) {
     const lvlStr = item.level === -1 ? 'しっかり' : 'LV '+item.level;
     const noHTML = item.no ? `<span class="card-no">No.${Number(item.no)}</span>` : '';
     const badgeHTML = `<span class="badge ${isGrad ? 'badge-grad':'badge-level'}">${isGrad ? 'GRADUATE' : lvlStr}</span>`;
+    // ★【0.03.17】意味ごとのレベル
+    const senseList = cardSenseList(item);
+    let _senseView = null;
+    const senseHTML = senseList ? `<div class="card-senses">${senseList.map(sn => {
+      const st = (_senseView || (_senseView = senseStatsView(item, senseList)))[sn.key] || item;
+      const g = isGraduated(st);
+      const lv = g ? '🎓' : (st.level === -1 ? 'しっかり' : 'Lv' + (Number(st.level) || 0));
+      return `<span class="sense-chip${g ? ' grad' : (st.level <= 0 ? ' weak' : '')}">🏷️ ${escapeHtml(sn.label || sn.key)} ${lv}</span>`;
+    }).join('')}</div>` : '';
     
     const sharedIcon = item.sharedDocId ? `<span style="margin-left:6px; font-size:0.75rem; color:var(--accent);">🌐同期</span>` : '';
     // ★【0.03.02】クイックメモを一覧にも表示する（長いものは折りたたみ）
@@ -201,6 +210,7 @@ function buildBoxCard(item) {
         A: <span style="background:var(--bg4); color:var(--text2); padding:2px 8px; border-radius:6px; border:1px solid var(--border); display:inline-block; font-size:0.75rem;">👆 タップして答えを表示</span>
       </div>
       ${noteHTML}
+      ${senseHTML}
       <div class="q-card-sub">${badgeHTML}<span>正: ${item.correct} / 誤: ${item.incorrect}</span><span style="font-size:0.75rem; color:var(--text3);">📂 ${escapeHtml(item.category)}${sharedIcon}</span></div>
     `;
     return card;
