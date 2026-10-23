@@ -4,6 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>すするanki</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#080c14">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="すするanki">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
 <script src="https://unpkg.com/tesseract.js@v2.1.0/dist/tesseract.min.js"></script>
@@ -290,6 +298,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging-compat.js"></script>
 <!-- ★【0.03.04】クラウド保存用の圧縮（Firestoreの1ドキュメント1MB上限対策） -->
 <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
 <script src="version-info.js"></script>
@@ -631,6 +640,11 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
         <button class="btn btn-success" onclick="syncToCloud(false)">☁️ 手動同期</button>
       </div>
       <div class="hint-small" style="margin-top:8px;">ログイン中はカードの追加・編集のたびに自動で同期されます。</div>
+    </div>
+
+    <div class="card">
+      <div class="setting-box-title">📲 アプリ・通知</div>
+      <div id="notifySettings" class="hint-small">読み込み中...</div>
     </div>
 
     <div class="card">
@@ -1222,6 +1236,8 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 <script src="social.js"></script>
 <script src="match.js"></script>
 <script src="safety.js"></script>
+<script src="notify-kv.js"></script>
+<script src="notify.js"></script>
 <script src="shared.js"></script>
 <script src="main.js"></script>
 

@@ -23,7 +23,10 @@ window.onload = function() {
 
   const urlParams = new URLSearchParams(window.location.search);
   if (urlParams.get('share_id')) { openPage('pgShared'); listenToSharedDoc(urlParams.get('share_id')); }
-  else {
+  else if (/^pg[A-Za-z]+$/.test(urlParams.get('page') || '') && document.getElementById(urlParams.get('page'))) {
+    // ★【0.03.14】ホーム画面アイコンのショートカット（クイズ・カード一覧）
+    openPage(urlParams.get('page'));
+  } else {
     // 再読み込み時に前のページに復帰
     try {
       const lastPage = localStorage.getItem('susuru_anki_last_page');

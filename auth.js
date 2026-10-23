@@ -16,7 +16,9 @@ function firebaseLogin() {
     });
 }
 
-function firebaseLogout() { 
+async function firebaseLogout() { 
+  // ★【0.03.14】この端末への通知を止めてからログアウトする
+  if (typeof removePushTokenBeforeLogout === 'function') await removePushTokenBeforeLogout();
   auth.signOut()
     .then(() => alert("✅ ログアウトしました"))
     .catch(err => alert("⚠️ ログアウトエラー: " + err.message));
@@ -54,6 +56,7 @@ auth.onAuthStateChanged(user => {
     
     // ★【0.03.10】招待リンク（オンライン対戦）・対戦途中からの復帰のチェック（ログインが終わってから）
     if (typeof onMatchAuthReady === 'function') onMatchAuthReady();
+    if (typeof onNotifyAuthReady === 'function') onNotifyAuthReady(); // ★【0.03.14】プッシュ通知の登録
   } else {
     if (typeof stopCloudListener === 'function') stopCloudListener();
     ls.innerHTML = `<span style="color:var(--warn);">未ログイン</span>`;

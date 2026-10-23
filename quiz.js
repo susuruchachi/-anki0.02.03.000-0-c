@@ -1111,6 +1111,7 @@ function autoResizeNote(el) {
 }
 
 async function recordDailyLog(isCorrect) {
+  if (typeof notifyMarkStudied === 'function') notifyMarkStudied(); // ★【0.03.14】今日は学習済み（催促しない）
   if(!currentUser) return;
   const d = getTodayStr(); 
   const lRef = firestore.collection('susuru_anki_logs').doc(`${d}_${currentUser.uid}`);
