@@ -90,7 +90,8 @@ self.addEventListener('notificationclick', event => {
   event.notification.close();
   const target = new URL((event.notification.data && event.notification.data.url) || './', self.registration.scope).href;
   event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
-    for (const c of list) { if (c.url.startsWith(self.registration.scope) && 'focus' in c) return c.focus(); }
+    // ★【0.03.36】開いている画面があれば、その画面に「このURLを開いて」と伝える（週間プランの課題をそのまま始める）
+    for (const c of list) { if (c.url.startsWith(self.registration.scope) && 'focus' in c) { if (/[?&]plantask=/.test(target)) c.postMessage({ type: 'open-url', url: target }); return c.focus(); } }
     return self.clients.openWindow(target);
   }));
 });

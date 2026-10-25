@@ -75,17 +75,21 @@ async function sendReminders() {
 }
 
 // ★【0.03.27】週間プラン：単語の期限が近い・過ぎた、例文・復習が残っている、を1日1回知らせる
-function planMessage(pl, nowMs, dow) {
-  if (!pl) return '';
+// ★【0.03.36】終わっていない課題ごとに1つずつ通知する。押すとその課題をそのまま始める（?plantask=プランID:課題）
+function planTaskMessages(pl, nowMs, dow) {
+  if (!pl) return [];
+  const out = [];
   if (!pl.wordsDone && nowMs >= pl.from) {
     const left = pl.due - nowMs;
-    if (left < 0) return left > -3 * 86400000 ? `⏰ 単語（${pl.cat}）の期限を過ぎています。今日中に終わらせましょう` : '';
-    const d = Math.floor(left / 86400000);
-    return d >= 1 ? `🧠 今週の単語（${pl.cat}）：期限まであと${d}日` : `🔥 今夜が単語（${pl.cat}）の期限です`;
+    if (left < 0) { if (left > -3 * 86400000) out.push({ key: 'words', title: '⏰ 単語の期限を過ぎています', body: `${pl.cat}：今日中に暗記テストを終わらせましょう` }); }
+    else {
+      const d = Math.floor(left / 86400000);
+      out.push({ key: 'words', title: d >= 1 ? `🧠 今週の単語：期限まであと${d}日` : '🔥 今夜が単語の期限です', body: `${pl.cat}：押すと暗記テストを始めます` });
+    }
   }
-  if (pl.wordsDone && pl.examples && !pl.examplesDone && nowMs > pl.due - 86400000) return `📖 今週の例文・チャンツ（${pl.cat}）をやりましょう`;
-  if (pl.sunday && !pl.sundayDone && dow === pl.reviewDay) return '🔁 今日は先週の範囲の復習の日です';
-  return '';
+  if (pl.wordsDone && pl.examples && !pl.examplesDone && nowMs > pl.due - 86400000) out.push({ key: 'examples', title: '📖 今週の例文・チャンツ', body: `${pl.cat}：押すと始めます` });
+  if (pl.sunday && !pl.sundayDone && dow === pl.reviewDay) out.push({ key: 'sunday', title: '🔁 今日は先週の範囲の復習の日です', body: `${pl.prevCat || '先週の範囲'}：押すと始めます` });
+  return out;
 }
 async function sendPlanReminders() {
   const snap = await db.collection(PUSH_COL).get();
@@ -96,12 +100,21 @@ async function sendPlanReminders() {
     if (!plans.length) continue;
     const now = localNow(d.tzOffset);
     const [h, m] = String(d.time || '20:00').split(':').map(Number);
-    if (now.minutes < h * 60 + m || d.lastPlanRemindDate === now.date) continue;
+    if (now.minutes < h * 60 + m) continue;
     const dow = new Date(Date.now() - (Number.isFinite(d.tzOffset) ? d.tzOffset : -540) * 60000).getUTCDay();
-    const body = plans.map(pl => planMessage(pl, Date.now(), dow)).filter(Boolean).join('\n');
-    if (!body) continue;
-    sent += await sendToUser(doc.ref, d, { kind: 'plan', tag: 'plan', title: '📅 今週のプラン', body, url: APP_URL });
-    await doc.ref.update({ lastPlanRemindDate: now.date });
+    const done = Object.assign({}, d.planReminded || {});
+    Object.keys(done).forEach(k => { if (done[k] !== now.date) delete done[k]; }); // 前の日の記録は消す
+    let changed = false;
+    for (const pl of plans) {
+      for (const msg of planTaskMessages(pl, Date.now(), dow)) {
+        const k = `${pl.planId || 'p'}:${msg.key}`;
+        if (done[k] === now.date) continue; // 今日はもう知らせた
+        const url = pl.planId ? `${APP_URL}?plantask=${encodeURIComponent(pl.planId + ':' + msg.key)}` : APP_URL;
+        sent += await sendToUser(doc.ref, d, { kind: 'plan', tag: 'plan-' + k, title: msg.title, body: msg.body, url });
+        done[k] = now.date; changed = true;
+      }
+    }
+    if (changed) await doc.ref.update({ planReminded: done, lastPlanRemindDate: now.date });
   }
   console.log(`週間プラン: ${sent} 件送信`);
 }

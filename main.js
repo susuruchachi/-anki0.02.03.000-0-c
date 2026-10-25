@@ -35,7 +35,9 @@ window.onload = function() {
   }
   
   // ★【0.03.32】週間プランの課題が残っていれば、そこから始める（共有URL・ショートカットで開いたときは除く）
-  if (!urlParams.get('share_id') && !urlParams.get('page') && typeof planAutoOpen === 'function') setTimeout(planAutoOpen, 2500);
+  // ★【0.03.36】通知から開いたときは、その課題をそのまま始める
+  if (urlParams.get('plantask') && typeof planHandleTaskParam === 'function') setTimeout(() => planHandleTaskParam(), 1500);
+  else if (!urlParams.get('share_id') && !urlParams.get('page') && typeof planAutoOpen === 'function') setTimeout(planAutoOpen, 2500);
 
   // 起動時に共有カテゴリーの変更を同期する
   if (typeof syncSubscriptions === 'function') syncSubscriptions();

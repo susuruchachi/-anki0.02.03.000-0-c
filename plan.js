@@ -79,8 +79,8 @@ function planTasks(now = new Date()) {
     if (dayPos >= fromPos || L.words) {
       tasks.push({ key: 'words', title: `🧠 単語：${cur}`, cards: words, done: !!L.words, deadline, overdue: !L.words && now > deadline,
         sub: L.words ? `✅ 終わりました${L.wordsOnTime === false ? '（期限後）' : ''}` : `暗記テストで全部〇に（${PLAN_DAYS[due]}曜の夜まで）・今週解いた単語 ${answered}/${words.length}`,
-        progress: words.length ? answered / words.length : 0, action: `planStartWords(${jsArg(cur)})` });
-    } else tasks.push({ key: 'words', title: `🧠 単語：${cur}`, cards: words, done: false, upcoming: true, sub: `${PLAN_DAYS[from]}曜から（${PLAN_DAYS[due]}曜の夜まで）`, action: `planStartWords(${jsArg(cur)})` });
+        progress: words.length ? answered / words.length : 0, action: `planStartTask(${jsArg(CP.id)}, 'words')` });
+    } else tasks.push({ key: 'words', title: `🧠 単語：${cur}`, cards: words, done: false, upcoming: true, sub: `${PLAN_DAYS[from]}曜から（${PLAN_DAYS[due]}曜の夜まで）`, action: `planStartTask(${jsArg(CP.id)}, 'words')` });
     const ex = planExampleCards(cur);
     if (ex.length && (L.words || dayPos > duePos)) {
       const exDone = !!L.examples || (ex.length && planAnsweredSince(ex, weekStart) >= ex.length);
@@ -124,6 +124,39 @@ function planLeftText(deadline, now = new Date()) {
 }
 
 // ---------------- 始める ----------------
+// ★【0.03.36】課題をそのまま始める（ボタン・通知・自動で開くで共通）。単語は暗記テスト（途中経過があれば続きから）
+function planStartTask(id, key) {
+  if (!planUse(planById(id))) return false;
+  const t = planTasks().find(x => x.key === key);
+  if (!t) return false;
+  if (key === 'words') {
+    const cur = planWeekFolder(planWeekIndex());
+    if (!cur) return false;
+    try { localStorage.setItem('susuru_anki_drill_cat', cur); } catch (e) {}
+    if (typeof _drillActive !== 'undefined' && _drillActive && typeof DS !== 'undefined' && DS && DS.cat === cur) { openPage('pgDrill'); return true; } // もう解いている
+    if (typeof _drillActive !== 'undefined' && _drillActive && typeof drillSave === 'function') drillSave(); // ほかの範囲を解いていたら保存して切り替える
+    if (typeof drillSetActive === 'function') drillSetActive(false);
+    openPage('pgDrill');
+    if (typeof drillLoadAll === 'function' && drillLoadAll()[cur]) drillResume(cur);
+    else if (typeof drillStart === 'function' && DG.length) drillStart();
+    return true;
+  }
+  planStartQuizFor(key, id);
+  return true;
+}
+// 通知から開いたとき（?plantask=プランID:課題）
+function planHandleTaskParam(url) {
+  let v = null;
+  try { v = new URL(url || location.href).searchParams.get('plantask'); } catch (e) {}
+  if (!v) return false;
+  const [id, key] = v.split(':');
+  try { history.replaceState(null, '', location.pathname); } catch (e) {}
+  try { localStorage.setItem('susuru_anki_plan_autoopen', String(Date.now())); } catch (e) {} // このあと自動で開くのはやめる
+  const ok = planStartTask(id, key);
+  if (!ok && typeof showAppToast === 'function') showAppToast('📅 その課題はもう終わっているか、見つかりませんでした');
+  return ok;
+}
+if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', e => { if (e.data && e.data.type === 'open-url') planHandleTaskParam(e.data.url); });
 function planStartWords(cat) {
   try { localStorage.setItem('susuru_anki_drill_cat', cat); } catch (e) {} // 暗記タブの出題範囲をその週の範囲に
   openPage('pgDrill');
@@ -324,7 +357,7 @@ function planSyncNotice() {
     if (!cur) return;
     const from = planParseDate(planWeekKey(i)); from.setDate(from.getDate() + ((CP.wordsFrom ?? 2) + 6) % 7);
     const L = planLog(i), ex = planExampleCards(cur);
-    infos.push({ cat: cur, week: planWeekKey(i), from: from.getTime(), due: planWordsDeadline(i).getTime(), wordsDone: !!L.words,
+    infos.push({ planId: p.id, prevCat: planWeekFolder(i - 1) || '', cat: cur, week: planWeekKey(i), from: from.getTime(), due: planWordsDeadline(i).getTime(), wordsDone: !!L.words,
       examples: ex.length > 0, examplesDone: !!L.examples, sunday: CP.sunday !== 'off' && !!planWeekFolder(i - 1), sundayDone: !!L.sunday, reviewDay: CP.reviewDay ?? 0 });
   });
   const key = JSON.stringify(infos);
@@ -348,12 +381,6 @@ function planAutoOpen() {
   for (const p of plans) { planUse(p); t = planTasks().find(x => !x.done && !x.upcoming && !x.locked && !x.optional); if (t) break; }
   if (!t) return;
   try { localStorage.setItem('susuru_anki_plan_autoopen', String(Date.now())); } catch (e) {}
-  const cur = planWeekFolder(planWeekIndex());
-  if (t.key === 'words') {
-    try { localStorage.setItem('susuru_anki_drill_cat', cur); } catch (e) {}
-    openPage('pgDrill');
-    if (typeof drillLoadAll === 'function' && drillLoadAll()[cur]) drillResume(cur); // 途中経過があれば続きから
-    else if (typeof drillStart === 'function' && DG.length) drillStart();
-  } else planStartQuizFor(t.key, t.planId);
+  planStartTask(t.planId, t.key);
   if (typeof showAppToast === 'function') showAppToast(`📅 今週のプラン「${t.title.replace(/^\S+\s/, '')}」から始めます（${t.key === 'words' ? '⏸ 一時離脱' : '✕ 中断'}でほかの画面へ）`);
 }
