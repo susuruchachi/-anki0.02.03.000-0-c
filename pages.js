@@ -52,7 +52,7 @@ function executePageTransition(pageId, isBackAction) {
     history.pushState({ page: pageId }, '', '');
   }
   // ★【0.02.58-g】最終ページを保存（再読み込み後に復元するため）。クイズ中・対戦中は保存しない
-  const dontSave = ['pgQuizPlayer', 'pgOnlineMatch', 'pgShared'];
+  const dontSave = ['pgQuizPlayer', 'pgOnlineMatch', 'pgShared', 'pgQuizResult'];
   if (!dontSave.includes(pageId)) {
     try { localStorage.setItem('susuru_anki_last_page', pageId); } catch(e) {}
   }
@@ -61,7 +61,7 @@ function executePageTransition(pageId, isBackAction) {
   document.querySelectorAll('.screen').forEach(s => { s.classList.remove('active'); s.style.display='none'; });
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   // ★【0.03.00】下部ナビの選択状態と、クイズ中の表示切り替え
-  const navOwner = { pgUpdates: 'pgHome', pgTutorial: 'pgHome', pgPublicCategories: 'pgBox', pgShared: 'pgBox', pgMatchHistory: 'pgOnlineMatch', pgFriends: 'pgBackup', pgCompareStats: 'pgBackup' };
+  const navOwner = { pgUpdates: 'pgHome', pgTutorial: 'pgHome', pgPublicCategories: 'pgBox', pgShared: 'pgBox', pgMatchHistory: 'pgOnlineMatch', pgFriends: 'pgBackup', pgCompareStats: 'pgBackup', pgQuizResult: 'pgHome' };
   const navPage = navOwner[pageId] || pageId;
   document.querySelectorAll('.bnav-item').forEach(b => b.classList.toggle('active', b.dataset.page === navPage));
   const wasInQuiz = document.body.classList.contains('in-quiz');

@@ -159,6 +159,90 @@ let currentStructuredAnswer = null;
 let currentRoundMode = 'desc';
 
 // ★【0.03.00】クイズを途中でやめてホームに戻る（それまでの解答結果は保存済み）
+// ================================================================
+// ★【0.03.37】クイズの結果の画面（解いた問題ごとに、正誤・レベルの変化・今のランク）
+// ================================================================
+let _quizSession = { results: [], startedAt: 0 };
+const SRS_STATUS = { grad: { n: '🎓 卒業', c: 'var(--success)' }, master: { n: '⚡ 得意', c: 'var(--primary)' }, normal: { n: '☕ 普通', c: 'var(--warn)' }, weak: { n: '⚠️ 苦手', c: 'var(--danger)' }, shikkari: { n: '🧱 しっかり', c: '#9aa0a6' }, unseen: { n: '💤 未着手', c: 'var(--text3)' } };
+function srsStatusOf(t) {
+  if (!t) return 'unseen';
+  if (isGraduated(t)) return 'grad';
+  if (t.level === -1) return 'shikkari';
+  if (t.level >= 3) return 'master';
+  if (t.level >= 1) return 'normal';
+  return (t.correct || 0) + (t.incorrect || 0) > 0 ? 'weak' : 'unseen';
+}
+function recordQuizSessionResult(cur, isCorrect, isPass, regrade, m, senseKey, before) {
+  if (window.currentOnlineMatch || !cur) return;
+  const t = m ? (senseKey ? m.senses[senseKey] : m) : null;
+  const key = (cur._sourceId || cur.id) + '\u0001' + (cur._senseKey || '') + '\u0001' + (cur._swapped ? 's' : '');
+  const list = _quizSession.results;
+  const r = { key, id: cur._sourceId || cur.id, q: cur.question, a: getPrimaryAnswer(cur.answer), label: cur._senseLabel || '', swapped: !!cur._swapped,
+    correct: !!isCorrect, pass: !!isPass, stars: m ? m.stars || 0 : 0,
+    before: before || (t ? { level: t.level, status: srsStatusOf(t) } : null), after: t ? { level: t.level, status: srsStatusOf(t), l5: t.level5Correct || 0 } : null };
+  // 採点のやり直しは、同じ問題の記録を置き換える（変化の前は最初の記録のまま）
+  if (regrade && list.length && list[list.length - 1].key === key) { r.before = list[list.length - 1].before; list[list.length - 1] = r; }
+  else list.push(r);
+}
+function lvText(x) { return !x ? '—' : x.status === 'grad' ? '🎓' : x.level === -1 ? 'しっかり' : 'Lv' + (Number(x.level) || 0); }
+function showQuizResults() {
+  const res = _quizSession.results;
+  openPage('pgQuizResult');
+  const box = document.getElementById('quizResultBox');
+  if (!res.length) { box.innerHTML = '<div class="card"><div class="hint-small">解いた問題はありません。</div></div>'; return; }
+  const n = res.filter(r => !r.pass).length, ok = res.filter(r => r.correct).length;
+  const up = res.filter(r => r.before && r.after && (r.after.level > r.before.level || (r.after.status === 'grad' && r.before.status !== 'grad'))).length;
+  const down = res.filter(r => r.before && r.after && r.after.level < r.before.level).length;
+  const grad = res.filter(r => r.after && r.after.status === 'grad' && r.before && r.before.status !== 'grad').length;
+  const secs = Math.round((Date.now() - (_quizSession.startedAt || Date.now())) / 1000);
+  const statusCount = {}; res.forEach(r => { if (r.after) statusCount[r.after.status] = (statusCount[r.after.status] || 0) + 1; });
+  const chip = s => `<span class="res-chip" style="--c:${SRS_STATUS[s].c}">${SRS_STATUS[s].n}</span>`;
+  box.innerHTML = `
+    <div class="card res-summary">
+      <div class="res-score">${ok}<span>/ ${n} 問正解</span></div>
+      <div class="hint-small">正答率 ${n ? Math.round(ok / n * 100) : 0}% ・ ${Math.floor(secs / 60)}分${secs % 60}秒</div>
+      <div class="res-stats"><div><b style="color:var(--success);">⬆ ${up}</b><span>レベルアップ</span></div><div><b style="color:var(--danger);">⬇ ${down}</b><span>レベルダウン</span></div><div><b style="color:var(--success);">🎓 ${grad}</b><span>卒業</span></div></div>
+      <div class="res-status">${Object.keys(SRS_STATUS).filter(s => statusCount[s]).map(s => `${chip(s)} ${statusCount[s]}`).join('　')}</div>
+    </div>
+    <div class="res-filter"><button class="chip active" data-f="all">すべて ${res.length}</button><button class="chip" data-f="ng">✕ 間違い ${res.filter(r => !r.correct).length}</button><button class="chip" data-f="chg">↕ 変化あり ${res.filter(r => r.before && r.after && r.before.level !== r.after.level || (r.after && r.before && r.after.status !== r.before.status)).length}</button></div>
+    <div id="quizResultList">${res.map((r, i) => {
+      const changed = r.before && r.after && (r.before.level !== r.after.level || r.before.status !== r.after.status);
+      const arrow = !r.before || !r.after ? '' : r.after.level > r.before.level || (r.after.status === 'grad' && r.before.status !== 'grad') ? '<b class="res-up">⬆</b>' : r.after.level < r.before.level ? '<b class="res-down">⬇</b>' : '<span class="res-same">→</span>';
+      return `<div class="res-row ${r.correct ? 'ok' : 'ng'}" data-ng="${r.correct ? 0 : 1}" data-chg="${changed ? 1 : 0}">
+        <div class="res-mark">${r.pass ? '🏳️' : r.correct ? '⭕' : '✕'}</div>
+        <div class="res-body"><div class="res-q">${renderRichText(r.q, { escape: true })}${r.label ? ` <span class="res-label">[${escapeHtml(r.label)}]</span>` : ''}${r.stars ? ` <span class="card-stars">${starsText(r.stars)}</span>` : ''}</div>
+          <div class="res-a">${renderRichText(r.a, { escape: true })}</div></div>
+        <div class="res-lv">${r.after ? `<div>${lvText(r.before)} ${arrow} <b>${lvText(r.after)}</b></div>${chip(r.after.status)}${r.after.status !== 'grad' && r.after.level >= 5 ? `<div class="hint-small">卒業まで ${Math.max(0, Math.ceil(getGradThreshold() - r.after.l5))}</div>` : ''}` : ''}</div>
+      </div>`; }).join('')}</div>
+    <div class="plan-btns" style="margin-top:12px;">
+      ${res.some(r => !r.correct) ? '<button class="btn btn-accent" onclick="retryQuizMistakes()">🔁 間違えた問題をもう一度</button>' : ''}
+      <button class="btn btn-secondary" onclick="openPage(\'pgHome\')">🏠 ホーム</button>
+    </div>
+    <button class="btn btn-secondary" style="margin-top:8px;" onclick="openPage('pgStats')">📊 実績を見る</button>`;
+  hydrateRich(box);
+  box.querySelectorAll('.res-filter .chip').forEach(b => b.onclick = () => {
+    box.querySelectorAll('.res-filter .chip').forEach(x => x.classList.toggle('active', x === b));
+    const f = b.dataset.f;
+    box.querySelectorAll('.res-row').forEach(row => { row.style.display = f === 'all' || (f === 'ng' && row.dataset.ng === '1') || (f === 'chg' && row.dataset.chg === '1') ? '' : 'none'; });
+  });
+}
+// 間違えた問題だけでもう一度
+function retryQuizMistakes() {
+  const wrong = _quizSession.results.filter(r => !r.correct);
+  const pool = [];
+  wrong.forEach(r => {
+    const card = db.find(q => q.id === r.id); if (!card) return;
+    let e = card;
+    if (r.label || /\u0001.+\u0001/.test(r.key)) { const sk = r.key.split('\u0001')[1]; const ex = expandSenses([card]).find(x => x._senseKey === sk); if (ex) e = ex; }
+    if (r.swapped) e = swapQuizEntry(e);
+    pool.push(e);
+  });
+  if (!pool.length) return alert('もう一度出せる問題がありません。');
+  currentCombo = 0; todayCorrectCount = 0; currentQuizOrderScope = null;
+  quizPool = pool; quizIndex = 0;
+  openPage('pgQuizPlayer'); loadQuizQuestion();
+}
+
 function quitQuiz() {
   if (window.currentOnlineMatch) {
     if (!confirm('⚔️ 対戦中です。中断してホームに戻りますか？')) return;
@@ -167,7 +251,9 @@ function quitQuiz() {
   }
   stopQuizTimer(); clearTimeout(autoNextTimeout);
   lastQuizScopePath = [...selectedScopePath];
-  openPage('pgHome');
+  // ★【0.03.37】途中でやめても、解いた問題があれば結果を見せる
+  if (!window.currentOnlineMatch && _quizSession.results.length) showQuizResults();
+  else openPage('pgHome');
 }
 
 // ================================================================
@@ -380,6 +466,7 @@ async function startQuiz(modeType = 'normal') {
 }
 
 function loadQuizQuestion() {
+  if (quizIndex === 0) _quizSession = { results: [], startedAt: Date.now() }; // ★【0.03.37】結果の画面用
   quizPhase='q'; selectedChoiceIdx=null; window.currentSelfJudge=null;
   _focus = { attempts: 0 }; // ★【0.03.18】重点モードの答え直しの回数
   _multi = null; // ★【0.03.21】意味の聞き直し
@@ -949,8 +1036,7 @@ function submitQuizAction() {
               [window.currentOnlineMatch.myRole + '.finished']: true
           }).catch(()=>{});
       } else {
-          alert("🏁 クイズ終了！実績を確認しましょう。");
-          openPage('pgStats');
+          showQuizResults(); // ★【0.03.37】解いた問題ごとの結果
       }
     }
     return;
@@ -1405,6 +1491,9 @@ function evaluateRoundAnswer(isCorrect, head, opts = {}) {
     const snap = {}; if (m) { CARD_STAT_FIELDS.forEach(f => { snap[f] = f === 'senses' ? (m.senses ? JSON.parse(JSON.stringify(m.senses)) : undefined) : m[f]; }); snap.statsAt = m.statsAt; }
     _lastEval = { id: m ? m.id : null, stats: snap, combo: prevCombo, today: prevToday, correct: isCorrect, typed: !!opts.typed, given: opts.given || '', ai: opts.ai || null };
   }
+  // ★【0.03.37】この問題のレベル・ランクの変化を記録する（クイズの結果の画面）
+  const _tb = m ? (senseKey ? m.senses[senseKey] : m) : null;
+  const _before = _tb ? { level: _tb.level, status: srsStatusOf(_tb) } : null;
   if(m) {
     const mode = currentRoundMode;
     // ★【0.03.08】難易度とヒントで1回の重みを変える（対戦中は難易度どおり・ヒントなし）
@@ -1420,6 +1509,7 @@ function evaluateRoundAnswer(isCorrect, head, opts = {}) {
     });
     if (levelChange && senseKey) levelChange.label = cur._senseLabel;
   }
+  recordQuizSessionResult(cur, isCorrect, isPass, regrade, m, senseKey, _before);
   if (levelChange) showLevelAnim(levelChange);
   const _hintBtn = document.getElementById('btnQuizHint'); if (_hintBtn) _hintBtn.style.display = 'none';
   const _aiHintBtn = document.getElementById('btnQuizAiHint'); if (_aiHintBtn) _aiHintBtn.style.display = 'none';
