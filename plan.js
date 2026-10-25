@@ -8,6 +8,7 @@
 //  ・期限を守る仕掛け：ホームのお知らせ（残り時間・進み具合・期限切れ）、期限内に終わった週の連続記録、
 //    その日にやることを通知（プッシュ通知の送信側にも渡す）
 // 設定と達成の記録は studyPlan（storage.js）に入れて、端末間で同期する
+// ★【0.03.33】プランは複数持てる。CP は「いま扱っているプラン」（planUse で切り替える）
 // ================================================================
 const PLAN_DAYS = ['日', '月', '火', '水', '木', '金', '土'];
 const PLAN_EX_RE = /例文|チャンツ|chant/i;
@@ -16,21 +17,30 @@ const DAY_MS = 86400000;
 function planDateStr(d) { const p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; }
 function planParseDate(s) { const [y, m, d] = String(s).split('-').map(Number); return new Date(y, m - 1, d); }
 function planMonday(d) { const x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); x.setDate(x.getDate() - (x.getDay() + 6) % 7); return x; }
-function planOk() { return !!(studyPlan && studyPlan.enabled && Array.isArray(studyPlan.weeks) && studyPlan.weeks.length && studyPlan.start); }
+let CP = null;
+function planIsValid(p) { return !!(p && !p.deleted && p.enabled && Array.isArray(p.weeks) && p.weeks.length && p.start); }
+function planOk() { return planIsValid(CP); }
+// 使っているプランの一覧（作った順）
+function planList() {
+  studyPlan = normalizeStudyPlans(studyPlan);
+  return Object.keys(studyPlan.plans).map(id => Object.assign(studyPlan.plans[id], { id })).filter(planIsValid).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+}
+function planUse(p) { CP = p || null; return CP; }
+function planById(id) { return planList().find(p => p.id === id) || null; }
 
 // その日が何週目か（0 始まり。範囲より前なら負）
-function planWeekIndex(now = new Date()) { return Math.round((planMonday(now) - planParseDate(studyPlan.start)) / (7 * DAY_MS)); }
-function planWeekFolder(i) { const w = studyPlan.weeks; return i >= 0 && i < w.length && categories.includes(w[i]) ? w[i] : null; }
-function planWeekKey(i) { const d = planParseDate(studyPlan.start); d.setDate(d.getDate() + i * 7); return planDateStr(d); }
-function planLog(i) { studyPlan.log = studyPlan.log || {}; return studyPlan.log[planWeekKey(i)] || {}; }
+function planWeekIndex(now = new Date()) { return Math.round((planMonday(now) - planParseDate(CP.start)) / (7 * DAY_MS)); }
+function planWeekFolder(i) { const w = CP.weeks; return i >= 0 && i < w.length && categories.includes(w[i]) ? w[i] : null; }
+function planWeekKey(i) { const d = planParseDate(CP.start); d.setDate(d.getDate() + i * 7); return planDateStr(d); }
+function planLog(i) { CP.log = CP.log || {}; return CP.log[planWeekKey(i)] || {}; }
 function planSetLog(i, field, value) {
-  studyPlan.log = studyPlan.log || {};
+  CP.log = CP.log || {};
   const k = planWeekKey(i);
-  studyPlan.log[k] = Object.assign({}, studyPlan.log[k] || {}, { [field]: value });
+  CP.log[k] = Object.assign({}, CP.log[k] || {}, { [field]: value });
   saveData();
 }
 // 単語の期限（その週の期限の曜日の 23:59）
-function planWordsDeadline(i) { const d = planParseDate(planWeekKey(i)); d.setDate(d.getDate() + ((studyPlan.wordsDue ?? 4) + 6) % 7); d.setHours(23, 59, 59, 999); return d; }
+function planWordsDeadline(i) { const d = planParseDate(planWeekKey(i)); d.setDate(d.getDate() + ((CP.wordsDue ?? 4) + 6) % 7); d.setHours(23, 59, 59, 999); return d; }
 
 // 範囲のカード
 function planCards(cat) { if (!cat) return []; const set = new Set(getAllSubcategories(cat)); return db.filter(q => set.has(q.category)); }
@@ -42,10 +52,10 @@ function planAnsweredSince(cards, t) { return cards.filter(q => (q.statsAt || 0)
 // 日曜の復習・1か月前の復習の対象
 function planSundayCards(cat) {
   const ws = planWordCards(cat);
-  return studyPlan.sunday === 'all' ? ws : ws.filter(q => !isGraduated(q));
+  return CP.sunday === 'all' ? ws : ws.filter(q => !isGraduated(q));
 }
 function planMonthlyCards(cat) {
-  const ws = planWordCards(cat), min = Number(studyPlan.monthlyStars) || 2;
+  const ws = planWordCards(cat), min = Number(CP.monthlyStars) || 2;
   const starred = ws.filter(q => (Number(q.stars) || 0) >= min);
   if (ws.some(q => q.stars)) return starred;
   // 星を付けていないときは、苦手なもの（レベル2以下・まだ卒業していない）
@@ -59,7 +69,7 @@ function planTasks(now = new Date()) {
   const i = planWeekIndex(now), dow = now.getDay();
   const cur = planWeekFolder(i), prev = planWeekFolder(i - 1), month = planWeekFolder(i - 4);
   const L = planLog(i), weekStart = planParseDate(planWeekKey(i)).getTime();
-  const from = studyPlan.wordsFrom ?? 2, due = studyPlan.wordsDue ?? 4;
+  const from = CP.wordsFrom ?? 2, due = CP.wordsDue ?? 4;
   const tasks = [];
   const dayPos = (dow + 6) % 7, fromPos = (from + 6) % 7, duePos = (due + 6) % 7;
   if (cur) {
@@ -77,24 +87,25 @@ function planTasks(now = new Date()) {
       if (exDone && !L.examples) planSetLog(i, 'examples', Date.now());
       tasks.push({ key: 'examples', title: `📖 例文・チャンツ：${cur}`, cards: ex, done: exDone, locked: !L.words,
         sub: exDone ? '✅ 終わりました' : (!L.words ? '先に単語を終わらせましょう' : `今週やった ${planAnsweredSince(ex, weekStart)}/${ex.length}`),
-        progress: planAnsweredSince(ex, weekStart) / ex.length, action: `planStartQuizFor('examples')` });
+        progress: planAnsweredSince(ex, weekStart) / ex.length, action: `planStartQuizFor('examples', ${jsArg(CP.id)})` });
     }
   }
-  const reviewDay = studyPlan.reviewDay ?? 0;
-  if (prev && studyPlan.sunday !== 'off' && dow === reviewDay) {
+  const reviewDay = CP.reviewDay ?? 0;
+  if (prev && CP.sunday !== 'off' && dow === reviewDay) {
     const rc = planSundayCards(prev), dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
     const n = planAnsweredSince(rc, dayStart);
     const done = !!L.sunday || (rc.length > 0 && n >= rc.length) || rc.length === 0;
     if (done && !L.sunday) planSetLog(i, 'sunday', Date.now());
-    tasks.push({ key: 'sunday', title: `🔁 先週の復習：${prev}`, cards: rc, done, sub: done ? '✅ 終わりました' : `${studyPlan.sunday === 'all' ? '全部' : 'まだ卒業していない単語'} ${n}/${rc.length}`, progress: rc.length ? n / rc.length : 1, action: `planStartQuizFor('sunday')` });
+    tasks.push({ key: 'sunday', title: `🔁 先週の復習：${prev}`, cards: rc, done, sub: done ? '✅ 終わりました' : `${CP.sunday === 'all' ? '全部' : 'まだ卒業していない単語'} ${n}/${rc.length}`, progress: rc.length ? n / rc.length : 1, action: `planStartQuizFor('sunday', ${jsArg(CP.id)})` });
   }
-  if (month && studyPlan.monthly !== false && (dow === reviewDay || dow === 6)) {
+  if (month && CP.monthly !== false && (dow === reviewDay || dow === 6)) {
     const mc = planMonthlyCards(month), n = planAnsweredSince(mc, weekStart);
     const done = !!L.monthly || mc.length === 0 || n >= mc.length;
     if (done && !L.monthly && mc.length) planSetLog(i, 'monthly', Date.now());
     tasks.push({ key: 'monthly', title: `🗓️ 1か月前の復習：${month}`, cards: mc, done, optional: true,
-      sub: done ? '✅ 終わりました' : `${mc.some(q => q.stars) ? `★${studyPlan.monthlyStars || 2}つ以上` : '苦手'}の単語 ${n}/${mc.length}（余裕があれば）`, progress: mc.length ? n / mc.length : 1, action: `planStartQuizFor('monthly')` });
+      sub: done ? '✅ 終わりました' : `${mc.some(q => q.stars) ? `★${CP.monthlyStars || 2}つ以上` : '苦手'}の単語 ${n}/${mc.length}（余裕があれば）`, progress: mc.length ? n / mc.length : 1, action: `planStartQuizFor('monthly', ${jsArg(CP.id)})` });
   }
+  tasks.forEach(t => { t.planId = CP.id; });
   return tasks;
 }
 // 期限内に単語を終えた週が、何週続いているか
@@ -117,7 +128,8 @@ function planStartWords(cat) {
   try { localStorage.setItem('susuru_anki_drill_cat', cat); } catch (e) {} // 暗記タブの出題範囲をその週の範囲に
   openPage('pgDrill');
 }
-function planStartQuizFor(key) {
+function planStartQuizFor(key, id) {
+  if (id && !planUse(planById(id))) return;
   const t = planTasks().find(x => x.key === key);
   if (!t || !t.cards.length) return alert('出題するカードがありません。');
   planStartQuiz(t.cards);
@@ -135,16 +147,20 @@ function planStartQuiz(cards) {
 }
 // 暗記テストで全部〇になったとき（drill.js から）
 function planOnDrillPassed(cat) {
-  if (!planOk() || !cat) return;
-  const i = planWeekIndex(), cur = planWeekFolder(i);
-  if (!cur) return;
-  // その週の範囲そのもの、またはその範囲を含むフォルダーで合格したら
-  if (cat === cur || getAllSubcategories(cat).includes(cur)) {
-    if (!planLog(i).words) { planSetLog(i, 'words', Date.now()); planSetLog(i, 'wordsOnTime', Date.now() <= planWordsDeadline(i).getTime()); }
-  }
+  if (!cat) return;
+  planList().forEach(p => {
+    planUse(p);
+    const i = planWeekIndex(), cur = planWeekFolder(i);
+    if (!cur) return;
+    // その週の範囲そのもの、またはその範囲を含むフォルダーで合格したら
+    if (cat === cur || getAllSubcategories(cat).includes(cur)) {
+      if (!planLog(i).words) { planSetLog(i, 'words', Date.now()); planSetLog(i, 'wordsOnTime', Date.now() <= planWordsDeadline(i).getTime()); }
+    }
+  });
   renderPlanViews();
 }
-function planMarkDone(key) {
+function planMarkDone(key, id) {
+  if (!planUse(planById(id))) return;
   if (!confirm('今週のこの課題を「終わった」ことにしますか？（紙でやった場合など）')) return;
   const i = planWeekIndex();
   planSetLog(i, key, Date.now());
@@ -161,26 +177,40 @@ function planTaskHTML(t) {
     <div class="plan-task-title">${escapeHtml(t.title)}${t.optional ? ' <span class="hint-small">（余裕があれば）</span>' : ''}</div>
     <div class="hint-small">${escapeHtml(t.sub || '')}</div>${dl}
     ${!t.done && !t.upcoming && t.progress !== undefined ? `<div class="plan-bar"><div style="width:${pct}%"></div></div>` : ''}
-    ${!t.done && !t.locked ? `<div class="plan-btns"><button class="btn btn-primary" onclick="${t.action}">${t.upcoming ? '先にやる' : '▶️ 始める'}</button>${t.key === 'words' || t.key === 'examples' ? `<button class="btn btn-secondary" onclick="planMarkDone('${t.key}')">✅ 済にする</button>` : ''}</div>` : ''}
+    ${!t.done && !t.locked ? `<div class="plan-btns"><button class="btn btn-primary" onclick="${t.action}">${t.upcoming ? '先にやる' : '▶️ 始める'}</button>${t.key === 'words' || t.key === 'examples' ? `<button class="btn btn-secondary" onclick="planMarkDone('${t.key}', ${jsArg(t.planId)})">✅ 済にする</button>` : ''}</div>` : ''}
   </div>`;
+}
+function planSectionHTML(p, withTitle) {
+  planUse(p);
+  const i = planWeekIndex(), cur = planWeekFolder(i);
+  const st = planStreak();
+  const head = `<div class="plan-head"><span>📚 ${escapeHtml(p.root)}${cur ? `（${i + 1}週目）` : ''}</span>${st ? `<span class="plan-streak">🔥 ${st}週連続で期限内</span>` : ''}</div>`;
+  if (!cur && i >= p.weeks.length) return (withTitle ? head : '') + `<div class="hint-small">🎉 このプランの範囲は全部終わりました（${p.weeks.length}週）。</div>`;
+  return (withTitle ? head : '') + (cur ? '' : `<div class="hint-small">${escapeHtml(p.start)} の週から始まります。</div>`) + planTasks().map(planTaskHTML).join('');
 }
 function renderPlanHome() {
   const box = document.getElementById('planHomeCard');
   if (!box) return;
-  if (!planOk()) { box.style.display = 'none'; return; }
-  const i = planWeekIndex(), cur = planWeekFolder(i);
-  const tasks = planTasks();
-  const st = planStreak();
+  const list = planList();
+  if (!list.length) { box.style.display = 'none'; return; }
   box.style.display = 'block';
-  if (!cur && i >= studyPlan.weeks.length) { box.innerHTML = `<div class="setting-box-title">📅 週間プラン</div><div class="hint-small">🎉 プランの範囲は全部終わりました（${studyPlan.weeks.length}週）。暗記タブの「📅 週間プラン」で次のプランを作れます。</div>`; return; }
-  box.innerHTML = `<div class="setting-box-title" style="display:flex; justify-content:space-between; align-items:center;"><span>📅 今週のプラン${cur ? `（${i + 1}週目）` : ''}</span>${st ? `<span class="plan-streak">🔥 ${st}週連続で期限内</span>` : ''}</div>
-    ${cur ? '' : `<div class="hint-small">プランは ${escapeHtml(studyPlan.start)} の週から始まります。</div>`}
-    ${tasks.map(planTaskHTML).join('')}`;
+  box.innerHTML = `<div class="setting-box-title">📅 今週のプラン</div>` + list.map(p => `<div class="plan-section">${planSectionHTML(p, true)}</div>`).join('');
 }
 function renderPlanSettings() {
   const box = document.getElementById('planSettings');
   if (!box) return;
-  const p = studyPlan || {};
+  const list = planList();
+  const editing = _planEditId === 'new' ? null : (planById(_planEditId) || null);
+  if (!editing && _planEditId !== 'new') {
+    // プランの一覧（編集・解除・追加）
+    box.innerHTML = (list.length ? list.map(p => `<div class="plan-row"><div style="min-width:0;"><b>📚 ${escapeHtml(p.root)}</b><div class="hint-small">${p.weeks.length}週・${escapeHtml(p.start)} の週から・単語は${PLAN_DAYS[p.wordsFrom ?? 2]}〜${PLAN_DAYS[p.wordsDue ?? 4]}曜</div></div>
+        <div style="display:flex; gap:6px; flex-shrink:0;"><button class="chip" onclick="planEdit(${jsArg(p.id)})">✏️ 編集</button><button class="chip" onclick="stopStudyPlan(${jsArg(p.id)})">🗑️ 解除</button></div></div>`).join('')
+      : '<div class="hint-small">まだプランはありません。</div>') +
+      `<button class="btn btn-secondary" style="margin-top:8px;" onclick="planEdit('new')">＋ 新しいプランを登録</button>`;
+    return;
+  }
+  const p = editing || {};
+  planUse(editing);
   // ★【0.03.30】どの階層のフォルダーでも選べる。1週の範囲は「直下」「2つ下」…「いちばん下」から選ぶ
   const roots = getSortedCategoriesForMenu().filter(c => planUnitFolders(c, 'leaves').length >= 2);
   const root = [_planDraftRoot, p.root, roots[0]].find(c => c && categories.includes(c)) || '';
@@ -191,7 +221,7 @@ function renderPlanSettings() {
   const unitOpts = [['leaves', '単語が入っているいちばん下のフォルダー'], ['children', '直下のフォルダー']].concat(Array.from({ length: Math.max(0, depth - 1) }, (_, k) => ['d' + (k + 2), `${k + 2}つ下のフォルダー`]));
   const daySel = (id, v) => `<select id="${id}" class="form-control">${PLAN_DAYS.map((d, i) => `<option value="${i}" ${Number(v) === i ? 'selected' : ''}>${d}曜</option>`).join('')}</select>`;
   box.innerHTML = `
-    ${planOk() ? `<div class="hint-small" style="margin-bottom:8px;">✅ 使っています：${escapeHtml(p.root)}（${p.weeks.length}週・${escapeHtml(p.start)} の週から）</div>` : '<div class="hint-small" style="margin-bottom:8px;">1週間に1つのフォルダーずつ進めるプランを作ります。</div>'}
+    <div class="hint-small" style="margin-bottom:8px;">${editing ? `✏️ ${escapeHtml(p.root)} のプランを編集` : '＋ 新しいプラン：1週間に1つのフォルダーずつ進めます（いくつでも登録できます）'}</div>
     <label class="section-label" style="font-weight:500;">📚 単語帳（親フォルダー）</label>
     <select id="planRoot" class="form-control" onchange="studyPlanDraftRoot(this.value)">${roots.map(c => { const d = getCategoryPath(c).length - 1; return `<option value="${escapeHtml(c)}" ${c === root ? 'selected' : ''}>${'　'.repeat(d)}${d ? '└ ' : ''}${escapeHtml(c)}</option>`; }).join('')}</select>
     <label class="section-label" style="font-weight:500; margin-top:8px;">📏 1週の範囲</label>
@@ -215,10 +245,11 @@ function renderPlanSettings() {
       <option value="3" ${p.monthly !== false && p.monthlyStars === 3 ? 'selected' : ''}>★★★ の単語</option>
       <option value="off" ${p.monthly === false ? 'selected' : ''}>しない</option></select>
     <label class="toggle-pill" style="margin-top:8px; display:flex; align-items:center; gap:8px;"><input type="checkbox" id="planAutoOpen" ${p.autoOpen === false ? '' : 'checked'}>▶️ アプリを開いたら、残っている課題を自動で開く</label>
-    <div class="plan-btns" style="margin-top:10px;"><button class="btn btn-primary" onclick="saveStudyPlan()" ${children.length ? '' : 'disabled'}>💾 ${planOk() ? '更新' : 'プランを作る'}</button>${planOk() ? '<button class="btn btn-secondary" onclick="stopStudyPlan()">やめる</button>' : ''}</div>
+    <div class="plan-btns" style="margin-top:10px;"><button class="btn btn-primary" onclick="saveStudyPlan()" ${children.length ? '' : 'disabled'}>💾 ${editing ? '更新' : '登録'}</button><button class="btn btn-secondary" onclick="planEdit(null)">戻る</button></div>
     ${roots.length ? '' : '<div class="hint-small drill-ng">サブフォルダーが2つ以上あるフォルダーがありません（例：鉄壁 の下に #1, #2 …）。</div>'}`;
 }
-let _planDraftRoot = null, _planDraftUnit = null;
+let _planDraftRoot = null, _planDraftUnit = null, _planEditId = null;
+function planEdit(id) { _planEditId = id; _planDraftRoot = null; _planDraftUnit = null; renderPlanSettings(); }
 function studyPlanDraftRoot(r) { _planDraftRoot = r; renderPlanSettings(); }
 function studyPlanDraftUnit(u) { _planDraftUnit = u; renderPlanSettings(); }
 // 1週の範囲にするフォルダー（「上から出題しない」フォルダーとその下は数えない）
@@ -246,29 +277,36 @@ function saveStudyPlan() {
   const idx = Number(document.getElementById('planCurrent').value) || 0;
   const mon = planMonday(new Date()); mon.setDate(mon.getDate() - idx * 7);
   const m = document.getElementById('planMonthly').value;
-  const keepLog = studyPlan && studyPlan.root === root ? studyPlan.log || {} : {};
-  studyPlan = {
-    enabled: true, root, weeks, start: planDateStr(mon),
+  const old = _planEditId && _planEditId !== 'new' ? planById(_planEditId) : null;
+  if (!old && planList().some(p => p.root === root) && !confirm(`「${root}」のプランはもうあります。もう1つ登録しますか？`)) return;
+  const id = old ? old.id : 'p' + Date.now().toString(36);
+  const plan = {
+    id, enabled: true, root, unit, weeks, start: planDateStr(mon),
     wordsFrom: Number(document.getElementById('planFrom').value), wordsDue: Number(document.getElementById('planDue').value),
     reviewDay: Number(document.getElementById('planReviewDay').value), sunday: document.getElementById('planSunday').value,
-    monthly: m !== 'off', monthlyStars: m === 'off' ? 2 : Number(m), log: keepLog, planAt: Date.now(),
-    autoOpen: !!(document.getElementById('planAutoOpen') || { checked: true }).checked
+    monthly: m !== 'off', monthlyStars: m === 'off' ? 2 : Number(m), log: old && old.root === root ? old.log || {} : {},
+    autoOpen: !!(document.getElementById('planAutoOpen') || { checked: true }).checked,
+    createdAt: old ? (old.createdAt || 0) : Date.now(), planAt: Date.now()
   };
-  _planDraftRoot = null; _planDraftUnit = null;
-  studyPlan.unit = unit;
+  studyPlan = normalizeStudyPlans(studyPlan);
+  studyPlan.plans[id] = plan;
+  _planDraftRoot = null; _planDraftUnit = null; _planEditId = null;
   saveData(true);
   renderPlanViews();
-  alert(`📅 プランを作りました。今週は「${weeks[idx]}」です。`);
+  alert(`📅 プランを${old ? '更新' : '登録'}しました。「${root}」の今週は「${weeks[idx]}」です。`);
 }
-function stopStudyPlan() {
-  if (!confirm('週間プランをやめますか？（達成の記録は消えます）')) return;
-  studyPlan = { enabled: false, planAt: Date.now() };
+function stopStudyPlan(id) {
+  const p = planById(id); if (!p) return;
+  if (!confirm(`「${p.root}」の週間プランを解除しますか？（このプランの達成の記録も消えます）`)) return;
+  studyPlan = normalizeStudyPlans(studyPlan);
+  studyPlan.plans[id] = { id, deleted: true, planAt: Date.now() };
+  _planEditId = null;
   saveData(true); renderPlanViews();
 }
 function renderPlanViews() {
   renderPlanHome();
   const dp = document.getElementById('drillPlanBox');
-  if (dp) dp.innerHTML = planOk() ? planTasks().map(planTaskHTML).join('') : '';
+  if (dp) { const list = planList(); dp.innerHTML = list.length ? list.map(p => `<div class="plan-section">${planSectionHTML(p, list.length > 1)}</div>`).join('') : '<div class="hint-small">プランはまだありません。下の「⚙️ 週間プランの設定」から登録できます。</div>'; }
   renderPlanSettings();
   planSyncNotice();
 }
@@ -279,33 +317,35 @@ function renderPlanViews() {
 let _planNoticeKey = '';
 function planSyncNotice() {
   if (typeof currentUser === 'undefined' || !currentUser || typeof firestore === 'undefined') return;
-  let info = null;
-  if (planOk()) {
+  const infos = [];
+  planList().forEach(p => {
+    planUse(p);
     const i = planWeekIndex(), cur = planWeekFolder(i);
-    if (cur) {
-      const from = planParseDate(planWeekKey(i)); from.setDate(from.getDate() + ((studyPlan.wordsFrom ?? 2) + 6) % 7);
-      const L = planLog(i), ex = planExampleCards(cur);
-      info = { cat: cur, week: planWeekKey(i), from: from.getTime(), due: planWordsDeadline(i).getTime(), wordsDone: !!L.words,
-        examples: ex.length > 0, examplesDone: !!L.examples, sunday: studyPlan.sunday !== 'off' && !!planWeekFolder(i - 1), sundayDone: !!L.sunday, reviewDay: studyPlan.reviewDay ?? 0 };
-    }
-  }
-  const key = JSON.stringify(info);
+    if (!cur) return;
+    const from = planParseDate(planWeekKey(i)); from.setDate(from.getDate() + ((CP.wordsFrom ?? 2) + 6) % 7);
+    const L = planLog(i), ex = planExampleCards(cur);
+    infos.push({ cat: cur, week: planWeekKey(i), from: from.getTime(), due: planWordsDeadline(i).getTime(), wordsDone: !!L.words,
+      examples: ex.length > 0, examplesDone: !!L.examples, sunday: CP.sunday !== 'off' && !!planWeekFolder(i - 1), sundayDone: !!L.sunday, reviewDay: CP.reviewDay ?? 0 });
+  });
+  const key = JSON.stringify(infos);
   if (key === _planNoticeKey) return;
   let token = null; try { token = localStorage.getItem('susuru_anki_push_token'); } catch (e) {}
   if (!token) return; // 通知をオンにしていない
   _planNoticeKey = key;
-  firestore.collection('susuru_anki_push').doc(currentUser.uid).set({ plan: info }, { merge: true }).catch(e => { _planNoticeKey = ''; console.warn('プランの通知の保存に失敗:', e.message); });
+  firestore.collection('susuru_anki_push').doc(currentUser.uid).set({ plans: infos, plan: infos[0] || null }, { merge: true }).catch(e => { _planNoticeKey = ''; console.warn('プランの通知の保存に失敗:', e.message); });
 }
 
 // ---------------- 自動で開く ----------------
 // ★【0.03.32】アプリを開いたとき、今日の課題が残っていれば、そこから始める（2時間に1回まで。設定で止められる）
 function planAutoOpen() {
-  if (!planOk() || studyPlan.autoOpen === false) return;
+  const plans = planList().filter(p => p.autoOpen !== false);
+  if (!plans.length) return;
   const active = (document.querySelector('.screen.active') || {}).id || '';
   if (['pgShared', 'pgQuizPlayer', 'pgOnlineMatch', 'pgMatchHistory'].includes(active)) return;
   if (document.querySelector('.modal-overlay[style*="flex"], #catEditOverlay[style*="flex"]')) return;
   try { const last = Number(localStorage.getItem('susuru_anki_plan_autoopen')) || 0; if (Date.now() - last < 2 * 3600 * 1000) return; } catch (e) {}
-  const t = planTasks().find(x => !x.done && !x.upcoming && !x.locked && !x.optional);
+  let t = null;
+  for (const p of plans) { planUse(p); t = planTasks().find(x => !x.done && !x.upcoming && !x.locked && !x.optional); if (t) break; }
   if (!t) return;
   try { localStorage.setItem('susuru_anki_plan_autoopen', String(Date.now())); } catch (e) {}
   const cur = planWeekFolder(planWeekIndex());
@@ -314,6 +354,6 @@ function planAutoOpen() {
     openPage('pgDrill');
     if (typeof drillLoadAll === 'function' && drillLoadAll()[cur]) drillResume(cur); // 途中経過があれば続きから
     else if (typeof drillStart === 'function' && DG.length) drillStart();
-  } else planStartQuizFor(t.key);
+  } else planStartQuizFor(t.key, t.planId);
   if (typeof showAppToast === 'function') showAppToast(`📅 今週のプラン「${t.title.replace(/^\S+\s/, '')}」から始めます（${t.key === 'words' ? '⏸ 一時離脱' : '✕ 中断'}でほかの画面へ）`);
 }

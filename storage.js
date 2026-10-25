@@ -25,15 +25,31 @@ function getQuizSubcategories(cat, result = []) {
   return result;
 }
 let studyPlan = null; // ★【0.03.27】週間プラン（plan.js）。設定は新しく変えた方、達成の記録は両方を残す
-function mergeStudyPlans(a, b) {
+// ★【0.03.33】週間プランは複数持てる：studyPlan = { v: 2, plans: { id: プラン } }（解除したプランは { deleted: true, planAt }）
+function normalizeStudyPlans(x) {
+  if (!x) return { v: 2, plans: {} };
+  if (x.v === 2) return { v: 2, plans: Object.assign({}, x.plans || {}) };
+  // 前の形（プラン1つ）
+  if (x.root || x.weeks) return { v: 2, plans: { p1: Object.assign({ id: 'p1' }, x, x.enabled === false ? { deleted: true } : {}) } };
+  return { v: 2, plans: x.planAt ? { p1: { id: 'p1', deleted: true, planAt: x.planAt } } : {} };
+}
+function mergeOnePlan(a, b) {
   if (!a) return b || null; if (!b) return a;
   const base = (a.planAt || 0) >= (b.planAt || 0) ? a : b, other = base === a ? b : a;
+  if (base.deleted) return base;
   const log = {};
   [other.log || {}, base.log || {}].forEach(L => Object.keys(L).forEach(k => {
     const x = log[k] = log[k] || {};
     Object.keys(L[k] || {}).forEach(f => { const v = L[k][f]; x[f] = typeof v === 'number' && typeof x[f] === 'number' ? Math.min(x[f], v) : (x[f] === undefined ? v : x[f]); });
   }));
   return Object.assign({}, base, { log });
+}
+function mergeStudyPlans(a, b) {
+  if (!a && !b) return null;
+  const A = normalizeStudyPlans(a), B = normalizeStudyPlans(b);
+  const plans = {};
+  new Set([...Object.keys(A.plans), ...Object.keys(B.plans)]).forEach(id => { plans[id] = mergeOnePlan(A.plans[id], B.plans[id]); });
+  return { v: 2, plans };
 }
 let deletedCardsAt = {}; // { カードID: 削除時刻 }（削除後に取り込み直したカードは updatedAt が新しいので復活できる）
 let docStamps = {};   // { 共有docId: { a: 購読時刻, d: 解除時刻 } }

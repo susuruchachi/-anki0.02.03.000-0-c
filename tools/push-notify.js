@@ -92,12 +92,13 @@ async function sendPlanReminders() {
   let sent = 0;
   for (const doc of snap.docs) {
     const d = doc.data();
-    if (!d.plan) continue;
+    const plans = Array.isArray(d.plans) ? d.plans : (d.plan ? [d.plan] : []); // ★【0.03.33】複数のプラン
+    if (!plans.length) continue;
     const now = localNow(d.tzOffset);
     const [h, m] = String(d.time || '20:00').split(':').map(Number);
     if (now.minutes < h * 60 + m || d.lastPlanRemindDate === now.date) continue;
     const dow = new Date(Date.now() - (Number.isFinite(d.tzOffset) ? d.tzOffset : -540) * 60000).getUTCDay();
-    const body = planMessage(d.plan, Date.now(), dow);
+    const body = plans.map(pl => planMessage(pl, Date.now(), dow)).filter(Boolean).join('\n');
     if (!body) continue;
     sent += await sendToUser(doc.ref, d, { kind: 'plan', tag: 'plan', title: '📅 今週のプラン', body, url: APP_URL });
     await doc.ref.update({ lastPlanRemindDate: now.date });
