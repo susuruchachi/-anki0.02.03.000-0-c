@@ -74,6 +74,37 @@ async function sendReminders() {
   console.log(`催促: ${sent} 件送信（対象 ${snap.size} 人）`);
 }
 
+// ★【0.03.27】週間プラン：単語の期限が近い・過ぎた、例文・復習が残っている、を1日1回知らせる
+function planMessage(pl, nowMs, dow) {
+  if (!pl) return '';
+  if (!pl.wordsDone && nowMs >= pl.from) {
+    const left = pl.due - nowMs;
+    if (left < 0) return left > -3 * 86400000 ? `⏰ 単語（${pl.cat}）の期限を過ぎています。今日中に終わらせましょう` : '';
+    const d = Math.floor(left / 86400000);
+    return d >= 1 ? `🧠 今週の単語（${pl.cat}）：期限まであと${d}日` : `🔥 今夜が単語（${pl.cat}）の期限です`;
+  }
+  if (pl.wordsDone && pl.examples && !pl.examplesDone && nowMs > pl.due - 86400000) return `📖 今週の例文・チャンツ（${pl.cat}）をやりましょう`;
+  if (pl.sunday && !pl.sundayDone && dow === pl.reviewDay) return '🔁 今日は先週の範囲の復習の日です';
+  return '';
+}
+async function sendPlanReminders() {
+  const snap = await db.collection(PUSH_COL).get();
+  let sent = 0;
+  for (const doc of snap.docs) {
+    const d = doc.data();
+    if (!d.plan) continue;
+    const now = localNow(d.tzOffset);
+    const [h, m] = String(d.time || '20:00').split(':').map(Number);
+    if (now.minutes < h * 60 + m || d.lastPlanRemindDate === now.date) continue;
+    const dow = new Date(Date.now() - (Number.isFinite(d.tzOffset) ? d.tzOffset : -540) * 60000).getUTCDay();
+    const body = planMessage(d.plan, Date.now(), dow);
+    if (!body) continue;
+    sent += await sendToUser(doc.ref, d, { kind: 'plan', tag: 'plan', title: '📅 今週のプラン', body, url: APP_URL });
+    await doc.ref.update({ lastPlanRemindDate: now.date });
+  }
+  console.log(`週間プラン: ${sent} 件送信`);
+}
+
 function readVersionInfo() {
   const v = (fs.readFileSync(path.join(ROOT, 'version-info.js'), 'utf8').match(/APP_VERSION\s*=\s*["']([^"']+)["']/) || [])[1];
   let title = '';
@@ -127,6 +158,7 @@ async function sendFriendNotices() {
 (async () => {
   if (MODE === 'all' || MODE === 'friends') await sendFriendNotices().catch(e => console.log('フレンド申請のお知らせに失敗:', e.message));
   if (MODE === 'all' || MODE === 'reminders') await sendReminders();
+  if (MODE === 'all' || MODE === 'plan') await sendPlanReminders().catch(e => console.log('週間プランの通知に失敗:', e.message));
   if (MODE === 'all' || MODE === 'update') await sendUpdate();
   // アプリ側が「送信側が動いている」と分かるように、最後に動いた時刻を書く
   await db.doc(META_DOC).set({ lastRunAt: Date.now() }, { merge: true });

@@ -141,26 +141,41 @@ async function submitUserReport() {
   } catch(e) { alert("⚠️ 送信に失敗しました。"); }
 }
 
-// ★【0.03.26】文字をコピーする（クリップボードが使えないブラウザでも動くように）
-async function copyTextToClipboard(text) {
-  try { await navigator.clipboard.writeText(text); return true; }
-  catch (e) {
-    const ta = document.createElement('textarea'); ta.value = text; ta.style.cssText = 'position:fixed; left:-9999px; top:0;';
-    document.body.appendChild(ta); ta.select();
-    let ok = false; try { ok = document.execCommand('copy'); } catch (e2) {}
-    ta.remove(); return ok;
-  }
+// ★【0.03.27】文字をコピーする。押した瞬間に（同期的に）コピーする方法を先に使う（iPhone・アプリ版などで確実に効くように）。
+// どれも使えないときは、文字を選んだ状態の枠を出して、手でコピーしてもらう
+function copyTextToClipboard(text) {
+  let ok = false;
+  const ta = document.createElement('textarea');
+  ta.value = text; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed; left:0; top:0; width:1px; height:1px; opacity:0;';
+  document.body.appendChild(ta);
+  ta.focus(); ta.select(); try { ta.setSelectionRange(0, text.length); } catch (e) {}
+  try { ok = document.execCommand('copy'); } catch (e) {}
+  ta.remove();
+  if (ok) return Promise.resolve(true);
+  if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text).then(() => true, () => { showCopyFallback(text); return 'manual'; });
+  showCopyFallback(text); return Promise.resolve('manual');
+}
+function showCopyFallback(text) {
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:10000; display:flex; align-items:center; justify-content:center; padding:16px;';
+  wrap.innerHTML = `<div class="card" style="width:100%; max-width:520px;"><div class="setting-box-title">📋 下の文字を長押し（または Ctrl+C）でコピーしてください</div><textarea class="form-control" rows="10" readonly style="font-size:0.8rem;"></textarea><button class="btn btn-secondary" style="margin-top:8px;">閉じる</button></div>`;
+  const ta = wrap.querySelector('textarea'); ta.value = text;
+  wrap.querySelector('button').onclick = () => wrap.remove();
+  document.body.appendChild(wrap); ta.focus(); ta.select();
 }
 let _adminReports = [];
+function copiedToast(msg) { if (typeof showAppToast === 'function') showAppToast(msg); else alert(msg); }
 function reportToText(r) { return `【${r.dateStr || '日時不明'}】${r.name || '名無し'}（v${r.version || '?'}・UID: ${r.uid || '?'}）\n${r.content || ''}`; }
 async function copyUserReport(i) {
   const r = _adminReports[i]; if (!r) return;
-  alert(await copyTextToClipboard(reportToText(r)) ? '📋 コピーしました' : '⚠️ コピーできませんでした');
+  const ok = await copyTextToClipboard(reportToText(r));
+  if (ok === true) copiedToast('📋 コピーしました');
 }
 async function copyAllUserReports() {
   if (!_adminReports.length) return alert('コピーする報告がありません。');
   const text = _adminReports.map(reportToText).join('\n\n---\n\n');
-  alert(await copyTextToClipboard(text) ? `📋 ${_adminReports.length} 件をまとめてコピーしました` : '⚠️ コピーできませんでした');
+  const ok = await copyTextToClipboard(text);
+  if (ok === true) copiedToast(`📋 ${_adminReports.length} 件をまとめてコピーしました`);
 }
 
 // ★ 管理者用：要望一覧を読み込む

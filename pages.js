@@ -81,6 +81,8 @@ function executePageTransition(pageId, isBackAction) {
   if(pageId==='pgCompareStats') { loadFriendsForComparison(); }
   if(pageId==='pgBackup') { const el = document.getElementById('navBackup'); if(el) el.classList.add('active'); if (typeof renderMySharedDocsSettings === 'function') renderMySharedDocsSettings(); if (typeof renderSnapshotList === 'function') renderSnapshotList(); if (typeof renderNotifySettings === 'function') renderNotifySettings(); if (typeof renderAiSettings === 'function') renderAiSettings(); }
   if(pageId==='pgTutorial') { fetchAndRenderTutorial(); }
+  if(pageId==='pgDrill' && typeof drillOnOpen === 'function') drillOnOpen(); // ★【0.03.27】暗記テストのタブ
+  if((pageId==='pgDrill' || pageId==='pgHome') && typeof renderPlanViews === 'function') renderPlanViews(); // ★【0.03.27】週間プラン
   
   closeMenu();
 }

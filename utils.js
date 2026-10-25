@@ -254,6 +254,21 @@ function matchAnswerMeanings(input, meanings) {
   return [...new Set(hit)];
 }
 
+// ★【0.03.27】難易度（重要度）の星：0〜3。「★★」「2」「☆☆」などを数にする
+function parseStars(v) {
+  const s = String(v == null ? '' : v).trim();
+  if (!s) return 0;
+  const st = (s.match(/[★☆*＊]/g) || []).length;
+  const n = st || parseInt(s.replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)), 10) || 0;
+  return Math.max(0, Math.min(3, n));
+}
+function starsText(n) { n = Number(n) || 0; return n > 0 ? '★'.repeat(Math.min(3, n)) : ''; }
+// 問題の後ろに付いた「★★」を取り出す（単語帳の書き方。例：abandon ★★）
+function splitQuestionStars(q) {
+  const m = String(q || '').match(/^(.*?)\s*([★☆]{1,3})\s*$/);
+  return m && m[1].trim() ? { q: m[1].trim(), stars: m[2].length } : { q: String(q || ''), stars: 0 };
+}
+
 // 構造化解答を表示用HTML（ラベル：本文、を1行ずつ）に整形する。
 // lblQuizQuestion / feedbackAnswerText / selfAnswerDisplay と同じく、中身は意図的にエスケープしない
 // （画像タグやKaTeX記法をそのまま埋め込めるようにする、既存の出題表示の方針に合わせるため）

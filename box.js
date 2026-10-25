@@ -206,7 +206,7 @@ function buildBoxCard(item) {
     _boxAnswerCache[item.id] = { text: item.answer, image: item.answerImage || null };
 
     const lvlStr = item.level === -1 ? 'しっかり' : 'LV '+item.level;
-    const noHTML = item.no ? `<span class="card-no">No.${Number(item.no)}</span>` : '';
+    const noHTML = (item.no ? `<span class="card-no">No.${Number(item.no)}</span>` : '') + (item.stars ? `<span class="card-stars">${starsText(item.stars)}</span>` : '');
     const badgeHTML = `<span class="badge ${isGrad ? 'badge-grad':'badge-level'}">${isGrad ? 'GRADUATE' : lvlStr}</span>`;
     // ★【0.03.17】意味ごとのレベル
     const senseList = cardSenseList(item);
@@ -339,6 +339,7 @@ function openCardModal(mode, itemOrDefaults) {
   document.getElementById('txtCardAnswer').value = mode === 'edit' ? (itemOrDefaults.answer || '') : '';
   document.getElementById('txtCardNote').value = mode === 'edit' ? (itemOrDefaults.note || '') : '';
   document.getElementById('numCardNo').value = mode === 'edit' && itemOrDefaults.no ? itemOrDefaults.no : '';
+  document.getElementById('selCardStars').value = String(mode === 'edit' ? (Number(itemOrDefaults.stars) || 0) : 0);
   updateCardImagePreview('question');
   updateCardImagePreview('answer');
   document.getElementById('cardModalOverlay').style.display = 'flex';
@@ -379,6 +380,7 @@ async function submitCardModal() {
   const note = document.getElementById('txtCardNote').value.trim();
   const noVal = parseInt(document.getElementById('numCardNo').value, 10);
   const no = Number.isFinite(noVal) && noVal > 0 ? noVal : null;
+  const stars = parseStars(document.getElementById('selCardStars').value);
   if (!q) { alert('問題文を入力してください。'); document.getElementById('txtCardQuestion').focus(); return; }
   if (!a) { alert('答えを入力してください。'); document.getElementById('txtCardAnswer').focus(); return; }
 
@@ -388,6 +390,7 @@ async function submitCardModal() {
     item.question = q; item.answer = a;
     if (note) item.note = note; else delete item.note;
     if (no) item.no = no;
+    if (stars) item.stars = stars; else delete item.stars;
     touchCard(item);
     if (_cardModalState.qImage) item.questionImage = _cardModalState.qImage; else delete item.questionImage;
     if (_cardModalState.aImage) item.answerImage = _cardModalState.aImage; else delete item.answerImage;
@@ -397,6 +400,7 @@ async function submitCardModal() {
     const newCard = { id: newCardId(), question: q, answer: a, category: _cardModalState.category, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 };
     if (note) newCard.note = note;
     if (no) newCard.no = no;
+    if (stars) newCard.stars = stars;
     touchCard(newCard);
     if (_cardModalState.qImage) newCard.questionImage = _cardModalState.qImage;
     if (_cardModalState.aImage) newCard.answerImage = _cardModalState.aImage;

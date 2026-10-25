@@ -14,6 +14,17 @@ let deletedCats = [];
 // ================================================================
 let catStamps = {};   // { フォルダー名: { a: 作成(復活)時刻, d: 削除時刻 } }
 let catSubjects = {}; // ★【0.03.07】フォルダーの教科タグ { フォルダー名: '英語' }（'' は「なし（親から引き継がない）」）
+let studyPlan = null; // ★【0.03.27】週間プラン（plan.js）。設定は新しく変えた方、達成の記録は両方を残す
+function mergeStudyPlans(a, b) {
+  if (!a) return b || null; if (!b) return a;
+  const base = (a.planAt || 0) >= (b.planAt || 0) ? a : b, other = base === a ? b : a;
+  const log = {};
+  [other.log || {}, base.log || {}].forEach(L => Object.keys(L).forEach(k => {
+    const x = log[k] = log[k] || {};
+    Object.keys(L[k] || {}).forEach(f => { const v = L[k][f]; x[f] = typeof v === 'number' && typeof x[f] === 'number' ? Math.min(x[f], v) : (x[f] === undefined ? v : x[f]); });
+  }));
+  return Object.assign({}, base, { log });
+}
 let deletedCardsAt = {}; // { カードID: 削除時刻 }（削除後に取り込み直したカードは updatedAt が新しいので復活できる）
 let docStamps = {};   // { 共有docId: { a: 購読時刻, d: 解除時刻 } }
 let structAt = 0;     // フォルダー構造・購読状態を最後に変更した時刻
@@ -166,6 +177,7 @@ function loadData() {
       if(p.deletedCats) deletedCats=p.deletedCats;
       if(p.catStamps) catStamps=p.catStamps;
       if(p.catSubjects) catSubjects=p.catSubjects;
+      if(p.studyPlan) studyPlan=p.studyPlan;
       if(p.deletedCardsAt) deletedCardsAt=p.deletedCardsAt;
       if(p.docStamps) docStamps=p.docStamps;
       if(p.structAt) structAt=p.structAt;
@@ -243,7 +255,7 @@ function updateStructStamp() {
 }
 
 function buildSyncPayload() {
-  return { db, categories, categoryTree, subscribedDocs, ownedDocs, deletedCards, deletedCardsAt, deletedCats, catStamps, docStamps, structAt, catSubjects };
+  return { db, categories, categoryTree, subscribedDocs, ownedDocs, deletedCards, deletedCardsAt, deletedCats, catStamps, docStamps, structAt, catSubjects, studyPlan };
 }
 
 let _quotaWarned = false;
@@ -491,6 +503,7 @@ function mergeSyncStates(L, C) {
     // 教科タグ：フォルダー構造を新しく変更した側を優先し、もう一方にしか無いものは足す
     catSubjects: (() => { const o = Object.assign({}, older.catSubjects || {}, newer.catSubjects || {}); Object.keys(o).forEach(k => { if (!aliveSet.has(k)) delete o[k]; }); return o; })(),
     structAt: Math.max(L.structAt || 0, C.structAt || 0),
+    studyPlan: mergeStudyPlans(L.studyPlan, C.studyPlan),
     subscribedDocs: subs, ownedDocs: owned
   };
 }
@@ -500,7 +513,7 @@ function mergeIntoLocal(r) {
   const merged = mergeSyncStates(buildSyncPayload(), r);
   db = merged.db; categories = merged.categories; categoryTree = merged.categoryTree;
   deletedCards = merged.deletedCards; deletedCardsAt = merged.deletedCardsAt; deletedCats = merged.deletedCats;
-  catStamps = merged.catStamps; docStamps = merged.docStamps; structAt = merged.structAt; catSubjects = merged.catSubjects || {};
+  catStamps = merged.catStamps; docStamps = merged.docStamps; structAt = merged.structAt; catSubjects = merged.catSubjects || {}; studyPlan = merged.studyPlan || null;
   subscribedDocs = merged.subscribedDocs; ownedDocs = merged.ownedDocs;
   ensureSystemSanity();
   autoMerge(true);
@@ -530,7 +543,7 @@ function syncFingerprint(p) {
   return stableStringify({
     db: dbSorted, categories: [...(p.categories || [])].sort(), categoryTree: p.categoryTree || {},
     deletedCards: [...(p.deletedCards || [])].sort(), deletedCardsAt: p.deletedCardsAt || {}, deletedCats: [...(p.deletedCats || [])].sort(),
-    catStamps: p.catStamps || {}, docStamps: p.docStamps || {}, structAt: p.structAt || 0, catSubjects: p.catSubjects || {},
+    catStamps: p.catStamps || {}, docStamps: p.docStamps || {}, structAt: p.structAt || 0, catSubjects: p.catSubjects || {}, studyPlan: p.studyPlan || null,
     subscribedDocs: [...(p.subscribedDocs || [])].sort(), ownedDocs: [...(p.ownedDocs || [])].sort()
   });
 }
@@ -541,7 +554,7 @@ function refreshVisibleViews(contentChanged = true) {
     if (contentChanged) {
       if (isActive('pgTree') && typeof renderTree === 'function') renderTree();
       if (isActive('pgBox') && typeof renderBox === 'function') renderBox();
-      if (isActive('pgHome')) { if (typeof buildQuizScopeDropdown === 'function') buildQuizScopeDropdown(); }
+      if (isActive('pgHome')) { if (typeof buildQuizScopeDropdown === 'function') buildQuizScopeDropdown(); if (typeof renderPlanHome === 'function') renderPlanHome(); }
     }
     if (typeof updateHomeSummary === 'function') updateHomeSummary();
   } catch (e) { console.warn(e); }
@@ -680,7 +693,7 @@ function resolveAccountSwitch() {
     if (!merge) {
       takeSnapshot('アカウント変更（置き換え）');
       db = []; categories = ['未分類']; categoryTree = {}; subscribedDocs = []; ownedDocs = [];
-      deletedCards = []; deletedCardsAt = {}; deletedCats = []; catStamps = {}; docStamps = {}; structAt = 0; catSubjects = {};
+      deletedCards = []; deletedCardsAt = {}; deletedCats = []; catStamps = {}; docStamps = {}; structAt = 0; catSubjects = {}; studyPlan = null;
       sharedDocPermissions = {};
       _structHash = structFingerprint(); writeLocal();
     } else {
