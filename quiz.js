@@ -720,6 +720,10 @@ function buildChoiceCandidates(cur, correctPrimary) {
   const normCorrect = normalizeAnswer(correctPrimary);
   const seen = new Set([normCorrect]);
   const pool = [];
+  // ★【0.03.25】ダミーは、同じフォルダー → 1つ上のフォルダー（の下）から選ぶ。足りないときだけほかのフォルダーから
+  const cat = cur.category || (db.find(q => q.id === (cur._sourceId || cur.id)) || {}).category;
+  const parent = cat && typeof getCategoryParent === 'function' ? getCategoryParent(cat) : null;
+  const near = new Set(parent ? getAllSubcategories(parent) : (cat ? [cat] : []));
   db.forEach(q => {
     if (q.id === cur.id || q.id === cur._sourceId) return;
     if (Array.isArray(q.choices) && q.choices.length) return; // テスト問題の Yes/No 等は混ぜない
@@ -734,12 +738,13 @@ function buildChoiceCandidates(cur, correctPrimary) {
     if (sh.rich === want.rich) score += 6;             // 構造式つきの答えには構造式つきの選択肢
     if (sh.ph === want.ph) score += 3;                 // 「A」「～」入りの熟語なら熟語どうし
     if (Math.abs(sh.words - want.words) <= 1) score += 2;
-    if (q.category === cur.category) score += 2;
     if (q.kind === cur.kind) score += 1;
-    pool.push({ t, score: score + Math.random() * 1.5 });
+    const tier = q.category === cat ? 0 : near.has(q.category) ? 1 : 2;
+    pool.push({ t, tier, score: score + (tier === 0 ? 3 : 0) + Math.random() * 1.5 });
   });
-  pool.sort((a, b) => b.score - a.score);
-  return pool.map(p => p.t);
+  const nearPool = pool.filter(p => p.tier < 2).sort((a, b) => b.score - a.score);
+  const far = pool.filter(p => p.tier === 2).sort((a, b) => b.score - a.score);
+  return nearPool.concat(far).map(p => p.t);
 }
 
 function buildFourChoices(cur) {

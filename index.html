@@ -180,6 +180,11 @@ b.drill-ng { font-size: 1.3rem; }
 .drill-ng-card { border-left: 4px solid var(--danger); }
 .drill-group { border-left: 4px solid var(--primary); }
 #drillApp input.form-control { margin-top: 6px; }
+.friend-req-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 1.4em; height: 1.4em; padding: 0 5px; border-radius: 999px; background: var(--danger); color: #fff; font-size: 0.75rem; font-weight: 800; margin-left: 6px; }
+.bnav-item { position: relative; }
+.bnav-badge { position: absolute; top: 2px; right: 14%; margin: 0; min-width: 1.2em; height: 1.2em; font-size: 0.65rem; }
+.app-toast { position: fixed; left: 50%; bottom: 84px; transform: translate(-50%, 20px); opacity: 0; transition: all .3s; z-index: 9999; max-width: 92vw; padding: 12px 16px; border-radius: 12px; background: var(--bg2); color: var(--text); border: 1px solid var(--primary); box-shadow: 0 6px 24px rgba(0,0,0,.35); font-size: 0.9rem; font-weight: 700; cursor: pointer; }
+.app-toast.show { opacity: 1; transform: translate(-50%, 0); }
 .focus-status { margin-top: 10px; padding: 6px 10px; border-radius: 8px; background: rgba(245,166,35,0.12); border: 1px solid rgba(245,166,35,0.4); color: var(--warn); font-size: 0.85rem; font-weight: 700; }
 .focus-status.multi { background: rgba(34,199,122,0.12); border-color: rgba(34,199,122,0.45); color: var(--success); }
 .quiz-hints .hint-focus { margin-top: 4px; color: var(--warn); font-weight: 700; }
@@ -689,6 +694,8 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
     <div class="card">
       <div class="setting-box-title">📲 アプリ・通知</div>
       <div id="notifySettings" class="hint-small">読み込み中...</div>
+      <a class="btn btn-secondary" style="margin-top:10px; text-decoration:none; justify-content:center;" href="apk/susuruanki.apk" download>🤖 Android アプリ（APK）をダウンロード</a>
+      <div class="hint-small" style="margin-top:4px;">Android の端末で開いてインストールします（「提供元不明のアプリ」の許可が必要なことがあります）。中身はこのウェブ版と同じで、学習データも共通です。iPhone・パソコンは上の「アプリとしてインストール」を使ってください。</div>
     </div>
 
     <div class="card">
@@ -728,7 +735,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 
     <div class="card">
       <div class="setting-box-title">👥 フレンド・ランキング</div>
-      <button class="btn btn-accent" onclick="openPage('pgFriends'); loadAppFriends(); loadDailyRanking();">🏆 ランキング・チャットを開く</button>
+      <button class="btn btn-accent" onclick="openPage('pgFriends'); loadAppFriends(); loadDailyRanking();">🏆 フレンド・ランキング・チャットを開く <span class="friend-req-badge" style="display:none;"></span></button>
       <div style="margin-top:12px;">
         <label class="section-label" style="font-weight:500;">あなたのUID</label>
         <div class="form-row">
@@ -794,11 +801,17 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
       </div>
 
       <div class="card" style="margin-bottom:15px;">
-        <div class="setting-box-title">🤝 フレンド追加</div>
+        <div class="setting-box-title">📨 フレンド申請 <span class="friend-req-badge" style="display:none;"></span></div>
+        <div id="friendRequestsBox" class="hint-small">ログインすると表示されます。</div>
+      </div>
+
+      <div class="card" style="margin-bottom:15px;">
+        <div class="setting-box-title">🤝 フレンド申請を送る</div>
         <div class="form-row">
           <input type="text" id="txtAddFriendUid" class="form-control" placeholder="友達のUIDを入力">
-          <button class="btn btn-accent" style="width:auto; padding:0 15px;" onclick="addAppFriend()">追加</button>
+          <button class="btn btn-accent" style="width:auto; padding:0 15px;" onclick="addAppFriend()">申請</button>
         </div>
+        <div class="hint-small" style="margin-top:6px;">相手が承認するとフレンドになります（相手の「設定 → 👥 フレンド」の UID をもらってください）。オンライン対戦の履歴からも申請できます。</div>
       </div>
 
       <h3 style="font-size: 1.1rem; font-weight: 700; margin: 10px 0; color: var(--text);">📜 フレンド一覧</h3>
@@ -987,7 +1000,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
     <button class="bnav-item" data-page="pgBox" onclick="openPage('pgBox')"><i>📝</i>カード</button>
     <button class="bnav-item" data-page="pgOnlineMatch" onclick="openPage('pgOnlineMatch')"><i>⚔️</i>対戦</button>
     <button class="bnav-item" data-page="pgStats" onclick="openPage('pgStats')"><i>📊</i>実績</button>
-    <button class="bnav-item" data-page="pgBackup" onclick="openPage('pgBackup')"><i>⚙️</i>設定</button>
+    <button class="bnav-item" data-page="pgBackup" onclick="openPage('pgBackup')"><i>⚙️</i>設定<span class="friend-req-badge bnav-badge" style="display:none;"></span></button>
   </nav>
 </div>
 

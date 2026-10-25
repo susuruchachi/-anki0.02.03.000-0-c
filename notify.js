@@ -20,7 +20,7 @@ let _periodicOk = null;
 function getNotifyPrefs() {
   let p = {};
   try { p = JSON.parse(localStorage.getItem(NOTIFY_PREFS_KEY) || '{}') || {}; } catch (e) {}
-  return { reminder: !!p.reminder, time: /^\d{1,2}:\d{2}$/.test(p.time || '') ? p.time : '20:00', updates: p.updates !== false };
+  return { reminder: !!p.reminder, time: /^\d{1,2}:\d{2}$/.test(p.time || '') ? p.time : '20:00', updates: p.updates !== false, friends: p.friends !== false };
 }
 function saveNotifyPrefs(p) {
   try { localStorage.setItem(NOTIFY_PREFS_KEY, JSON.stringify(p)); } catch (e) {}
@@ -155,7 +155,7 @@ function syncPushDoc(immediate) {
     const p = getNotifyPrefs();
     let lastStudy = null; try { lastStudy = localStorage.getItem('susuru_anki_last_study'); } catch (e) {}
     const body = {
-      uid: currentUser.uid, reminder: p.reminder, time: p.time, updates: p.updates,
+      uid: currentUser.uid, reminder: p.reminder, time: p.time, updates: p.updates, friends: p.friends,
       tzOffset: new Date().getTimezoneOffset(), weakCount: weakCardCount(), updatedAt: Date.now(),
       tokens: { [token]: { at: Date.now(), ua: (isAndroidDevice() ? 'android' : isIOSDevice() ? 'ios' : 'other') + (isStandaloneApp() ? '-app' : '') } }
     };
@@ -233,8 +233,9 @@ function onNotifyPrefChange() {
   if (r) p.reminder = r.checked;
   if (t && /^\d{1,2}:\d{2}$/.test(t.value)) p.time = t.value;
   if (u) p.updates = u.checked;
+  const f = document.getElementById('chkNotifyFriends'); if (f) p.friends = f.checked;
   saveNotifyPrefs(p);
-  if ((p.reminder || p.updates) && typeof Notification !== 'undefined' && Notification.permission === 'default') enableNotifications();
+  if ((p.reminder || p.updates || p.friends) && typeof Notification !== 'undefined' && Notification.permission === 'default') enableNotifications();
   renderNotifySettings();
 }
 
@@ -250,8 +251,7 @@ function renderNotifySettings() {
   else if (_deferredInstall) installHTML = '<button class="btn btn-accent" onclick="installApp()">📲 アプリとしてインストール（ホーム画面に追加）</button>';
   else if (isIOSDevice()) installHTML = '<div class="hint-small">📲 アプリにするには：Safari の共有ボタン（□に↑）→「ホーム画面に追加」</div>';
   else installHTML = '<button class="btn btn-secondary" onclick="installApp()">📲 アプリとしてインストールする方法</button>';
-  const apkHTML = isAndroidDevice() && !standalone
-    ? `<a class="btn btn-secondary" style="margin-top:8px; text-decoration:none; justify-content:center;" href="${APK_URL}" download>🤖 Android アプリ（APK）</a>` : '';
+  const apkHTML = ''; // ★【0.03.25】APK のボタンは、設定画面にいつも出す（index.html）
   let permHTML;
   if (perm === 'granted') permHTML = '<div class="hint-small" style="color:var(--success);">✅ 通知は許可されています</div>';
   else if (perm === 'denied') permHTML = '<div class="hint-small" style="color:var(--danger);">🚫 通知がブロックされています。ブラウザ（端末）の設定で、このサイトの通知を許可してください。</div>';
@@ -273,6 +273,7 @@ function renderNotifySettings() {
       <input type="time" id="txtNotifyTime" class="form-control" value="${p.time}" onchange="onNotifyPrefChange()" style="max-width:140px;">
     </div>
     <label class="toggle-pill" style="margin-top:8px; display:flex; align-items:center; gap:8px;"><input type="checkbox" id="chkNotifyUpdates" ${p.updates ? 'checked' : ''} onchange="onNotifyPrefChange()">🆕 アップデートのお知らせ</label>
+    <label class="toggle-pill" style="margin-top:8px; display:flex; align-items:center; gap:8px;"><input type="checkbox" id="chkNotifyFriends" ${p.friends ? 'checked' : ''} onchange="onNotifyPrefChange()">🤝 フレンド申請・承認のお知らせ</label>
     <div class="hint-small" style="margin-top:8px; line-height:1.6;">${[how, bg].filter(Boolean).join('<br>')}</div>
     ${perm === 'granted' ? '<button class="btn btn-secondary" style="margin-top:8px;" onclick="sendTestNotification()">🔔 テスト通知を送る</button>' : ''}
   `;

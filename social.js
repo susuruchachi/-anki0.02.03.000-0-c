@@ -38,19 +38,128 @@ function copyMyUid() {
   navigator.clipboard.writeText(uid).then(() => alert("✅ UIDをコピーしました！"));
 }
 
-// ★ フレンド追加（双方向登録）
-async function addAppFriend() {
-  const fUid = document.getElementById('txtAddFriendUid').value.trim();
-  if (!fUid) return alert("UIDを入力してください。"); 
-  if (!currentUser) return alert("ログインが必要です。"); 
-  if (fUid === currentUser.uid) return alert("自分自身は登録できません。");
+// ================================================================
+// ★【0.03.25】フレンド申請と承認
+//  申請：susuru_anki_friend_requests/{送った人_受け取る人} に { from, to, status: 'pending' } を作る
+//  承認：受け取った人が、自分のフレンド一覧に相手を足して、申請を status: 'accepted' にする
+//        → 送った人の画面がそれに気づいて、自分のフレンド一覧に相手を足し、申請を消す
+//  （相手のプロフィールには書き込まないので、勝手にフレンドにされることはない）
+//  通知：アプリを開いている間はその場で、閉じているときはプッシュ通知（送信側 tools/push-notify.js）で知らせる
+// ================================================================
+const FRIEND_REQ_COL = 'susuru_anki_friend_requests';
+let _friendReqIn = [], _friendReqOut = [], _friendReqUnsubs = [];
+function friendErrMsg(e) {
+  const c = (e && (e.code || e.message)) || '';
+  if (/permission/i.test(c)) return 'Firestore のルールで拒否されました。管理者が docs/firestore.rules の最新のルールを公開しているか確認してください。';
+  if (/unavailable|network/i.test(c)) return '通信できませんでした。電波の良いところでもう一度試してください。';
+  return c;
+}
+async function myFriendList() {
+  const snap = await firestore.collection('susuru_anki_profiles').doc(currentUser.uid).get();
+  return snap.exists ? (snap.data().friends || []) : [];
+}
+// フレンド申請を送る（UID の入力欄・対戦履歴から）
+async function sendFriendRequest(toUid, toName) {
+  if (!currentUser) return alert('ログインが必要です。');
+  toUid = String(toUid || '').trim();
+  if (!toUid) return alert('UIDを入力してください。');
+  if (toUid === currentUser.uid) return alert('自分自身には申請できません。');
   try {
-    await firestore.collection('susuru_anki_profiles').doc(currentUser.uid).set({ friends: firebase.firestore.FieldValue.arrayUnion(fUid) }, { merge: true });
-    await firestore.collection('susuru_anki_profiles').doc(fUid).set({ friends: firebase.firestore.FieldValue.arrayUnion(currentUser.uid) }, { merge: true });
-    document.getElementById('txtAddFriendUid').value = ''; 
-    alert("✅ フレンドを追加しました！"); 
+    const prof = await firestore.collection('susuru_anki_profiles').doc(toUid).get();
+    if (!prof.exists) return alert('⚠️ そのUIDのユーザーが見つかりません。UIDをもう一度確かめてください（相手が一度ログインしている必要があります）。');
+    const name = toName || prof.data().displayName || '名無し';
+    if ((await myFriendList()).includes(toUid)) return alert(`${name} さんはすでにフレンドです。`);
+    // 相手からの申請が届いていれば、それを承認する
+    const back = _friendReqIn.find(r => r.from === toUid && r.status === 'pending');
+    if (back) { await acceptFriendRequest(back.id); return; }
+    await firestore.collection(FRIEND_REQ_COL).doc(`${currentUser.uid}_${toUid}`).set({
+      from: currentUser.uid, fromName: currentUser.displayName || '名無し', to: toUid, toName: name,
+      status: 'pending', createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    alert(`✅ ${name} さんにフレンド申請を送りました。相手が承認するとフレンドになります。`);
+  } catch (e) { console.error(e); alert('⚠️ フレンド申請に失敗しました。\n' + friendErrMsg(e)); }
+}
+async function addAppFriend() {
+  const el = document.getElementById('txtAddFriendUid');
+  await sendFriendRequest(el.value);
+  el.value = '';
+}
+async function acceptFriendRequest(id) {
+  const r = _friendReqIn.find(x => x.id === id); if (!r || !currentUser) return;
+  try {
+    await firestore.collection('susuru_anki_profiles').doc(currentUser.uid).set({ friends: firebase.firestore.FieldValue.arrayUnion(r.from) }, { merge: true });
+    await firestore.collection(FRIEND_REQ_COL).doc(id).update({ status: 'accepted', toName: currentUser.displayName || '名無し', respondedAt: firebase.firestore.FieldValue.serverTimestamp() });
+    alert(`✅ ${r.fromName || '相手'} さんとフレンドになりました。`);
     loadAppFriends();
-  } catch (e) { alert("⚠️ フレンド追加に失敗しました。ルールの確認を。"); }
+  } catch (e) { console.error(e); alert('⚠️ 承認に失敗しました。\n' + friendErrMsg(e)); }
+}
+async function rejectFriendRequest(id) {
+  const r = _friendReqIn.find(x => x.id === id);
+  if (!confirm(`${(r && r.fromName) || '相手'} さんからの申請を断りますか？（相手には知らせません）`)) return;
+  try { await firestore.collection(FRIEND_REQ_COL).doc(id).delete(); } catch (e) { alert('⚠️ 失敗しました。\n' + friendErrMsg(e)); }
+}
+async function cancelFriendRequest(id) {
+  if (!confirm('この申請を取り消しますか？')) return;
+  try { await firestore.collection(FRIEND_REQ_COL).doc(id).delete(); } catch (e) { alert('⚠️ 失敗しました。\n' + friendErrMsg(e)); }
+}
+// 届いた申請・承認をその場で知らせる（一度知らせたものは知らせない）
+function friendNoticeSeen(key) {
+  let seen = {}; try { seen = JSON.parse(localStorage.getItem('susuru_anki_friend_seen') || '{}') || {}; } catch (e) {}
+  if (seen[key]) return true;
+  seen[key] = Date.now();
+  const ks = Object.keys(seen); if (ks.length > 300) ks.sort((a, b) => seen[a] - seen[b]).slice(0, ks.length - 300).forEach(k => delete seen[k]);
+  try { localStorage.setItem('susuru_anki_friend_seen', JSON.stringify(seen)); } catch (e) {}
+  return false;
+}
+function friendNotify(title, body, key) {
+  if (friendNoticeSeen(key)) return;
+  if (typeof showLocalNotification === 'function' && typeof Notification !== 'undefined' && Notification.permission === 'granted' && document.visibilityState !== 'visible') showLocalNotification(title, body, 'friend');
+  else showAppToast(`${title}　${body}`, () => { openPage('pgFriends'); loadAppFriends(); });
+}
+function showAppToast(text, onClick) {
+  const t = document.createElement('div'); t.className = 'app-toast'; t.textContent = text;
+  t.onclick = () => { t.remove(); if (onClick) onClick(); };
+  document.body.appendChild(t);
+  setTimeout(() => t.classList.add('show'), 10);
+  setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 400); }, 6000);
+}
+// ログインしたら、自分あての申請・自分が送った申請を見張る
+function startFriendRequestWatch() {
+  _friendReqUnsubs.forEach(u => { try { u(); } catch (e) {} }); _friendReqUnsubs = [];
+  _friendReqIn = []; _friendReqOut = []; renderFriendRequests();
+  if (!currentUser) return;
+  const col = firestore.collection(FRIEND_REQ_COL);
+  _friendReqUnsubs.push(col.where('to', '==', currentUser.uid).onSnapshot(snap => {
+    _friendReqIn = snap.docs.map(d => Object.assign({ id: d.id }, d.data())).filter(r => r.status === 'pending');
+    _friendReqIn.forEach(r => friendNotify('🤝 フレンド申請', `${r.fromName || '名無し'} さんから申請が届きました`, 'in:' + r.id));
+    renderFriendRequests();
+  }, e => console.warn('フレンド申請の読み込みに失敗:', e.message)));
+  _friendReqUnsubs.push(col.where('from', '==', currentUser.uid).onSnapshot(async snap => {
+    const all = snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
+    _friendReqOut = all.filter(r => r.status === 'pending');
+    renderFriendRequests();
+    // 承認された申請：自分のフレンド一覧にも相手を足して、申請を片づける
+    for (const r of all.filter(x => x.status === 'accepted')) {
+      try {
+        await firestore.collection('susuru_anki_profiles').doc(currentUser.uid).set({ friends: firebase.firestore.FieldValue.arrayUnion(r.to) }, { merge: true });
+        await col.doc(r.id).delete();
+        friendNotify('✅ フレンド申請が承認されました', `${r.toName || '相手'} さんとフレンドになりました`, 'ok:' + r.id);
+        if (document.getElementById('pgFriends').classList.contains('active')) loadAppFriends();
+      } catch (e) { console.warn('承認された申請の処理に失敗:', e.message); }
+    }
+  }, e => console.warn('送ったフレンド申請の読み込みに失敗:', e.message)));
+  if (location.hash === '#friends') { history.replaceState(null, '', location.pathname + location.search); openPage('pgFriends'); loadAppFriends(); }
+}
+function renderFriendRequests() {
+  const n = _friendReqIn.length;
+  document.querySelectorAll('.friend-req-badge').forEach(b => { b.textContent = n; b.style.display = n ? 'inline-flex' : 'none'; });
+  const box = document.getElementById('friendRequestsBox');
+  if (!box) return;
+  const rows = [];
+  _friendReqIn.forEach(r => rows.push(`<div class="achieve-row"><div class="achieve-label">📨 ${escapeHtml(r.fromName || '名無し')}<div class="hint-small" style="font-family:'JetBrains Mono',monospace;">${escapeHtml(String(r.from).slice(0, 10))}…</div></div>
+    <div style="display:flex; gap:6px;"><button class="btn btn-success" style="width:auto; padding:6px 12px; font-size:0.8rem;" onclick="acceptFriendRequest(${jsArg(r.id)})">承認</button><button class="btn btn-secondary" style="width:auto; padding:6px 10px; font-size:0.8rem;" onclick="rejectFriendRequest(${jsArg(r.id)})">断る</button></div></div>`));
+  _friendReqOut.forEach(r => rows.push(`<div class="achieve-row"><div class="achieve-label">⏳ ${escapeHtml(r.toName || '名無し')} <span class="hint-small">（承認待ち）</span></div><button class="btn btn-secondary" style="width:auto; padding:6px 10px; font-size:0.8rem;" onclick="cancelFriendRequest(${jsArg(r.id)})">取り消す</button></div>`));
+  box.innerHTML = rows.length ? rows.join('') : '<div class="hint-small">届いている申請・送った申請はありません。</div>';
 }
 
 // ★ フレンド一覧を読み込んで表示

@@ -1,5 +1,5 @@
 rules_version = '2';
-// すするanki の Firestore ルール（v0.03.15 時点のアプリの読み書きに合わせたもの）
+// すするanki の Firestore ルール（v0.03.25 時点のアプリの読み書きに合わせたもの）
 // Firebase コンソール →「Firestore Database」→「ルール」に、このファイルの中身をそのまま貼り付けて「公開」する
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -16,15 +16,11 @@ service cloud.firestore {
       allow read, write: if isAuthenticated() && uid() == userId;
     }
 
-    // 👤 プロフィール（ログインした人は読める。書き換えは本人だけ。
-    //    ただし、フレンド登録で「相手のフレンド一覧に自分を足す」ことだけは、相手のプロフィールにもできる）
+    // 👤 プロフィール（ログインした人は読める。書き換えは本人だけ）
+    //    ★【0.03.25】フレンドは「申請 → 相手が承認」で、それぞれが自分のフレンド一覧に足す（相手のプロフィールには書かない）
     match /susuru_anki_profiles/{userId} {
       allow read: if isAuthenticated();
       allow create, update, delete: if isAuthenticated() && uid() == userId;
-      allow update: if isAuthenticated() && uid() != userId
-        && changedKeys().hasOnly(['friends'])
-        && request.resource.data.friends.toSet().difference(resource.data.get('friends', []).toSet()) == [uid()].toSet()
-        && resource.data.get('friends', []).toSet().difference(request.resource.data.friends.toSet()).size() == 0;
     }
 
     // 📈 毎日の学習ログ（文書IDは「日付_UID」。本人の分だけ）
@@ -56,9 +52,21 @@ service cloud.firestore {
     }
 
     // 🤝 フレンド申請（文書IDは「送った人_受け取る人」）
+    //   送る：自分を「送った人」にして、承認待ち（pending）で作る（送り直しも同じ）
+    //   読む・消す（断る・取り消す）：送った人と受け取った人だけ
+    //   承認：受け取った人が status を accepted にするだけ
     match /susuru_anki_friend_requests/{reqId} {
-      allow create: if isAuthenticated() && request.resource.data.from == uid();
-      allow read, delete: if isAuthenticated() && uid() in [resource.data.from, resource.data.to];
+      function validNewRequest() {
+        return request.resource.data.from == uid() && request.resource.data.to is string && request.resource.data.to != uid()
+          && reqId == uid() + '_' + request.resource.data.to && request.resource.data.status == 'pending';
+      }
+      allow create: if isAuthenticated() && validNewRequest();
+      allow update: if isAuthenticated() && resource.data.from == uid() && validNewRequest();
+      allow update: if isAuthenticated() && resource.data.to == uid() && resource.data.status == 'pending'
+        && request.resource.data.status == 'accepted'
+        && changedKeys().hasOnly(['status', 'toName', 'respondedAt']);
+      allow read: if isAuthenticated() && (resource.data.to == uid() || resource.data.from == uid());
+      allow delete: if isAuthenticated() && (resource.data.to == uid() || resource.data.from == uid());
     }
 
     // ⚔️ オンライン対戦（待っている部屋を探すため読むのはログインした人なら誰でも。

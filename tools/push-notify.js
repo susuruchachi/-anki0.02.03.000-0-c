@@ -102,7 +102,30 @@ async function sendUpdate() {
   console.log(`アップデートのお知らせ v${version}: ${sent} 件送信`);
 }
 
+// ★【0.03.25】フレンド申請が届いた・承認された、を知らせる（それぞれ1回だけ）
+async function sendFriendNotices() {
+  const col = db.collection('susuru_anki_friend_requests');
+  let sent = 0;
+  const pushOf = async uid => { const ref = db.collection(PUSH_COL).doc(uid); const s = await ref.get(); return s.exists && s.data().friends !== false ? { ref, data: s.data() } : null; };
+  for (const doc of (await col.where('status', '==', 'pending').get()).docs) {
+    const d = doc.data();
+    if (d.notifiedTo) continue;
+    const p = await pushOf(d.to);
+    if (p) sent += await sendToUser(p.ref, p.data, { kind: 'friend', tag: 'friend-' + doc.id, title: '🤝 フレンド申請', body: `${d.fromName || '名無し'} さんからフレンド申請が届きました`, url: APP_URL + '#friends' });
+    await doc.ref.update({ notifiedTo: true });
+  }
+  for (const doc of (await col.where('status', '==', 'accepted').get()).docs) {
+    const d = doc.data();
+    if (d.notifiedFrom) continue;
+    const p = await pushOf(d.from);
+    if (p) sent += await sendToUser(p.ref, p.data, { kind: 'friend', tag: 'friend-' + doc.id, title: '✅ フレンド申請が承認されました', body: `${d.toName || '相手'} さんとフレンドになりました`, url: APP_URL + '#friends' });
+    await doc.ref.update({ notifiedFrom: true });
+  }
+  console.log(`フレンド申請のお知らせ: ${sent} 件送信`);
+}
+
 (async () => {
+  if (MODE === 'all' || MODE === 'friends') await sendFriendNotices().catch(e => console.log('フレンド申請のお知らせに失敗:', e.message));
   if (MODE === 'all' || MODE === 'reminders') await sendReminders();
   if (MODE === 'all' || MODE === 'update') await sendUpdate();
   // アプリ側が「送信側が動いている」と分かるように、最後に動いた時刻を書く

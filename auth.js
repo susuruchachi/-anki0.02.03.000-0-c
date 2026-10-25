@@ -58,8 +58,10 @@ auth.onAuthStateChanged(user => {
     if (typeof onMatchAuthReady === 'function') onMatchAuthReady();
     if (typeof onNotifyAuthReady === 'function') onNotifyAuthReady(); // ★【0.03.14】プッシュ通知の登録
     if (typeof loadAiKeysFromCloud === 'function') loadAiKeysFromCloud(); // ★【0.03.15】AI のキー（自分の・家族の）
+    if (typeof startFriendRequestWatch === 'function') startFriendRequestWatch(); // ★【0.03.25】フレンド申請
   } else {
     if (typeof stopCloudListener === 'function') stopCloudListener();
+    if (typeof startFriendRequestWatch === 'function') startFriendRequestWatch(); // ログアウトしたら見張りをやめる
     ls.innerHTML = `<span style="color:var(--warn);">未ログイン</span>`;
     const btnLogin = document.getElementById('btnFbLogin');
     const btnLogout = document.getElementById('btnFbLogout');
