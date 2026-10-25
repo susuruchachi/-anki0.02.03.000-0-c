@@ -136,11 +136,23 @@ function drillBusy() { dlock = true; const a = document.getElementById('drillApp
 function drillErr(e) { dlock = false; drillDraw(); document.getElementById('drillApp').insertAdjacentHTML('beforeend', `<p class="drill-ng">エラー：${dE(e.message || '通信失敗')}。もう一度押してください。</p>`); }
 
 // ---------------- 始める・続きから ----------------
+// ★【0.03.29】出題範囲は暗記タブで選ぶ（ホームの出題範囲とは別。初めはホームの範囲）
+const DRILL_CAT_KEY = 'susuru_anki_drill_cat';
 function drillScopeCategory() {
+  try { const c = localStorage.getItem(DRILL_CAT_KEY); if (c !== null) return c === '' || categories.includes(c) ? c : ''; } catch (e) {}
   const p = (selectedScopePath && selectedScopePath.length ? selectedScopePath : lastQuizScopePath) || [];
   const c = p.length && p[0] !== 'all' ? p[p.length - 1] : '';
   return categories.includes(c) ? c : '';
 }
+function drillSetCategory(c) { try { localStorage.setItem(DRILL_CAT_KEY, c || ''); } catch (e) {} if (!_drillActive) drillHome(); }
+// ★【0.03.29】途中経過はフォルダーごとに保存する { フォルダー名（すべては ''）: 状態 }
+function drillLoadAll() {
+  let all = {};
+  try { all = JSON.parse(localStorage.getItem(DRILL_KEY + '_v2') || '{}') || {}; } catch (e) {}
+  try { const old = JSON.parse(localStorage.getItem(DRILL_KEY)); if (old && !all[old.cat || '']) { all[old.cat || ''] = old; localStorage.setItem(DRILL_KEY + '_v2', JSON.stringify(all)); } localStorage.removeItem(DRILL_KEY); } catch (e) {}
+  return all;
+}
+function drillStoreAll(all) { try { localStorage.setItem(DRILL_KEY + '_v2', JSON.stringify(all)); } catch (e) {} }
 // ★【0.03.27】暗記テストは専用のタブ。ほかの画面に行っても（一時離脱）、タブに戻るとその問題から続く
 let _drillActive = false;
 function openDrill() { openPage('pgDrill'); }
@@ -153,24 +165,36 @@ function drillSetActive(on) {
 function drillPause() { if (dlock) return; drillSave(); openPage('pgHome'); }
 function drillHome() {
   dlock = false; drillSetActive(false);
-  let d = null; try { d = JSON.parse(localStorage.getItem(DRILL_KEY)); } catch (e) {}
+  const all = drillLoadAll();
   const cat = drillScopeCategory();
+  const d = all[cat] || null;
   drillBuild(cat);
   const words = DG.reduce((n, g) => n + g.items.length, 0), checks = DG.reduce((n, g) => n + g.chk.length, 0);
+  const left = x => (x.Q || []).filter(y => y.t === 'q' || y.t === 'c').length;
+  const others = Object.keys(all).filter(k => k !== cat && (k === '' || categories.includes(k)));
   const A = document.getElementById('drillApp');
-  A.innerHTML = (d ? `<div class="card"><b>途中経過が保存されています</b><div class="hint-small">📁 ${dE(d.cat || 'すべて')} ・ ${d.r}周目 ・ 残り${(d.Q || []).filter(x => x.t === 'q' || x.t === 'c').length}問</div><button class="btn btn-primary" style="margin-top:8px;" onclick="drillResume()">▶️ 続きから</button></div>` : '') +
-    `<div class="card"><div class="setting-box-title">📝 暗記テスト</div>
-      <div class="hint-small" style="margin-bottom:8px;">${d ? '最初からやり直す場合：' : ''}ホームの「出題範囲」で選んだフォルダーで始めます。</div>
-      <div><b>📁 ${dE(cat || 'すべてのフォルダー')}</b></div>
-      <div class="hint-small">グループ ${DG.length} ・ 単語 ${words} 語 ・ Check! ${checks} 問</div>
+  A.innerHTML = `<div class="card"><div class="setting-box-title">🧠 暗記テスト</div>
+      <label class="section-label" style="font-weight:500;">🎯 出題範囲</label>
+      <select class="form-control" onchange="drillSetCategory(this.value)"><option value="">📚 すべてのフォルダー</option>${buildCategoryOptionsHTML(new Set(), false)}</select>
+      <div class="hint-small" style="margin-top:4px;">グループ ${DG.length} ・ 単語 ${words} 語 ・ Check! ${checks} 問</div>
+      ${d ? `<div class="drill-saved"><b>▶️ 途中経過があります</b><div class="hint-small">${d.r}周目 ・ 残り${left(d)}問</div><div class="drill-btns"><button class="btn btn-primary" onclick="drillResume(${jsArg(cat)})">続きから</button><button class="btn btn-secondary" onclick="drillDiscard(${jsArg(cat)})">途中経過を消す</button></div></div>` : ''}
       ${drillAiOk() ? '' : '<div class="hint-small drill-ng" style="margin-top:6px;">⚠️ AI が使えないため、単語帳の訳と同じ言葉だけを正解にします（言い換えの判定・意味のまとめ・4択・解説・質問は使えません）。設定 → 🤖 AI でキーを入れると使えます。</div>'}
-      <button class="btn btn-start" style="margin-top:10px;" onclick="drillStart()" ${words + checks ? '' : 'disabled'}>🚀 開始</button>
-      <div class="hint-small" style="margin-top:8px;">・グループ（フォルダー）ごとに、単語の<b>全部の意味</b>を答えます（ほぼ同じ意味の訳は、どれか1つで OK）<br>・間違えたら、その場でもう一度出ます。グループの最後に、そのグループで間違えた単語と Check!（Review Test）<br>・1周目で間違えた問題を2周目で…と、全部〇になるまで続けます<br>・各周の1回目の答えだけ、いつものレベルに反映します</div>
+      <button class="btn btn-start" style="margin-top:10px;" onclick="drillStart()" ${words + checks ? '' : 'disabled'}>🚀 ${d ? '最初から始める' : '開始'}</button>
+      ${others.length ? `<div class="hint-small" style="margin-top:10px;">ほかのフォルダーの途中経過：</div><div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:4px;">${others.map(k => `<button class="chip" onclick="drillSetCategory(${jsArg(k)})">📁 ${dE(k || 'すべて')}（${all[k].r}周目・残り${left(all[k])}）</button>`).join('')}</div>` : ''}
+      <div class="hint-small" style="margin-top:8px;">・グループ（フォルダー）ごとに、単語の<b>全部の意味</b>を答えます（言い換えても意味が変わらない訳は、どれか1つで OK）<br>・間違えたら、その場でもう一度出ます。グループの最後に、そのグループで間違えた単語と Check!（Review Test）<br>・1周目で間違えた問題を2周目で…と、全部〇になるまで続けます<br>・正解・不正解の回数は、暗記テストだけで数えます（いつものレベル・成績とは別）</div>
     </div>`;
+  const sel = A.querySelector('select'); if (sel) sel.value = cat;
+}
+function drillDiscard(cat) {
+  if (!confirm('このフォルダーの途中経過を消しますか？')) return;
+  const all = drillLoadAll(); delete all[cat]; drillStoreAll(all); drillHome();
 }
 function drillStart() {
   if (!DG.length) return alert('この範囲に単語のカードがありません。');
-  DS = { cat: drillScopeCategory(), r: 1, gi: 0, miss: new Map(), gm: [], rv: false, hdr: null, ct: {}, sp: {}, rec: {} };
+  const cat = drillScopeCategory();
+  const all = drillLoadAll();
+  if (all[cat] && !confirm('このフォルダーの途中経過を消して、最初から始めますか？')) return;
+  DS = { cat, r: 1, gi: 0, miss: new Map(), gm: [], rv: false, hdr: null, ct: {}, sp: {}, rec: {} };
   DQ = []; drillSetActive(true); drillPop();
 }
 function drillSer(s) { return s.t === 'q' ? { t: 'q', id: s.it.id, retry: s.retry } : s.t === 'c' ? { t: 'c', key: s.ck.key, retry: s.retry } : s.t === 'msg' ? { t: 'msg', h: s.h } : { t: s.t, g: DG.indexOf(s.g) }; }
@@ -181,13 +205,17 @@ function drillDe(o) {
   return DG[o.g] ? { t: o.t, g: DG[o.g] } : null;
 }
 function drillSave() {
-  try { localStorage.setItem(DRILL_KEY, JSON.stringify({ cat: DS.cat, r: DS.r, gi: DS.gi, rv: DS.rv, gm: DS.gm.map(x => x.id), miss: [...DS.miss.values()].map(drillSer), ct: DS.ct, rec: DS.rec, Q: [dcur, ...DQ].filter(Boolean).map(drillSer), hg: DS.hdr ? DG.indexOf(DS.hdr) : -1 })); } catch (e) {}
+  if (!DS || DS.r === undefined) return;
+  const all = drillLoadAll();
+  all[DS.cat || ''] = { cat: DS.cat, r: DS.r, gi: DS.gi, rv: DS.rv, gm: DS.gm.map(x => x.id), miss: [...DS.miss.values()].map(drillSer), ct: DS.ct, rec: DS.rec, Q: [dcur, ...DQ].filter(Boolean).map(drillSer), hg: DS.hdr ? DG.indexOf(DS.hdr) : -1, at: Date.now() };
+  drillStoreAll(all);
 }
-function drillResume() {
+function drillResume(cat) {
   try {
-    const d = JSON.parse(localStorage.getItem(DRILL_KEY));
+    const d = drillLoadAll()[cat || ''];
+    if (!d) return drillHome();
     drillBuild(d.cat && categories.includes(d.cat) ? d.cat : '');
-    DS = { cat: d.cat, r: d.r, gi: d.gi, rv: d.rv, miss: new Map(), gm: (d.gm || []).map(i => DI[i]).filter(Boolean), hdr: d.hg >= 0 ? DG[d.hg] : null, ct: d.ct || {}, sp: {}, rec: d.rec || {} };
+    DS = { cat: d.cat || '', r: d.r, gi: d.gi, rv: d.rv, miss: new Map(), gm: (d.gm || []).map(i => DI[i]).filter(Boolean), hdr: d.hg >= 0 ? DG[d.hg] : null, ct: d.ct || {}, sp: {}, rec: d.rec || {} };
     (d.miss || []).map(drillDe).filter(Boolean).forEach(x => DS.miss.set(dKey(x), x));
     DQ = (d.Q || []).map(drillDe).filter(Boolean);
     drillSetActive(true); drillPop();
@@ -220,7 +248,7 @@ function drillEndRound() {
   const L = [...DS.miss.values()].sort((a, b) => dOrd(a) - dOrd(b));
   const A = document.getElementById('drillApp');
   if (!L.length) {
-    try { localStorage.removeItem(DRILL_KEY); } catch (e) {}
+    { const all = drillLoadAll(); delete all[DS.cat || '']; drillStoreAll(all); }
     drillSetActive(false);
     if (typeof planOnDrillPassed === 'function') planOnDrillPassed(DS.cat); // ★【0.03.27】週間プランの「単語」達成
     A.innerHTML = `<div class="card"><b>🎉 ${DS.r}周目で全問〇になりました</b><p>【合格】おめでとうございます。</p><button class="btn btn-secondary" onclick="drillHome()">戻る</button></div>`;
@@ -402,15 +430,18 @@ function drillCh(i) { if (dlock) return; i === dst.ci ? (dst.qi++, drillNq()) : 
 
 // ---------------- 結果 ----------------
 // 各周の1回目の答えだけ、いつものレベルに反映する
+// ★【0.03.29】正解・不正解の回数は、暗記テストだけで数える（いつものレベル・成績は動かさない）。各周の1回目の答えだけ
+// card.drillStats = { c: 正解, w: 不正解, at: 最後に答えた時刻 }（カードの成績と一緒に同期する）
 function drillRecord(card, ok) {
   const k = DS.r + ':' + card.id;
   if (DS.rec[k]) return; DS.rec[k] = 1;
-  const m = db.find(q => q.id === card.id); if (!m || typeof applySrsResult !== 'function') return;
-  const W = srsSpeedWeights((document.getElementById('selQuizSpeed') || {}).value || 'normal');
-  const list = typeof cardSenseList === 'function' ? cardSenseList(m) : null;
-  if (list && list.length && ensureSenseStats(m)) list.forEach((sn, i) => { if (m.senses[sn.key]) applySrsResult(m, sn.key, ok, { gain: W.up, loss: W.down, noCategory: i > 0 }); });
-  else applySrsResult(m, null, ok, { gain: W.up, loss: W.down });
-  if (typeof recordDailyLog === 'function') recordDailyLog(ok);
+  const m = db.find(q => q.id === card.id); if (!m) return;
+  const st = Object.assign({ c: 0, w: 0 }, m.drillStats || {});
+  if (ok) st.c++; else st.w++;
+  st.at = Date.now();
+  m.drillStats = st;
+  touchStats(m); saveData();
+  if (typeof recordDailyLog === 'function') recordDailyLog(ok); // 学習した記録（ヒートマップ・催促）には入れる
 }
 async function drillFin(ok, ans, tip) {
   if (dst.fl) return; dst.fl = 1;
@@ -433,11 +464,16 @@ async function drillFin(ok, ans, tip) {
   dst.ph = 9;
   if (drillTtsOn()) drillSpeakA();
   dst.res = `<div class="card ${ok ? 'drill-ok-card' : 'drill-ng-card'}">${c.it ? `<div class="drill-word">${dE(c.it.w)}</div>` : `<p class="drill-q">${dE(c.ck.q)}</p>`}
-    <p>【判定】 <b class="${ok ? 'drill-ok' : 'drill-ng'}">${ok ? '〇' : '×'}</b>${!ok ? '<span class="hint-small">（あとでもう一度出ます）</span>' : ''}</p>
+    <p>【判定】 <b class="${ok ? 'drill-ok' : 'drill-ng'}">${ok ? '〇' : '×'}</b>${!ok ? '<span class="hint-small">（あとでもう一度出ます）</span>' : ''}${drillStatsText(c)}</p>
     <div>【公式の答え】 <button class="chip" onclick="drillSpeakA()" title="答えを読み上げる">🔊</button> ${official}</div>
     ${ns.length ? `<p>【解説・注意点】<br>${ns.map(dE).join('<br>')}</p>` : ''}
     <div class="drill-btns"><button class="btn btn-primary" onclick="drillPop()">次</button>${drillAiOk() ? '<button class="btn btn-secondary" onclick="drillQo()">💬 質問する</button>' : ''}</div></div>`;
   drillSave(); drillDraw();
+}
+function drillStatsText(c) {
+  const m = db.find(q => q.id === (c.it ? c.it.card.id : c.ck.card.id));
+  const st = m && m.drillStats;
+  return st ? ` <span class="hint-small">（暗記テスト通算 〇${st.c} ×${st.w}）</span>` : '';
 }
 // AI に質問する
 function drillQaHTML() {

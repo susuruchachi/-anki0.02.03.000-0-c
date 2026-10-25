@@ -207,7 +207,8 @@ function buildBoxCard(item) {
 
     const lvlStr = item.level === -1 ? 'しっかり' : 'LV '+item.level;
     const noHTML = (item.no ? `<span class="card-no">No.${Number(item.no)}</span>` : '') + (item.stars ? `<span class="card-stars">${starsText(item.stars)}</span>` : '');
-    const badgeHTML = `<span class="badge ${isGrad ? 'badge-grad':'badge-level'}">${isGrad ? 'GRADUATE' : lvlStr}</span>`;
+    const badgeHTML = `<span class="badge ${isGrad ? 'badge-grad':'badge-level'}">${isGrad ? 'GRADUATE' : lvlStr}</span>`
+      + (item.drillStats ? `<span class="badge badge-level" style="margin-left:4px;" title="暗記テストの正解・不正解">🧠 〇${Number(item.drillStats.c) || 0} ×${Number(item.drillStats.w) || 0}</span>` : ''); // ★【0.03.29】
     // ★【0.03.17】意味ごとのレベル
     const senseList = cardSenseList(item);
     let _senseView = null;

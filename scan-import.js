@@ -165,7 +165,7 @@ function scanSplitEntries() {
   const format = (document.getElementById('selScanFormat') || {}).value || 'auto';
   const parsed = parseVocabText(raw, format);
   if (parsed.length === 0) { alert('カード候補が見つかりませんでした。\n・1行1語なら「見出し語（タブかカンマ）答え」の形にしてください\n・単語帳形式なら「247 complete …」のように行頭に見出し語番号が必要です'); return; }
-  scanImportEntries = parsed.map((p, i) => ({ id: 'tmp_' + i + '_' + Date.now(), question: p.question, answer: p.answer }));
+  scanImportEntries = parsed.map((p, i) => ({ id: 'tmp_' + i + '_' + Date.now(), question: p.question, answer: p.answer, note: p.note || '', stars: p.stars || 0 }));
   renderScanReviewList();
   document.getElementById('scanRawArea').style.display = 'none';
   document.getElementById('scanReviewArea').style.display = 'block';
@@ -206,6 +206,12 @@ function renderScanReviewList() {
 
     card.appendChild(qInput);
     card.appendChild(aTextarea);
+    // ★【0.03.29】メモと星（AI の読み取り・タブ区切りの3・4列目）
+    if (entry.note || entry.stars) {
+      const extra = document.createElement('div'); extra.className = 'hint-small'; extra.style.margin = '4px 0';
+      extra.textContent = (entry.stars ? '★'.repeat(entry.stars) + '　' : '') + (entry.note ? '📝 ' + entry.note : '');
+      card.appendChild(extra);
+    }
     card.appendChild(tagRow);
     card.appendChild(delBtn);
     container.appendChild(card);
@@ -230,6 +236,7 @@ async function submitScanImport() {
     if (!q || !a) return;
     const newCard = { id: newCardId(), question: q, answer: a, category: scanImportTargetCategory, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 };
     if (entry.note) newCard.note = entry.note;
+    if (entry.stars) newCard.stars = entry.stars;
     touchCard(newCard);
     if (targetSharedDocId) newCard.sharedDocId = targetSharedDocId;
     db.push(newCard); addedCards.push(newCard); count++;

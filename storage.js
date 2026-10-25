@@ -43,7 +43,7 @@ const DEVICE_ID = (() => {
 })();
 
 const CARD_CONTENT_FIELDS = ['question', 'answer', 'category', 'note', 'questionImage', 'answerImage', 'choices', 'kind', 'sharedDocId', 'no'];
-const CARD_STAT_FIELDS = ['level', 'correct', 'incorrect', 'streak', 'wrongStreak', 'shikkariStreak', 'level5Correct', 'senses'];
+const CARD_STAT_FIELDS = ['level', 'correct', 'incorrect', 'streak', 'wrongStreak', 'shikkariStreak', 'level5Correct', 'senses', 'drillStats']; // drillStats：暗記テストだけの正解・不正解
 
 // ★【0.03.17】意味（品詞タグ）ごとの成績
 //  答えが「(他動詞)…/(自動詞)…」のように2つ以上の意味に分かれているカードは、意味ごとに成績（レベル・正誤数・連続記録）を持つ。
@@ -665,7 +665,7 @@ function autoMerge(skipSave = false) {
       String(a.id).localeCompare(String(b.id)));
     const keep = Object.assign({}, sorted[0]);
     sorted.slice(1).forEach(dup => {
-      CARD_STAT_FIELDS.forEach(f => { if (f === 'senses') { if (!keep.senses && dup.senses) keep.senses = dup.senses; return; } keep[f] = Math.max(Number(keep[f]) || 0, Number(dup[f]) || 0); });
+      CARD_STAT_FIELDS.forEach(f => { if (f === 'senses' || f === 'drillStats') { if (!keep[f] && dup[f]) keep[f] = dup[f]; return; } keep[f] = Math.max(Number(keep[f]) || 0, Number(dup[f]) || 0); });
       if (!keep.note && dup.note) keep.note = dup.note;
       if (!keep.choices && dup.choices) keep.choices = dup.choices;
       if (!keep.kind && dup.kind) keep.kind = dup.kind;

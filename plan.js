@@ -114,8 +114,7 @@ function planLeftText(deadline, now = new Date()) {
 
 // ---------------- 始める ----------------
 function planStartWords(cat) {
-  selectedScopePath = getCategoryPath(cat);
-  try { if (typeof saveScopePath === 'function') saveScopePath(); } catch (e) {}
+  try { localStorage.setItem('susuru_anki_drill_cat', cat); } catch (e) {} // 暗記タブの出題範囲をその週の範囲に
   openPage('pgDrill');
 }
 function planStartQuizFor(key) {

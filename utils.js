@@ -402,11 +402,23 @@ function parseDelimitedVocab(rawText) {
   String(rawText || '').split(/\r?\n/).forEach(line => {
     const l = line.trim();
     if (!l || /^```/.test(l)) return;
-    let idx = l.indexOf('\t');
-    if (idx === -1) idx = l.indexOf(',');
+    const unq = s => String(s || '').trim().replace(/^"|"$/g, '');
+    // ★【0.03.29】タブ区切りは「見出し語・答え・メモ・星」（メモ・星はなくてもよい）
+    if (l.includes('\t')) {
+      const cols = l.split('\t').map(unq);
+      const qs = splitQuestionStars(cols[0]);
+      const q = qs.q, a = cols[1] || '';
+      if (!q || !a || q === '問題' || q === '見出し語') return;
+      const e = { question: q, answer: a };
+      if (cols[2]) e.note = cols[2];
+      const st = cols[3] ? parseStars(cols[3]) : qs.stars;
+      if (st) e.stars = st;
+      entries.push(e);
+      return;
+    }
+    const idx = l.indexOf(',');
     if (idx === -1) return;
-    const q = l.slice(0, idx).trim().replace(/^"|"$/g, '');
-    const a = l.slice(idx + 1).trim().replace(/^"|"$/g, '');
+    const q = unq(l.slice(0, idx)), a = unq(l.slice(idx + 1));
     if (!q || !a || (q === '問題' || q === '見出し語')) return;
     entries.push({ question: q, answer: a });
   });
@@ -429,7 +441,8 @@ const VOCAB_AI_PROMPT = [
   '添付した単語帳のページを、暗記アプリ「すするanki」に取り込める形式に変換してください。',
   '',
   '【出力形式】',
-  '・1行に1語、「見出し語<TAB>答え」のタブ区切り。変換結果だけをコードブロックで出力してください。',
+  '・1行に1語、「見出し語<TAB>答え<TAB>メモ<TAB>星」のタブ区切り。メモ・星が無いときは空にする（タブは残してよい）。',
+  '・変換結果だけをコードブロックで出力し、説明や見出し・表は書かない。ページの全部の語を、ページに載っている順に出す（途中で省略しない）。',
   '',
   '【答えの書き方】',
   '・品詞ごとに「(品詞)訳語」と書く。品詞は 名詞／動詞／他動詞／自動詞／形容詞／副詞／前置詞／接続詞／熟語 のどれか。',
@@ -437,8 +450,25 @@ const VOCAB_AI_PROMPT = [
   '　例: reason<TAB>(名詞①)理由　根拠/(名詞②)理性/(自動詞)論理的に考える',
   '・同じ意味の言い換えは全角スペースで区切る。　例: rational<TAB>(形容詞)合理的な　理性的な',
   '・「（～を）」のような補足は全角カッコで書く。答えの中で半角「/」は区切り以外に使わない（必要なら全角「／」）。',
+  '・答えには訳語だけを書く。発音記号・例文・語源・解説は答えに入れない。',
   '・番号の無い派生語も1語として含める。◆の熟語・成句は、その英語表現を見出し語にして「(熟語)訳」で1行にする。',
-  '・例文（▶）、解説（★）、他ページ参照（→p.○○）の語、Check!、Review Test は含めない。'
+  '',
+  '【メモ（3列目）】',
+  '・覚えるのに役立つ短い補足だけ（80字以内）：語源、注意点、変化形（arise – arose – arisen）、派生語の関係など。',
+  '・同意語・反意語が載っていれば「= 同意語」「↔ 反意語」の形で書く（例：↔ implicit）。複数あれば「、」で区切る。',
+  '・メモの中でもタブ・改行は使わない。',
+  '',
+  '【星（4列目）】',
+  '・見出し語に重要度・頻出度の★が付いていれば、その数を半角数字で（★★ なら 2）。無ければ空。最大3。',
+  '',
+  '【含めないもの】',
+  '・例文（▶）、他ページ参照（→p.○○）の語、Check!、Review Test、章・グループの見出し。',
+  '・同意語・反意語として（= …）（↔ …）で挙がっているだけの語は、見出し語にしない（メモに書く）。',
+  '',
+  '【例】',
+  'emerge<TAB>(自動詞)現れる　出現する<TAB>水中・暗闇からぬっと出てくるイメージ。emergency（緊急事態）に注意<TAB>2',
+  'explicit<TAB>(形容詞)明白な　明確な<TAB>↔ implicit<TAB>1',
+  'derive<TAB>(自動詞)（～に）由来する/(他動詞)（…から）～を引き出す<TAB><TAB>3'
 ].join('\n');
 
 // テキストエリア/inputのカーソル位置に文字列を挿入する（品詞タグのワンタップ挿入用）
