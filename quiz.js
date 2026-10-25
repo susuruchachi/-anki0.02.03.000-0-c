@@ -489,7 +489,7 @@ function loadQuizQuestion() {
   // ★【0.03.15】AI ヒント（ヒントがオンで、AI が使えるとき）
   const aiHintBtn = document.getElementById('btnQuizAiHint');
   if (aiHintBtn) {
-    const showAi = hintsOn && !window.currentOnlineMatch && typeof aiAvailable === 'function' && aiAvailable() && getAiPrefs().hint && !richAnswer;
+    const showAi = hintsOn && !window.currentOnlineMatch && typeof aiAvailable === 'function' && aiAvailable() && getAiPrefs().hint && !richAnswer && !isBinaryCard(cur);
     aiHintBtn.style.display = showAi ? 'inline-flex' : 'none'; aiHintBtn.disabled = false; aiHintBtn.innerText = '🤖 AIヒント';
   }
   const autoHintAt = speed === 'easy' ? [0.15, 0.35, 0.6] : [0.25, 0.55, 0.8];
@@ -552,6 +552,15 @@ function maskAnswerInText(text, answer) {
   });
   return out;
 }
+// ★【0.03.23】もともと選択肢から選ぶ問題（Same/Opposite・Yes/No・選択肢つきのテスト）。
+//  記述式で出しても、頭文字や文字数のヒントは答えそのものになるので出さない
+const BINARY_ANSWER_RE = /^(yes|no|true|false|same|opposite|similar|different|correct|incorrect|right|wrong|t|f|○|×|〇|✕|はい|いいえ|正しい|誤り|正|誤|同じ|反対|同意|反意|同義|反義)$/i;
+function isChoiceCard(cur) { return !!cur && Array.isArray(cur.choices) && cur.choices.length >= 2; }
+function isBinaryCard(cur) {
+  if (!cur) return false;
+  if (Array.isArray(cur.choices) && cur.choices.length === 2) return true;
+  return BINARY_ANSWER_RE.test(String(cur.answer || '').trim());
+}
 function buildHintStages(cur, mode, structured, richAnswer) {
   const stages = [];
   const note = String(cur.note || '').trim();
@@ -560,11 +569,11 @@ function buildHintStages(cur, mode, structured, richAnswer) {
   const hidden = noteHidingApplies(cur.category) ? hideNoteTranslations(note, isLatinAnswer(getPrimaryAnswer(cur.answer))) : note;
   if (note) stages.push({ memo: true, html: '📝 ' + escapeHtml(maskAnswerInText(hidden, cur.answer)).replace(/\n/g, '<br>') });
   // ★【0.03.18】何度も必要になった AI のヒント（この端末に覚えたもの）
-  if (typeof aiMemoryHintsFor === 'function' && !window.currentOnlineMatch) {
+  if (typeof aiMemoryHintsFor === 'function' && !window.currentOnlineMatch && !isBinaryCard(cur)) {
     const mh = aiMemoryHintsFor(cur, 2);
     if (mh.length) stages.push({ ai: true, html: mh.map(it => '🤖 ' + escapeHtml(it.h)).join('<br>') });
   }
-  if (richAnswer || mode !== 'desc') return { stages, shown: 0 };
+  if (richAnswer || mode !== 'desc' || isChoiceCard(cur) || isBinaryCard(cur)) return { stages, shown: 0 };
   if (structured) {
     stages.push({ structured: structured.map(seg => seg.text.charAt(0)) });
   } else {
@@ -980,7 +989,7 @@ function submitQuizAction() {
   // 意味ごとの問題は、全角スペース・読点で区切った言い換えのどれか1つで正解
   const ok = (cur._senseKey && !cur._swapped) ? isStructuredSegmentCorrect(given, cur.answer) : isAnswerCorrect(given, cur.answer);
   // ★【0.03.15】完全一致しなくても、意味が同じなら正解にする（AI に確かめる）
-  if (!ok && given.trim() && aiJudgeEnabled()) {
+  if (!ok && given.trim() && aiJudgeEnabled() && !isChoiceCard(cur) && !isBinaryCard(cur)) { // 選択肢から選ぶ問題は、言い換えを認めない
     aiJudgeItems(cur, [{ label: cur._senseLabel && !cur._swapped ? cur._senseLabel : '', expected: cur.answer, given }]).then(r => {
       if (quizPool[quizIndex] !== cur || quizPhase === 'a' || !document.getElementById('pgQuizPlayer').classList.contains('active')) return;
       const allOk = !!(r && r.results && r.results.length && r.results.every(x => x.correct));
@@ -1004,7 +1013,8 @@ let _focus = { attempts: 0 };
 let _focusBusy = false;
 function focusEnabled(cur) {
   const el = document.getElementById('chkFocusMode');
-  return !!(el && el.checked) && !window.currentOnlineMatch && ['desc', 'choice'].includes(currentRoundMode) && !(cur && cur.kind === 'self');
+  // 2択の問題は、間違えたらもう片方が答えなので、答え直しはしない
+  return !!(el && el.checked) && !window.currentOnlineMatch && ['desc', 'choice'].includes(currentRoundMode) && !(cur && cur.kind === 'self') && !isBinaryCard(cur);
 }
 function aiVerdictKind(r) {
   if (!r || !r.results) return 'wrong';
@@ -1110,7 +1120,7 @@ function askOtherMeanings(cur, mt, again) {
   const timerText = document.getElementById('lblQuizTimerText'); if (timerText) timerText.innerText = '🔁';
   // 文字のヒントは、まだ答えていない意味のものにする
   const hs = quizHintState;
-  if (hs && hs.stages && hs.stages.length && currentRoundMode === 'desc') {
+  if (hs && hs.stages && hs.stages.some(x => !x.memo && !x.ai) && currentRoundMode === 'desc') {
     const restText = mt.meanings.find((m, i) => !_multi.found.includes(i)) || '';
     const keep = hs.stages.filter(x => x.memo || x.ai);
     const shownKeep = Math.min(hs.shown, keep.length);

@@ -297,7 +297,7 @@ async function aiJudgeAnswers(question, items, note) {
     const v = String(r.verdict || '').toLowerCase();
     const verdict = /correct/.test(v) ? 'correct' : /partial/.test(v) ? 'partial' : (r.correct === true || r.correct === 'true') && !v ? 'correct' : 'wrong';
     const issue = verdict === 'correct' ? '' : (String(r.issue || '').match(/spelling|pos|meaning/) || [''])[0];
-    return { verdict, correct: verdict === 'correct', issue, reason: cleanAiHintText(r.reason), hint: cleanAiHintText(r.hint) };
+    return { verdict, correct: verdict === 'correct', issue, reason: cleanAiHintText(r.reason), hint: stripLetterLeaks(cleanAiHintText(r.hint)) };
   });
   if (results.length !== items.length) throw new Error('判定の数が合いません');
   // ★【0.03.22】英語の答えで、正解と1〜2文字だけ違うものはスペルミス（AI が甘く判定しても不正解にする）
@@ -324,19 +324,32 @@ const AI_HINT_SYSTEM = [
   ...AI_HINT_RULES,
   '出力は手がかりの文だけ。'
 ].join('\n');
+const AI_HINT_VER = 2; // ★【0.03.23】ヒントの作り方を変えたら上げる（前の作り方で保存したヒントは作り直す）
 async function aiHintFor(card) {
   const cache = loadAiHintCache();
   const sig = String(card.answer || '').slice(0, 60);
   const c = cache[card.id];
-  if (c && c.a === sig) return c.h;
+  if (c && c.a === sig && c.v === AI_HINT_VER && c.h) return c.h;
   const lines = [`問題（解答者に見えている）：${card.question}`, `正解（解答者が思い出したいもの。書いてはいけない）：${card.answer}`];
   if (card.note) lines.push(`メモ：${String(card.note).slice(0, 300)}`);
-  let h = (await aiRequest(AI_HINT_SYSTEM, [{ text: lines.join('\n') }], { maxTokens: 200, timeout: 12000, totalTimeout: 20000 })).trim();
-  h = cleanAiHintText(h);
+  let h = '';
+  for (let tries = 0; tries < 2 && !h; tries++) {
+    if (tries) lines.push('注意：頭文字・最初の文字・文字数・つづりに触れるヒントは使えません。意味・使われる場面・例文で手がかりを出してください。');
+    h = (await aiRequest(AI_HINT_SYSTEM, [{ text: lines.join('\n') }], { maxTokens: 200, timeout: 12000, totalTimeout: 20000 })).trim();
+    h = stripLetterLeaks(cleanAiHintText(h));
+  }
+  if (!h) throw new Error('ヒントを作れませんでした。もう一度押してください');
   if (typeof maskAnswerInText === 'function') h = maskAnswerInText(h, card.answer); // 念のため答えを伏せる
-  cache[card.id] = { h, a: sig, t: Date.now() };
+  cache[card.id] = { h, a: sig, v: AI_HINT_VER, t: Date.now() };
   saveAiHintCache(cache);
   return h;
+}
+// ★【0.03.23】頭文字・文字数・つづりに触れる文を取り除く（「eから始まる英単語」など。AI が決まりを破ることがあるため）
+const LETTER_LEAK_RE = /頭文字|イニシャル|先頭の?(文字|字|アルファベット)|最初の(一?文字|字|アルファベット|音)|(最後|末尾)の(一?文字|字)|[「『"'“]?[A-Za-zＡ-Ｚａ-ｚ][」』"'”]?\s*(から|で)(始|はじ)ま|(から|で)(始|はじ)まる|[0-9０-９一二三四五六七八九十]+\s*文字|[0-9０-９]+\s*字(の|で|から|だ|です)|(つづり|綴り|スペル)(は|が|を)/;
+function stripLetterLeaks(h) {
+  let t = String(h || '').replace(/[（(][^（）()]*[）)]/g, m => LETTER_LEAK_RE.test(m) ? '' : m);
+  t = t.split(/(?<=[。！？!?\n])/).filter(x => !LETTER_LEAK_RE.test(x)).join('').trim();
+  return t.replace(/^[、，,\s]+/, '');
 }
 // AI の文の後ろに付くことがある「（40字）」や、全体を囲むかぎかっこを外す
 function cleanAiHintText(h) {
@@ -361,7 +374,7 @@ async function aiExplainMistake(card, given) {
   const lines = [`問題：${card.question}`, `正解：${card.answer}`, `解答者の答え：${given || '（答えられなかった）'}`];
   if (card.note) lines.push(`メモ：${String(card.note).slice(0, 300)}`);
   const j = parseAiJson(await aiRequest(AI_EXPLAIN_SYSTEM, [{ text: lines.join('\n') }], { json: true, maxTokens: 300, timeout: 12000, totalTimeout: 20000 }));
-  return { explain: cleanAiHintText(j.explain), tip: cleanAiHintText(j.tip), hint: cleanAiHintText(j.hint), model: _aiLastModel };
+  return { explain: cleanAiHintText(j.explain), tip: cleanAiHintText(j.tip), hint: stripLetterLeaks(cleanAiHintText(j.hint)), model: _aiLastModel };
 }
 
 // ================================================================
@@ -400,6 +413,8 @@ function recallAiHint(cur, kind, given) {
   if (!e || e.a !== String(cur.answer || '').slice(0, 80)) return null;
   const it = findAiMemItem(e, kind, given);
   if (!it || !it.h) return null;
+  it.h = stripLetterLeaks(it.h); // 前に覚えたヒントも、頭文字などに触れる文は取り除く
+  if (!it.h) { e.items = e.items.filter(x => x !== it); saveAiMemory(mem); return null; }
   it.n = (it.n || 1) + 1; it.t = Date.now(); e.t = Date.now();
   saveAiMemory(mem);
   return it.h;
@@ -407,7 +422,8 @@ function recallAiHint(cur, kind, given) {
 // AI が出したヒントを覚える
 function rememberAiHint(cur, kind, given, hint) {
   if (!hint) return;
-  let h = String(hint).trim();
+  let h = stripLetterLeaks(String(hint).trim());
+  if (!h) return;
   if (typeof maskAnswerInText === 'function') h = maskAnswerInText(h, cur.answer); // 念のため答えを伏せる
   const mem = loadAiMemory();
   const e = aiMemEntry(mem, cur);
@@ -423,7 +439,7 @@ function rememberAiHint(cur, kind, given, hint) {
 function aiMemoryHintsFor(cur, minCount = 2) {
   const e = loadAiMemory()[aiMemKey(cur)];
   if (!e || e.a !== String(cur.answer || '').slice(0, 80)) return [];
-  return e.items.filter(it => it.h && (it.n || 1) >= minCount).slice(0, 2);
+  return e.items.map(it => Object.assign({}, it, { h: stripLetterLeaks(it.h) })).filter(it => it.h && (it.n || 1) >= minCount).slice(0, 2);
 }
 // 重点モード：間違えた（または答えられなかった）ときの、答え直すためのヒント
 async function aiRetryHint(cur, kind, given) {
