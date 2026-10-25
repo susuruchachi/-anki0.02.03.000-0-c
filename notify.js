@@ -278,3 +278,60 @@ function renderNotifySettings() {
     ${perm === 'granted' ? '<button class="btn btn-secondary" style="margin-top:8px;" onclick="sendTestNotification()">🔔 テスト通知を送る</button>' : ''}
   `;
 }
+
+// ================================================================
+// ★【0.03.31】アップデートの確認（アプリを開いている間）
+// 新しいバージョンが公開されたら、画面の上に「再読み込みしますか？」を出す。
+// アプリを裏に回しているときは通知でも知らせる（同じバージョンは1回だけ）
+// ================================================================
+const UPDATE_CHECK_MS = 3 * 60 * 1000;
+let _updateFound = null, _updateDismissed = null, _updateTimer = null;
+function versionNewer(a, b) {
+  const pa = String(a).split('.').map(Number), pb = String(b).split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) { const x = pa[i] || 0, y = pb[i] || 0; if (x !== y) return x > y; }
+  return false;
+}
+async function checkForAppUpdate() {
+  if (typeof APP_VERSION === 'undefined' || navigator.onLine === false) return;
+  try {
+    const txt = await (await fetch('./version-info.js?t=' + Date.now(), { cache: 'no-store' })).text();
+    const v = (txt.match(/APP_VERSION\s*=\s*["']([^"']+)["']/) || [])[1];
+    if (!v || !versionNewer(v, APP_VERSION)) return;
+    if (_updateFound && _updateFound.version === v) { showUpdateBar(); return; }
+    let title = '';
+    try { const rn = await (await fetch('./release-notes.js?t=' + Date.now(), { cache: 'no-store' })).text(); const m = rn.match(new RegExp(`version:\\s*'${v.replace(/\./g, '\\.')}'[\\s\\S]*?title:\\s*'([^']*)'`)); if (m) title = m[1]; } catch (e) {}
+    _updateFound = { version: v, title };
+    showUpdateBar();
+    // 裏にいるときは通知でも（プッシュ通知・バックグラウンド確認と同じバージョンを二重に出さない）
+    const notified = typeof notifyKvGet === 'function' ? await notifyKvGet('notifiedVersion') : null;
+    if (notified !== v && document.visibilityState !== 'visible' && getNotifyPrefs().updates && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      if (typeof notifyKvSet === 'function') notifyKvSet('notifiedVersion', v);
+      showLocalNotification(`🆕 すするanki v${v} が出ました`, (title ? title + '。' : '') + '開いて「再読み込み」すると新しいバージョンになります', 'update');
+    }
+  } catch (e) { /* オフラインなど */ }
+}
+function showUpdateBar() {
+  if (!_updateFound || _updateDismissed === _updateFound.version) return;
+  let bar = document.getElementById('updateBar');
+  if (!bar) { bar = document.createElement('div'); bar.id = 'updateBar'; bar.className = 'update-bar'; document.body.appendChild(bar); }
+  const busy = document.body.classList.contains('in-quiz') || (typeof _drillActive !== 'undefined' && _drillActive);
+  bar.innerHTML = `<div style="flex:1; min-width:0;"><b>🆕 新しいバージョン v${escapeHtml(_updateFound.version)} があります</b>
+      <div class="hint-small">${_updateFound.title ? escapeHtml(_updateFound.title) + '。' : ''}再読み込みすると新しくなります${busy ? '（クイズ中の問題は最初からになります。暗記テストの途中経過は保存されます）' : ''}</div></div>
+    <div style="display:flex; gap:6px; flex-shrink:0;"><button class="btn btn-primary" style="width:auto; padding:6px 12px;" onclick="applyAppUpdate()">🔄 再読み込み</button><button class="btn btn-secondary" style="width:auto; padding:6px 10px;" onclick="dismissUpdateBar()">あとで</button></div>`;
+  bar.style.display = 'flex';
+}
+function dismissUpdateBar() { if (_updateFound) _updateDismissed = _updateFound.version; const bar = document.getElementById('updateBar'); if (bar) bar.style.display = 'none'; }
+async function applyAppUpdate() {
+  try { if (typeof drillSave === 'function' && typeof _drillActive !== 'undefined' && _drillActive) drillSave(); } catch (e) {}
+  try { if (typeof flushPendingSaves === 'function') flushPendingSaves(); } catch (e) {}
+  try { if (_swReg) await _swReg.update(); } catch (e) {}
+  setTimeout(() => location.reload(), 300);
+}
+function startUpdateWatch() {
+  clearInterval(_updateTimer);
+  _updateTimer = setInterval(checkForAppUpdate, UPDATE_CHECK_MS);
+  setTimeout(checkForAppUpdate, 15000);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { checkForAppUpdate(); showUpdateBar(); } });
+  window.addEventListener('online', checkForAppUpdate);
+}
+startUpdateWatch();

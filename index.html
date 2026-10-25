@@ -187,6 +187,7 @@ b.drill-ng { font-size: 1.3rem; }
 .app-toast.show { opacity: 1; transform: translate(-50%, 0); }
 .card-stars { color: #f5b301; font-size: 0.75rem; margin-left: 4px; letter-spacing: -1px; }
 .drill-saved { margin-top: 10px; padding: 10px; border-radius: 10px; border: 1px solid var(--primary); background: rgba(79,124,255,0.08); }
+.update-bar { position: fixed; top: calc(8px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); z-index: 9998; width: min(560px, calc(100vw - 16px)); display: none; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; background: var(--bg2); color: var(--text); border: 1px solid var(--primary); box-shadow: 0 6px 24px rgba(0,0,0,.35); font-size: 0.85rem; }
 .plan-task { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-top: 8px; background: var(--bg3); }
 .plan-task.done { opacity: .65; }
 .plan-task.overdue { border-color: var(--danger); background: rgba(255,79,106,0.08); }
