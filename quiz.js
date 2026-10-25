@@ -1010,6 +1010,9 @@ function aiVerdictKind(r) {
   if (!r || !r.results) return 'wrong';
   return r.results.some(x => x.verdict === 'wrong') ? 'wrong' : r.results.some(x => x.verdict === 'partial') ? 'partial' : 'wrong';
 }
+// ★【0.03.22】AI が見つけた誤りの種類（スペルミス・品詞の誤り）
+function aiIssueOf(r) { const x = r && r.results && r.results.find(y => !y.correct && (y.issue === 'spelling' || y.issue === 'pos')); return x ? x.issue : ''; }
+const AI_ISSUE_LABEL = { spelling: '✏️ スペルミス・誤字', pos: '🏷️ 品詞の誤り' };
 function aiFirstHint(r) { const x = r && r.results && r.results.find(y => !y.correct && y.hint); return x ? x.hint : ''; }
 
 // 1回の解答の結果を決める（重点モードなら、間違いのときは答え直しへ）
@@ -1026,7 +1029,8 @@ function concludeAttempt(cur, ok, info) {
     if (attempt === 2) { quizHintState.aiUsed = true; return evaluateRoundAnswer(true, '🎯 ヒントのあとで正解', opts); }
     return evaluateRoundAnswer(false, `△ ヒント${attempt - 1}回のあとで正解（不正解寄りとして記録）`, Object.assign(opts, { softWrong: true, focusLate: true }));
   }
-  evaluateRoundAnswer(false, info.kind === 'partial' ? '△ 解答不足' : (attempt > 1 ? `❌ 不正解（ヒント${attempt - 1}回）` : '❌ 不正解'), opts);
+  const issue = aiIssueOf(info.ai);
+  evaluateRoundAnswer(false, issue ? `❌ ${AI_ISSUE_LABEL[issue]}` + (attempt > 1 ? `（ヒント${attempt - 1}回）` : '') : info.kind === 'partial' ? '△ 解答不足' : (attempt > 1 ? `❌ 不正解（ヒント${attempt - 1}回）` : '❌ 不正解'), opts);
 }
 
 // ================================================================
@@ -1157,7 +1161,8 @@ async function startFocusRetry(cur, info) {
     while (st.shown < st.stages.length && st.stages[st.shown].ai && st.stages[st.shown].html.split('<br>').every(h => shownText.includes(h.replace(/^\S+\s/, '').replace(/&[a-z]+;/g, '')))) st.shown++;
     if (st.shown < st.stages.length) showNextHint();
   }
-  const label = { blank: '答えが空欄です', partial: '足りない部分があります', wrong: '違います' }[kind] || '違います';
+  const issue = aiIssueOf(info.ai);
+  const label = issue === 'spelling' ? 'つづり・字が違います' : issue === 'pos' ? '品詞が違います' : ({ blank: '答えが空欄です', partial: '足りない部分があります', wrong: '違います' }[kind] || '違います');
   const st = document.getElementById('lblFocusStatus');
   if (st) { st.style.display = 'block'; st.classList.remove('multi'); st.textContent = `🔁 ${label}。ヒントを見て、もう一度答えてください（あと${FOCUS_MAX_RETRY - _focus.attempts + 1}回）`; }
   // 答え直せるようにする（制限時間は止めたまま）

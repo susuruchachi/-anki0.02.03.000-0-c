@@ -245,16 +245,45 @@ function parseAiJson(text) {
   return JSON.parse(s.slice(a, b + 1));
 }
 
+// ---------------- スペルミスの見分け ----------------
+// 何文字直せば同じになるか（となり合う2文字の入れ替え＝recieve なども1回と数える）
+function editDistance(a, b) {
+  const m = a.length, n = b.length;
+  const d = Array.from({ length: m + 1 }, (_, i) => { const r = new Array(n + 1).fill(0); r[0] = i; return r; });
+  for (let j = 0; j <= n; j++) d[0][j] = j;
+  for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++) {
+    d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+  }
+  return d[m][n];
+}
+// イギリス式・アメリカ式のつづりの違いはそろえる
+function usUkFold(w) { return w.replace(/our(s?)$/, 'or$1').replace(/our(?=[a-z])/g, 'or').replace(/([^aeiou])re(s?)$/, '$1er$2').replace(/is(e|es|ed|ing|ation|ations)$/, 'iz$1').replace(/ll(ed|ing|er)$/, 'l$1').replace(/ogue$/, 'og'); }
+// 英語の答えが、正解の英語のどれかと1〜2文字だけ違うとき、その正解を返す（同じなら null）
+function englishSpellingSlip(given, expected) {
+  const g = String(given || '').toLowerCase().replace(/[^a-z' -]/g, '').replace(/\s+/g, ' ').trim();
+  if (!g || !/^[a-z' -]+$/.test(g) || g.length < 3) return null;
+  const words = String(expected || '').split(/[\/|、,，;；\u3000]+/).map(w => w.replace(/\([^()]*\)|（[^（）]*）|[\[\]［］～〜~…]/g, ' ').toLowerCase().replace(/[^a-z' -]/g, '').replace(/\s+/g, ' ').trim()).filter(w => w.length >= 3);
+  if (!words.length || words.includes(g) || words.some(w => usUkFold(w) === usUkFold(g))) return null;
+  for (const w of words) {
+    const d = editDistance(g, w);
+    if (d > 0 && d <= (w.length >= 8 ? 2 : 1)) return w;
+  }
+  return null;
+}
+
 // ---------------- 用途別 ----------------
 const AI_JUDGE_SYSTEM = [
   'あなたは暗記カードの採点係です。問題・正解・解答者の答えを見て、解答者の答えが「正解と同じ意味で、内容として間違っていないか」を判定します。',
-  '・表記の違い（漢字/かな、送り仮名、全角/半角、句読点、語順の小さな違い）、言い換え、同義語は正解。',
-  '・英単語や熟語の和訳では、辞書で同じ意味として載っている訳語なら正解。品詞が変わっても意味が同じなら正解（例：「理由」と「根拠」）。',
+  '・表記の違い（ひらがな/カタカナ/漢字の書き分け、送り仮名、全角/半角、大文字/小文字、句読点、語順の小さな違い）、言い換え、同義語は正解。',
+  '・英単語や熟語の和訳では、辞書で同じ意味として載っている、品詞が同じ訳語なら正解（例：「理由」と「根拠」はどちらも名詞なので正解）。',
+  '・つづり・字の誤りは厳しく不正解（issue は "spelling"）：英語のスペルミス（1文字の違い・抜け・入れ替えも。例：receive に recieve、necessary に neccesary）、漢字の誤字（例：感情 に 感状、専門 に 専問）。イギリス式とアメリカ式のつづりの違い（colour/color、centre/center）は誤りではない。',
+  '・品詞の誤りも厳しく不正解（issue は "pos"）：正解が動詞なのに名詞で答えた（「を放棄する」に「放棄」、decide に decision）、形容詞なのに名詞・動詞（「残忍な」に「残忍さ」、happy に happiness）、副詞なのに形容詞（quickly に quick）、他動詞の訳（〜を…させる）に自動詞の訳（…する）など。意味が近くても品詞が違えば不正解。ただし「野蛮な」と「野蛮」のような、語尾の「な」「の」の有無だけの違いは正解。',
   '・意味が違う、反対の意味、大事な部分が欠けている、余計な誤りを含む答えは不正解。',
   '・化学・数学などは、物質・値・式が同じなら正解。',
   '・厳しすぎず、甘すぎず。迷ったら不正解。',
   '・正しい内容だが一部しか答えていない（例：意味が2つある答えの片方だけ、必要な語句が欠けている）は "partial"（解答不足）。',
-  '出力は次のJSONだけ：{"results":[{"verdict":"correct か partial か wrong","correct":true,"reason":"40字以内の理由","hint":"正解でないとき、答えを言わずに、足りない部分・違う部分に気づかせる短いヒント（50字以内。正解の語・その一部・頭文字・文字数・訳語は書かない。問題の語の説明ではなく、正解を思い出すための手がかりにする）"}],"tip":"不正解があるとき、次に覚えるための短い覚え方（60字以内。正解を含めてよい）。全部正解なら空文字"}',
+  '出力は次のJSONだけ：{"results":[{"verdict":"correct か partial か wrong","correct":true,"issue":"正解でないときの理由の種類：spelling（つづり・字の誤り）か pos（品詞の誤り）か meaning（意味の誤り・不足）。正解なら none","reason":"40字以内の理由","hint":"正解でないとき、答えを言わずに、足りない部分・違う部分に気づかせる短いヒント（50字以内。正解の語・その一部・頭文字・文字数・訳語は書かない。問題の語の説明ではなく、正解を思い出すための手がかりにする）"}],"tip":"不正解があるとき、次に覚えるための短い覚え方（60字以内。正解を含めてよい）。全部正解なら空文字"}',
   'correct は verdict が correct のときだけ true。results は与えた項目と同じ順番・同じ数にすること。'
 ].join('\n');
 // items: [{ label, expected, given }]
@@ -267,9 +296,16 @@ async function aiJudgeAnswers(question, items, note) {
   const results = (Array.isArray(j.results) ? j.results : []).slice(0, items.length).map(r => {
     const v = String(r.verdict || '').toLowerCase();
     const verdict = /correct/.test(v) ? 'correct' : /partial/.test(v) ? 'partial' : (r.correct === true || r.correct === 'true') && !v ? 'correct' : 'wrong';
-    return { verdict, correct: verdict === 'correct', reason: cleanAiHintText(r.reason), hint: cleanAiHintText(r.hint) };
+    const issue = verdict === 'correct' ? '' : (String(r.issue || '').match(/spelling|pos|meaning/) || [''])[0];
+    return { verdict, correct: verdict === 'correct', issue, reason: cleanAiHintText(r.reason), hint: cleanAiHintText(r.hint) };
   });
   if (results.length !== items.length) throw new Error('判定の数が合いません');
+  // ★【0.03.22】英語の答えで、正解と1〜2文字だけ違うものはスペルミス（AI が甘く判定しても不正解にする）
+  results.forEach((r, i) => {
+    if (!r.correct) return;
+    const miss = englishSpellingSlip(items[i].given, items[i].expected);
+    if (miss) Object.assign(r, { verdict: 'wrong', correct: false, issue: 'spelling', reason: `スペルミス（${miss}）`, hint: r.hint || 'つづりをもう一度確かめましょう' });
+  });
   return { results, tip: String(j.tip || ''), model: _aiLastModel };
 }
 
