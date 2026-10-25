@@ -382,7 +382,8 @@ async function startQuiz(modeType = 'normal') {
 function loadQuizQuestion() {
   quizPhase='q'; selectedChoiceIdx=null; window.currentSelfJudge=null;
   _focus = { attempts: 0 }; // ★【0.03.18】重点モードの答え直しの回数
-  const _fs = document.getElementById('lblFocusStatus'); if (_fs) { _fs.style.display = 'none'; _fs.textContent = ''; }
+  _multi = null; // ★【0.03.21】意味の聞き直し
+  const _fs = document.getElementById('lblFocusStatus'); if (_fs) { _fs.style.display = 'none'; _fs.textContent = ''; _fs.classList.remove('multi'); }
   const cur = quizPool[quizIndex];
 
   // ★【0.02.63】品詞タグ付き構造化解答の判定（このラウンドで使い回すのでキャッシュしておく）
@@ -569,15 +570,19 @@ function buildHintStages(cur, mode, structured, richAnswer) {
   } else {
     // 意味ごとの問題は、全角スペース・読点で区切った言い換えの最初のものでヒントを出す
     const ans = (cur._senseKey && !cur._swapped) ? (String(cur.answer).split(/[\u3000、，,|]/)[0].trim() || getPrimaryAnswer(cur.answer)) : getPrimaryAnswer(cur.answer);
-    const chars = [...ans];
-    stages.push({ html: `🔤 先頭は「 ${escapeHtml(chars[0] || '')} 」 （全 ${chars.length} 文字）` });
-    if (chars.length >= 4) {
-      const n = Math.ceil(chars.length / 2);
-      const shown = chars.map((c, i) => i < n || /[\s　]/.test(c) ? c : '＿').join('');
-      stages.push({ html: `🔤 ${escapeHtml(shown)}` });
-    }
+    stages.push(...letterHintStages(ans));
   }
   return { stages, shown: 0 };
+}
+function letterHintStages(ans) {
+  const chars = [...String(ans || '')];
+  if (!chars.length) return [];
+  const out = [{ html: `🔤 先頭は「 ${escapeHtml(chars[0] || '')} 」 （全 ${chars.length} 文字）` }];
+  if (chars.length >= 4) {
+    const n = Math.ceil(chars.length / 2);
+    out.push({ html: `🔤 ${escapeHtml(chars.map((c, i) => i < n || /[\s　]/.test(c) ? c : '＿').join(''))}` });
+  }
+  return out;
 }
 function showNextHint() {
   if (quizPhase !== 'q' || window.currentOnlineMatch) return;
@@ -898,6 +903,12 @@ function submitSelfMode(judge) {
 
 function passQuizQuestion() {
   stopQuizTimer();
+  if (_aiJudging || _focusBusy) return;
+  // ★【0.03.21】意味の聞き直しの途中でパスしたら、答えられた分は「一部正解」
+  if (_multi && _multi.found.length && quizPhase === 'q') {
+    const fs = document.getElementById('lblFocusStatus'); if (fs) fs.style.display = 'none';
+    return finishPartialMeanings(multiFoundNames(), _focus.attempts + 1, { typed: true, given: multiFoundNames().join('、') });
+  }
   // ★【0.03.06】パスは不正解として記録する
   evaluateRoundAnswer(false, "🏳️ パスしました（不正解として記録）");
 }
@@ -940,6 +951,8 @@ function submitQuizAction() {
     const given = selectedChoiceIdx;
     return concludeAttempt(cur, isAnswerCorrect(given, cur.answer), { given, kind: 'wrong', choice: true });
   }
+  // ★【0.03.21】意味をいくつも並べた答え（地域社会、共同体 など）で、一部だけ答えたら、ほかの意味も聞き直す
+  if (handleMultiMeaning(cur)) return;
   if (currentStructuredAnswer) {
     const ok = gradeStructuredAnswer(currentStructuredAnswer);
     const vals = currentStructuredAnswer.map((seg, i) => (document.getElementById('structAns_' + i) || {}).value || '');
@@ -956,6 +969,7 @@ function submitQuizAction() {
           if (rr && rr.correct) { if (input) { input.style.borderColor = 'var(--success)'; input.style.background = 'rgba(34,199,122,0.1)'; } }
           else stillWrong.push(x.i);
         });
+        if ((stillWrong.length === 0 || aiVerdictKind(r) === 'partial') && startAiPartialReask(cur, givenAll, stillWrong.length === 0, r)) return;
         concludeAttempt(cur, stillWrong.length === 0, { typed: true, given: givenAll, ai: r, kind: aiVerdictKind(r), hint: aiFirstHint(r), structuredWrong: stillWrong });
       });
       return;
@@ -969,7 +983,10 @@ function submitQuizAction() {
   if (!ok && given.trim() && aiJudgeEnabled()) {
     aiJudgeItems(cur, [{ label: cur._senseLabel && !cur._swapped ? cur._senseLabel : '', expected: cur.answer, given }]).then(r => {
       if (quizPool[quizIndex] !== cur || quizPhase === 'a' || !document.getElementById('pgQuizPlayer').classList.contains('active')) return;
-      concludeAttempt(cur, !!(r && r.results && r.results.length && r.results.every(x => x.correct)), { typed: true, given, ai: r, kind: aiVerdictKind(r), hint: aiFirstHint(r) });
+      const allOk = !!(r && r.results && r.results.length && r.results.every(x => x.correct));
+      // 意味をいくつも並べた答えに、言い換えで一部だけ答えた → ほかの意味を聞き直す
+      if ((aiVerdictKind(r) === 'partial' || allOk) && startAiPartialReask(cur, given, allOk, r)) return;
+      concludeAttempt(cur, allOk, { typed: true, given, ai: r, kind: aiVerdictKind(r), hint: aiFirstHint(r) });
     });
     return;
   }
@@ -1003,12 +1020,109 @@ function concludeAttempt(cur, ok, info) {
   // 普通のモードでも、AI が出した「答え直すためのヒント」は覚えておく
   if (!ok && info.hint && typeof rememberAiHint === 'function') rememberAiHint(cur, info.kind, info.given, info.hint);
   const opts = { typed: !!info.typed, given: info.given || '', ai: info.ai || null };
+  if (!ok && info.partialFound && info.partialFound.length) return finishPartialMeanings(info.partialFound, attempt, opts);
   if (ok) {
-    if (attempt === 1) return evaluateRoundAnswer(true, info.ai && info.ai.results ? '🤖 正解（同じ意味）' : '🎉 正解！', opts);
+    if (attempt === 1) return evaluateRoundAnswer(true, info.label || (info.ai && info.ai.results ? '🤖 正解（同じ意味）' : '🎉 正解！'), opts);
     if (attempt === 2) { quizHintState.aiUsed = true; return evaluateRoundAnswer(true, '🎯 ヒントのあとで正解', opts); }
     return evaluateRoundAnswer(false, `△ ヒント${attempt - 1}回のあとで正解（不正解寄りとして記録）`, Object.assign(opts, { softWrong: true, focusLate: true }));
   }
   evaluateRoundAnswer(false, info.kind === 'partial' ? '△ 解答不足' : (attempt > 1 ? `❌ 不正解（ヒント${attempt - 1}回）` : '❌ 不正解'), opts);
+}
+
+// ================================================================
+// ★【0.03.21】意味をいくつも並べた答えの聞き直し
+//  例：community → 地域社会、共同体。「地域社会」だけ答えたら ⭕ にして「ほかの意味は？」と聞き直す
+//  全部答えられたら正解。答えられなかったら「一部正解」（ヒントを見た正解と同じ扱い。重点モードで答え直したあとなら不正解寄り）
+// ================================================================
+let _multi = null; // { key, meanings, found: [番号], aiGiven: [AI が一部の意味と認めた答え] }
+function multiMeaningTarget(cur) {
+  if (currentRoundMode !== 'desc' || window.currentOnlineMatch || !cur) return null;
+  let text, inputId;
+  if (currentStructuredAnswer) {
+    if (currentStructuredAnswer.length !== 1) return null; // 欄が複数あるときは、欄ごとの採点のまま
+    text = currentStructuredAnswer[0].text; inputId = 'structAns_0';
+  } else { text = cur.answer; inputId = 'txtDescAnswer'; }
+  const meanings = splitAnswerMeanings(text);
+  return meanings.length >= 2 ? { key: text, meanings, inputId } : null;
+}
+// 聞き直しの処理をしたら true（いつもの採点はしない）
+function handleMultiMeaning(cur) {
+  const mt = multiMeaningTarget(cur);
+  if (!mt) return false;
+  if (!_multi || _multi.key !== mt.key) _multi = { key: mt.key, meanings: mt.meanings, found: [], aiGiven: [] };
+  const input = document.getElementById(mt.inputId);
+  const given = input ? input.value : '';
+  const hit = matchAnswerMeanings(given, mt.meanings);
+  if (hit && hit.length) {
+    const before = _multi.found.length + _multi.aiGiven.length;
+    const beforeFound = _multi.found.length;
+    hit.forEach(i => { if (!_multi.found.includes(i)) _multi.found.push(i); });
+    if (_multi.found.length + _multi.aiGiven.length >= mt.meanings.length) {
+      concludeAttempt(cur, true, { typed: true, given: multiFoundNames().join('、'), label: before ? '🎉 全部の意味を正解！' : '🎉 正解！' });
+      return true;
+    }
+    askOtherMeanings(cur, mt, _multi.found.length === beforeFound);
+    return true;
+  }
+  if (!_multi.found.length && !_multi.aiGiven.length) return false; // 1つも当たっていない → いつもの採点（AI の判定を含む）
+  // 聞き直しで、残りの意味に当たらなかった（空欄・違う答え）→ AI に、これまでの答えと合わせて全部の意味がそろったか確かめる
+  const rest = _multi.aiGiven.length ? mt.meanings : mt.meanings.filter((m, i) => !_multi.found.includes(i));
+  const miss = r => concludeAttempt(cur, false, { typed: true, given: multiFoundNames().join('、'), kind: 'partial', partialFound: multiFoundNames(), ai: r || null, hint: aiFirstHint(r), structuredWrong: currentStructuredAnswer ? [0] : undefined });
+  if (given.trim() && aiJudgeEnabled()) {
+    aiJudgeItems(cur, [{ label: '', expected: rest.join('、'), given: _multi.aiGiven.length ? multiFoundNames().concat(given).join('、') : given }]).then(r => {
+      if (quizPool[quizIndex] !== cur || quizPhase === 'a' || !document.getElementById('pgQuizPlayer').classList.contains('active')) return;
+      const x = r && r.results && r.results[0];
+      if (x && x.correct) { _multi.found = mt.meanings.map((m, i) => i); concludeAttempt(cur, true, { typed: true, given: multiFoundNames().join('、'), ai: r, label: '🤖 全部の意味を正解！（同じ意味）' }); }
+      else miss(r);
+    });
+    return true;
+  }
+  miss(null);
+  return true;
+}
+function multiFoundNames() { return _multi ? _multi.found.map(i => _multi.meanings[i]).concat(_multi.aiGiven || []) : []; }
+// AI が「意味の一部（解答不足）」と判定した言い換えの答えから、聞き直しを始める
+//  AI が「正解」と判定しても、並べた意味の数より少ない言葉しか答えていなければ聞き直す（例：地域社会、共同体 に「コミュニティ」）
+function startAiPartialReask(cur, given, aiSaidCorrect, r) {
+  const mt = multiMeaningTarget(cur);
+  if (!mt || !String(given || '').trim()) return false;
+  if (aiSaidCorrect) {
+    const parts = String(given).split(/[\s\u3000、,，・／/]+/).filter(p => normalizeStructuredToken(p) !== '');
+    if (parts.length >= mt.meanings.length) return false;
+  }
+  _multi = { key: mt.key, meanings: mt.meanings, found: [], aiGiven: [String(given).trim()] };
+  askOtherMeanings(cur, mt, false);
+  const st = document.getElementById('lblFocusStatus');
+  if (st) st.textContent = st.textContent.replace('⭕ ', aiSaidCorrect ? '⭕（🤖 同じ意味）' : '△（🤖 意味の一部）');
+  return true;
+}
+function askOtherMeanings(cur, mt, again) {
+  const left = Math.max(1, mt.meanings.length - _multi.found.length - _multi.aiGiven.length);
+  const st = document.getElementById('lblFocusStatus');
+  if (st) {
+    st.style.display = 'block'; st.classList.add('multi');
+    st.textContent = `⭕ ${multiFoundNames().join('、')}${again ? '（もう答えました）' : ''}　ほかの意味もあります。答えてください（あと${left}つ）`;
+  }
+  const timerText = document.getElementById('lblQuizTimerText'); if (timerText) timerText.innerText = '🔁';
+  // 文字のヒントは、まだ答えていない意味のものにする
+  const hs = quizHintState;
+  if (hs && hs.stages && hs.stages.length && currentRoundMode === 'desc') {
+    const restText = mt.meanings.find((m, i) => !_multi.found.includes(i)) || '';
+    const keep = hs.stages.filter(x => x.memo || x.ai);
+    const shownKeep = Math.min(hs.shown, keep.length);
+    hs.stages = keep.concat(letterHintStages(getPrimaryAnswer(restText).replace(/\([^()]*\)|（[^（）]*）/g, '').trim()));
+    hs.shown = shownKeep; hs.aiUsed = hs.aiUsed || false;
+    document.querySelectorAll('#lblQuizHint .hint-letter, [id^=structHint_]').forEach(el => { if (el.id) el.style.display = 'none'; else el.remove(); });
+    const hb = document.getElementById('btnQuizHint'); if (hb && hs.shown < hs.stages.length) hb.style.display = '';
+  }
+  const input = document.getElementById(mt.inputId);
+  if (input) { input.disabled = false; input.value = ''; input.style.borderColor = ''; input.style.background = ''; input.focus(); }
+}
+// 一部の意味だけ答えられたときの記録
+function finishPartialMeanings(found, attempt, opts) {
+  const names = found.join('、');
+  if (attempt === 1) { quizHintState.aiUsed = true; return evaluateRoundAnswer(true, `△ 一部正解（${names}）`, opts); }
+  return evaluateRoundAnswer(false, `△ 一部だけ正解（${names}）・不正解寄りとして記録`, Object.assign(opts, { softWrong: true, focusLate: true }));
 }
 
 async function startFocusRetry(cur, info) {
@@ -1045,7 +1159,7 @@ async function startFocusRetry(cur, info) {
   }
   const label = { blank: '答えが空欄です', partial: '足りない部分があります', wrong: '違います' }[kind] || '違います';
   const st = document.getElementById('lblFocusStatus');
-  if (st) { st.style.display = 'block'; st.textContent = `🔁 ${label}。ヒントを見て、もう一度答えてください（あと${FOCUS_MAX_RETRY - _focus.attempts + 1}回）`; }
+  if (st) { st.style.display = 'block'; st.classList.remove('multi'); st.textContent = `🔁 ${label}。ヒントを見て、もう一度答えてください（あと${FOCUS_MAX_RETRY - _focus.attempts + 1}回）`; }
   // 答え直せるようにする（制限時間は止めたまま）
   const timerText = document.getElementById('lblQuizTimerText'); if (timerText) timerText.innerText = '🎯';
   if (info.choice) {

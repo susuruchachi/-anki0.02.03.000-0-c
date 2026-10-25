@@ -225,6 +225,35 @@ function isStructuredSegmentCorrect(input, correctText) {
   return parts.length > 1 && parts.every(p => forms.has(p));
 }
 
+// ★【0.03.21】答えに並べた意味を分ける（全角スペース・読点・カンマ区切り。日本語どうしの間の半角スペースも）
+// 「/」「|」は同じ意味の別の書き方として、1つの意味の中に残す。( ) ［ ］「」の中では区切らない
+function splitAnswerMeanings(text) {
+  const mk = maskRichBlocks(String(text == null ? '' : text));
+  const chars = [...mk.masked];
+  const out = []; let cur = '', depth = 0;
+  chars.forEach((ch, i) => {
+    if ('[［(（「'.includes(ch)) depth++;
+    else if (']］)）」'.includes(ch)) depth = Math.max(0, depth - 1);
+    const jpSpace = ch === ' ' && /[^\x00-\x7F]/.test(chars[i - 1] || '') && /[^\x00-\x7F]/.test(chars[i + 1] || '');
+    if (depth === 0 && (/[、，,\u3000]/.test(ch) || jpSpace)) { out.push(cur); cur = ''; return; }
+    cur += ch;
+  });
+  out.push(cur);
+  return out.map(s => mk.restore(s).trim()).filter(s => normalizeStructuredToken(s) !== '');
+}
+// 答えた言葉が、並べた意味のどれに当たるか（意味の番号の配列）。当たらない言葉が混じっていれば null
+function matchAnswerMeanings(input, meanings) {
+  const forms = meanings.map(m => new Set(splitAnswerAlternatives(m).flatMap(a => structuredTokenForms(a))));
+  const find = t => { const n = normalizeStructuredToken(t); return n ? forms.findIndex(f => f.has(n)) : -1; };
+  const whole = find(input);
+  if (whole >= 0) return [whole];
+  const parts = String(input || '').split(/[\s\u3000、,，・／/]+/).filter(p => normalizeStructuredToken(p) !== '');
+  if (!parts.length) return null;
+  const hit = parts.map(find);
+  if (hit.some(i => i < 0)) return null;
+  return [...new Set(hit)];
+}
+
 // 構造化解答を表示用HTML（ラベル：本文、を1行ずつ）に整形する。
 // lblQuizQuestion / feedbackAnswerText / selfAnswerDisplay と同じく、中身は意図的にエスケープしない
 // （画像タグやKaTeX記法をそのまま埋め込めるようにする、既存の出題表示の方針に合わせるため）
