@@ -4,7 +4,12 @@ let _boxAnswerCache = {};
 let _boxSearchTimer = null;
 function scheduleBoxSearch() { clearTimeout(_boxSearchTimer); _boxSearchTimer = setTimeout(renderBox, 250); }
 function showAllCards() { currentViewContext = 'all'; const sb = document.getElementById('txtSearchBox'); if(sb) sb.value = ''; renderBox(); }
-function filterBoxByStatus(statusType) { currentViewContext = statusType; openPage('pgBox'); }
+// ★【0.03.24】実績画面で選んでいるフォルダーがあれば、そのフォルダーの中だけで絞り込む
+function filterBoxByStatus(statusType) {
+  const cat = typeof statsCategory !== 'undefined' && statsCategory && categories.includes(statsCategory) ? statsCategory : '';
+  currentViewContext = cat ? { type: 'status', status: statusType, category: cat } : statusType;
+  openPage('pgBox');
+}
 
 function renderBox() {
   const container = document.getElementById('boxList'); container.innerHTML = '';
@@ -101,6 +106,24 @@ function renderBox() {
       });
       navContainer.appendChild(subGrid);
     }
+  } else if (typeof currentViewContext === 'object' && currentViewContext.type === 'status') {
+    // ★【0.03.24】フォルダーの中の、そのランクのカード
+    const v = currentViewContext;
+    filtered = statsCards(v.category).filter(STATUS_TESTS[v.status] || (() => true));
+    titleString = `📊 ${v.category}：${STATUS_NAMES[v.status] || ''}`;
+    navContainer = document.createElement('div');
+    navContainer.style.cssText = 'display:flex; gap:8px; flex-wrap:wrap; padding-bottom:12px; margin-bottom:12px; border-bottom:1px solid var(--border);';
+    Object.keys(STATUS_NAMES).forEach(k => {
+      const b = document.createElement('button'); b.type = 'button';
+      b.className = 'chip' + (k === v.status ? ' active' : '');
+      b.textContent = `${STATUS_NAMES[k]} ${statsCards(v.category).filter(STATUS_TESTS[k]).length}`;
+      b.onclick = e => { e.preventDefault(); currentViewContext = { type: 'status', status: k, category: v.category }; renderBox(); };
+      navContainer.appendChild(b);
+    });
+    const back = document.createElement('button'); back.type = 'button'; back.className = 'chip';
+    back.textContent = '📁 フォルダーを開く';
+    back.onclick = e => { e.preventDefault(); currentViewContext = { type: 'category', value: v.category, showAllSub: true }; renderBox(); };
+    navContainer.appendChild(back);
   } else if (typeof currentViewContext === 'string' && currentViewContext !== 'all') {
     titleString = `📊 実績抽出カードの一覧`;
     if (currentViewContext === 'grad') filtered = db.filter(q => isGraduated(q));

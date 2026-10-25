@@ -1306,6 +1306,68 @@ function gradeStructuredAnswer(structured) {
   return allCorrect;
 }
 
+// ★【0.03.24】1回の結果でカード（または意味）の成績・レベルを動かす（クイズと暗記テストで共通）
+// o: { multiplier, gain, loss, regrade, keepStreak, noCategory }。レベルが変わったら { type, level } を返す
+function applySrsResult(m, senseKey, isCorrect, o = {}) {
+  let levelChange = null;
+  const t = senseKey ? m.senses[senseKey] : m; // 成績を動かす相手
+  if(t.wrongStreak === undefined) t.wrongStreak = 0; if(t.shikkariStreak === undefined) t.shikkariStreak = 0;
+  const multiplier = o.multiplier || 1;
+  // ★【0.03.03】設定の「卒業認定正解数」に比例して、レベルの上がり下がりの回数も変わる
+  const P = srsParams();
+  const gain = o.gain === undefined ? 1 : o.gain, loss = o.loss === undefined ? 1 : o.loss, regrade = !!o.regrade;
+  if(t.level5Correct === undefined) t.level5Correct = 0;
+  const isGrad = isGraduated(t);
+  const beforeLevel = t.level;
+
+  if(isCorrect) {
+    t.correct++; if (!regrade && !o.noCategory) recordCategoryScore(m.category, true);
+    if (o.keepStreak) t.wrongStreak = 0;
+    else { t.streak = roundStat((t.streak || 0) + gain); t.wrongStreak = 0; }
+    
+    if (t.level === -1) {
+      t.shikkariStreak = roundStat(t.shikkariStreak + gain);
+      if (t.shikkariStreak >= P.recoverAt * multiplier) { t.level = 0; t.shikkariStreak = 0; t.streak = 0; }
+    } else if (isGrad) {
+      // 卒業済み：何もしない
+    } else if (t.level >= 5) {
+      // レベル5で未卒業：正解を積む
+      t.level5Correct = roundStat(t.level5Correct + gain);
+      if (isGraduated(t)) levelChange = { type: 'grad' };
+    } else {
+      if (t.streak >= P.upStreak * multiplier - 1e-9 && t.level < 5) {
+        t.level++;
+        if (t.level === 5) t.level5Correct = 0;
+        t.streak = 0;
+      }
+    }
+  } else {
+    t.incorrect++; t.streak = 0; t.shikkariStreak = 0;
+    const prevWrong = t.wrongStreak || 0;
+    t.wrongStreak = roundStat(prevWrong + loss);
+    if (!regrade && !o.noCategory) recordCategoryScore(m.category, false);
+    const crossed = (every) => Math.floor(t.wrongStreak / every + 1e-9) > Math.floor(prevWrong / every + 1e-9);
+
+    if (isGrad) {
+      // 卒業済みで不正解：続けて間違えると卒業取り消し（レベル5に留まる）
+      if (t.wrongStreak >= P.ungradAt * multiplier - 1e-9) { t.level5Correct = 0; t.wrongStreak = 0; levelChange = { type: 'ungrad' }; }
+    } else if (t.level >= 5) {
+      // レベル5・未卒業で不正解：続けて間違えるとレベル4に下がる
+      if (t.wrongStreak >= P.level5Down * multiplier - 1e-9) { t.level = 4; t.level5Correct = 0; t.wrongStreak = 0; }
+    } else {
+      if (t.level !== -1) {
+        if (t.wrongStreak >= P.shikkariAt * multiplier - 1e-9) { t.level = -1; t.wrongStreak = 0; t.correct = 0; } 
+        else if (crossed(P.downEvery * multiplier) && t.level > 0) t.level--;
+      }
+    }
+  }
+  if (!levelChange && t.level !== beforeLevel) levelChange = { type: t.level > beforeLevel ? 'up' : 'down', level: t.level };
+  if (senseKey) recomputeCardFromSenses(m);
+  touchStats(m);
+  saveData();
+  return levelChange;
+}
+
 function evaluateRoundAnswer(isCorrect, head, opts = {}) {
   if (quizPhase === 'a') return; // 二重呼び出し防止
   quizPhase = 'a'; const cur = quizPool[quizIndex];
@@ -1339,70 +1401,19 @@ function evaluateRoundAnswer(isCorrect, head, opts = {}) {
     _lastEval = { id: m ? m.id : null, stats: snap, combo: prevCombo, today: prevToday, correct: isCorrect, typed: !!opts.typed, given: opts.given || '', ai: opts.ai || null };
   }
   if(m) {
-    const t = senseKey ? m.senses[senseKey] : m; // 成績を動かす相手
-    if(t.wrongStreak === undefined) t.wrongStreak = 0; if(t.shikkariStreak === undefined) t.shikkariStreak = 0;
     const mode = currentRoundMode;
-    const multiplier = (mode === 'choice' || mode === 'tap' || mode === 'minhaya') ? 2 : 1; 
-    // ★【0.03.03】設定の「卒業認定正解数」に比例して、レベルの上がり下がりの回数も変わる
-    const P = srsParams();
     // ★【0.03.08】難易度とヒントで1回の重みを変える（対戦中は難易度どおり・ヒントなし）
     const W = srsSpeedWeights(window.currentOnlineMatch ? 'normal' : document.getElementById('selQuizSpeed').value);
     const hs = quizHintState || { stages: [], shown: 0 };
     const memoShown = hs.shown > 0 && hs.stages[0] && hs.stages[0].memo;
     const letterStages = Math.max(0, hs.shown - (hs.stages[0] && hs.stages[0].memo ? 1 : 0)) + (hs.aiUsed ? 1 : 0);
-    const gain = W.up * srsHintFactor(memoShown, letterStages);
-    const loss = W.down * (opts.softWrong ? 0.5 : 1); // ★【0.03.18】重点モードでヒント2回以上のあとの正解は、不正解より軽く
-
-    if(t.level5Correct === undefined) t.level5Correct = 0;
-    const isGrad = isGraduated(t);
-    const beforeLevel = t.level;
-
-    if(isCorrect) {
-      t.correct++; if (!regrade) recordCategoryScore(m.category, true);
-      if (mode === 'self' && window.currentSelfJudge === 'good') t.wrongStreak = 0;
-      else { t.streak = roundStat((t.streak || 0) + gain); t.wrongStreak = 0; }
-      
-      if (t.level === -1) {
-        t.shikkariStreak = roundStat(t.shikkariStreak + gain);
-        if (t.shikkariStreak >= P.recoverAt * multiplier) { t.level = 0; t.shikkariStreak = 0; t.streak = 0; }
-      } else if (isGrad) {
-        // 卒業済み：何もしない
-      } else if (t.level >= 5) {
-        // レベル5で未卒業：正解を積む
-        t.level5Correct = roundStat(t.level5Correct + gain);
-        if (isGraduated(t)) levelChange = { type: 'grad' };
-      } else {
-        if (t.streak >= P.upStreak * multiplier - 1e-9 && t.level < 5) {
-          t.level++;
-          if (t.level === 5) t.level5Correct = 0;
-          t.streak = 0;
-        }
-      }
-    } else {
-      t.incorrect++; t.streak = 0; t.shikkariStreak = 0;
-      const prevWrong = t.wrongStreak || 0;
-      t.wrongStreak = roundStat(prevWrong + loss);
-      if (!regrade) recordCategoryScore(m.category, false);
-      const crossed = (every) => Math.floor(t.wrongStreak / every + 1e-9) > Math.floor(prevWrong / every + 1e-9);
-
-      if (isGrad) {
-        // 卒業済みで不正解：続けて間違えると卒業取り消し（レベル5に留まる）
-        if (t.wrongStreak >= P.ungradAt * multiplier - 1e-9) { t.level5Correct = 0; t.wrongStreak = 0; levelChange = { type: 'ungrad' }; }
-      } else if (t.level >= 5) {
-        // レベル5・未卒業で不正解：続けて間違えるとレベル4に下がる
-        if (t.wrongStreak >= P.level5Down * multiplier - 1e-9) { t.level = 4; t.level5Correct = 0; t.wrongStreak = 0; }
-      } else {
-        if (t.level !== -1) {
-          if (t.wrongStreak >= P.shikkariAt * multiplier - 1e-9) { t.level = -1; t.wrongStreak = 0; t.correct = 0; } 
-          else if (crossed(P.downEvery * multiplier) && t.level > 0) t.level--;
-        }
-      }
-    }
-    if (!levelChange && t.level !== beforeLevel) levelChange = { type: t.level > beforeLevel ? 'up' : 'down', level: t.level };
+    levelChange = applySrsResult(m, senseKey, isCorrect, {
+      multiplier: (mode === 'choice' || mode === 'tap' || mode === 'minhaya') ? 2 : 1,
+      gain: W.up * srsHintFactor(memoShown, letterStages),
+      loss: W.down * (opts.softWrong ? 0.5 : 1), // ★【0.03.18】重点モードでヒント2回以上のあとの正解は、不正解より軽く
+      regrade, keepStreak: mode === 'self' && window.currentSelfJudge === 'good'
+    });
     if (levelChange && senseKey) levelChange.label = cur._senseLabel;
-    if (senseKey) recomputeCardFromSenses(m);
-    touchStats(m);
-    saveData();
   }
   if (levelChange) showLevelAnim(levelChange);
   const _hintBtn = document.getElementById('btnQuizHint'); if (_hintBtn) _hintBtn.style.display = 'none';

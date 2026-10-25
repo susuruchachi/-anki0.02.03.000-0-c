@@ -1,14 +1,35 @@
 // ----------------- 実績とグラフ -----------------
+// ★【0.03.24】ランク分布をフォルダーごとに見られるようにする（空＝すべて）
+let statsCategory = (() => { try { return localStorage.getItem('susuru_anki_stats_cat') || ''; } catch (e) { return ''; } })();
+function setStatsCategory(cat) { statsCategory = cat || ''; try { localStorage.setItem('susuru_anki_stats_cat', statsCategory); } catch (e) {} renderStatsAndCharts(); }
+// 選んだフォルダー（と、その下のフォルダー）のカード
+function statsCards(cat) {
+  if (!cat || !categories.includes(cat)) return db;
+  const set = new Set(getAllSubcategories(cat));
+  return db.filter(q => set.has(q.category));
+}
+// カードのランク（卒業・得意・普通・苦手・しっかり・未着手）。一覧の絞り込みと同じ決め方
+const STATUS_TESTS = {
+  grad: q => isGraduated(q),
+  master: q => !isGraduated(q) && q.level >= 3,
+  normal: q => !isGraduated(q) && q.level >= 1 && q.level <= 2,
+  weak: q => !isGraduated(q) && q.level === 0 && (q.correct + q.incorrect) > 0,
+  shikkari: q => !isGraduated(q) && q.level === -1,
+  unseen: q => q.correct === 0 && q.incorrect === 0 && q.level >= 0
+};
+const STATUS_NAMES = { grad: '🎓 卒業', master: '⚡ 得意', normal: '☕ 普通', weak: '⚠️ 苦手', shikkari: '🧱 しっかり', unseen: '💤 未着手' };
 function renderStatsAndCharts() {
-  const t = db.length;
+  const sel = document.getElementById('selStatsCategory');
+  if (statsCategory && !categories.includes(statsCategory)) statsCategory = '';
+  if (sel) {
+    sel.innerHTML = '<option value="">📚 すべてのフォルダー</option>' + buildCategoryOptionsHTML(new Set(), false);
+    sel.value = statsCategory;
+  }
+  const cards = statsCards(statsCategory);
+  const t = cards.length;
   document.getElementById('statTotal').innerText = t;
-  const isGraduatedCard = isGraduated;
-  const cG = db.filter(q => isGraduatedCard(q)).length;
-  const cM = db.filter(q => !isGraduatedCard(q) && q.level >= 3).length;
-  const cN = db.filter(q => !isGraduatedCard(q) && q.level >= 1 && q.level <= 2).length;
-  const cW = db.filter(q => !isGraduatedCard(q) && q.level === 0 && (q.correct+q.incorrect)>0).length;
-  const cS = db.filter(q => !isGraduatedCard(q) && q.level === -1).length;
-  const cU = db.filter(q => q.correct === 0 && q.incorrect === 0 && q.level >= 0).length;
+  const cnt = k => cards.filter(STATUS_TESTS[k]).length;
+  const cG = cnt('grad'), cM = cnt('master'), cN = cnt('normal'), cW = cnt('weak'), cS = cnt('shikkari'), cU = cnt('unseen');
 
   document.getElementById('cntGrad').innerText = cG;
   document.getElementById('cntMaster').innerText = cM;
@@ -17,6 +38,7 @@ function renderStatsAndCharts() {
   document.getElementById('cntShikkari').innerText = cS;
   document.getElementById('cntUnseen').innerText = cU;
   document.getElementById('statGradRatio').innerText = t > 0 ? `${Math.round((cG/t)*100)}%` : '0%';
+  const lbl = document.getElementById('lblStatsScope'); if (lbl) lbl.innerText = statsCategory ? `📁 ${statsCategory}（下のフォルダーも含む）` : '';
 
   if(chartInstance) chartInstance.destroy();
   const ctx = document.getElementById('rankPieChart').getContext('2d');
@@ -24,7 +46,9 @@ function renderStatsAndCharts() {
   chartInstance = new Chart(ctx, {
     type: 'doughnut',
     data: { labels: ['卒業','得意','普通','苦手','しっかり'], datasets: [{ data: [cG,cM,cN,cW,cS], backgroundColor: ['#22c77a','#4f7cff','#f5a623','#ff4f6a','#9aa0a6'], borderWidth:0 }] },
-    options: { plugins: { legend: { position: 'bottom' } }, cutout: '70%' }
+    options: { plugins: { legend: { position: 'bottom' } }, cutout: '70%',
+      // グラフの色をタップすると、そのランクの問題一覧を開く
+      onClick: (e, els) => { if (els && els.length) filterBoxByStatus(['grad', 'master', 'normal', 'weak', 'shikkari'][els[0].index]); } }
   });
 
   const hc = document.getElementById('heatmapContainer'); hc.innerHTML='';

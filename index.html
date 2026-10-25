@@ -166,6 +166,20 @@ h2 { font-size: 1.4rem; font-weight: 700; margin-bottom: 20px; display: flex; al
 .sense-chip { font-size: 0.7rem; padding: 2px 8px; border-radius: 10px; background: var(--bg4); border: 1px solid var(--border); color: var(--text2); }
 .sense-chip.weak { border-color: rgba(255,79,106,0.5); color: var(--danger); }
 .sense-chip.grad { border-color: rgba(34,199,122,0.5); color: var(--success); }
+.drill-app { width: 100%; max-width: 560px; margin: 0 auto; }
+.drill-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.drill-word { font-size: 1.7rem; font-weight: 800; color: var(--text); word-break: break-word; }
+.drill-q { font-size: 1.05rem; color: var(--text); white-space: pre-wrap; }
+.drill-opt { display: block; width: 100%; text-align: left; justify-content: flex-start; margin: 6px 0; height: auto; white-space: normal; }
+.drill-btns { display: flex; gap: 8px; margin-top: 8px; }
+.drill-btns .btn { flex: 1; }
+.drill-ok { color: var(--success); font-size: 1.3rem; }
+.drill-ng { color: var(--danger); }
+b.drill-ng { font-size: 1.3rem; }
+.drill-ok-card { border-left: 4px solid var(--success); }
+.drill-ng-card { border-left: 4px solid var(--danger); }
+.drill-group { border-left: 4px solid var(--primary); }
+#drillApp input.form-control { margin-top: 6px; }
 .focus-status { margin-top: 10px; padding: 6px 10px; border-radius: 8px; background: rgba(245,166,35,0.12); border: 1px solid rgba(245,166,35,0.4); color: var(--warn); font-size: 0.85rem; font-weight: 700; }
 .focus-status.multi { background: rgba(34,199,122,0.12); border-color: rgba(34,199,122,0.45); color: var(--success); }
 .quiz-hints .hint-focus { margin-top: 4px; color: var(--warn); font-weight: 700; }
@@ -442,6 +456,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
       <button class="btn btn-accent home-sub-btn" style="flex:1;" onclick="startQuiz('tokkun')">🔥 集中特訓<span style="font-size:0.65rem; font-weight:500;">苦手・しっかりのみ</span></button>
       <button class="btn btn-success home-sub-btn" style="flex:1;" onclick="startQuiz('review')">♻️ ランダム復習<span style="font-size:0.65rem; font-weight:500;">卒業済みから出題</span></button>
     </div>
+    <button class="btn btn-secondary home-sub-btn" style="width:100%; margin:-6px 0 15px;" onclick="openDrill()">📝 暗記テスト<span style="font-size:0.65rem; font-weight:500;">グループごとに全部の意味を答える・全問〇まで周回（AI）</span></button>
 
     <details class="card" id="homeDetailSettings">
       <summary>⚙️ 詳細設定（難易度・出題数・オプション）</summary>
@@ -618,6 +633,10 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
     </div>
   </div>
 
+  <div id="pgDrill" class="screen">
+    <div id="drillApp" class="drill-app"></div>
+  </div>
+
   <div id="pgStats" class="screen">
     <h2>📊 習熟実績と学習状況</h2>
     
@@ -628,6 +647,8 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 
     <div class="card">
       <div class="setting-box-title">🥧 ランク分布グラフ</div>
+      <select id="selStatsCategory" class="form-control" style="margin-bottom:6px;" onchange="setStatsCategory(this.value)"></select>
+      <div id="lblStatsScope" class="hint-small" style="margin-bottom:6px;"></div>
       <div style="width: 100%; max-width: 250px; margin: 0 auto;">
         <canvas id="rankPieChart"></canvas>
       </div>
@@ -1266,6 +1287,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 <script src="notify-kv.js"></script>
 <script src="notify.js"></script>
 <script src="ai.js"></script>
+<script src="drill.js"></script>
 <script src="shared.js"></script>
 <script src="main.js"></script>
 
