@@ -262,6 +262,17 @@ async function updateCardInSharedDoc(docId, card, action) {
     await firestore.collection("susuru_anki_shared").doc(docId).update({ cards: JSON.parse(JSON.stringify(newCards)) });
   } catch(e) { console.error("Cloud update failed", e); }
 }
+// ★【0.03.38】まとめて削除（1回の書き込みで）
+async function removeCardsFromSharedDoc(docId, ids) {
+  if (!currentUser || !docId || !ids || !ids.length) return;
+  try {
+    const ref = firestore.collection("susuru_anki_shared").doc(docId);
+    const snap = await ref.get();
+    if (!snap.exists) return;
+    const set = new Set(ids);
+    await ref.update({ cards: JSON.parse(JSON.stringify((snap.data().cards || []).filter(c => !set.has(c.id)))) });
+  } catch (e) { console.error('Cloud update failed', e); }
+}
 // ★【0.03.02】まとめて追加（1枚ずつ同時に書き込むと、互いに上書きしてカードが消えることがあったため）
 async function addCardsToSharedDoc(docId, cards) {
   if (!currentUser || !docId || !cards || cards.length === 0) return;

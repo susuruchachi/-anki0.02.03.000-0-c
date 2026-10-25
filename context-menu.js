@@ -166,6 +166,7 @@ function openCategoryEditor(catName) {
       ${btn('merge', '🔀', '他のフォルダーに統合', { disabled: lock })}
       ${btn('reset', '🔄', '成績をリセット')}
       ${btn('renumber', '🔢', '問題番号を振り直す', { disabled: ro })}
+      ${btn('pickdel', '☑️', '問題を選んで削除', { disabled: ro || !total, danger: true })}
     </div>
     <div id="catEditPanel"></div>
     <div class="cat-edit-sec">🏷️ 教科タグ ${subjectStatusHTML(catName)}</div>
@@ -237,6 +238,85 @@ function autoSkipSubfolders(cat) {
   openCategoryEditor(cat);
 }
 
+// ================================================================
+// ★【0.03.38】フォルダーの中の問題を選んで、まとめて削除する
+// ================================================================
+let _bulkDel = null; // { cat, sub, sel: Set(id), q }
+function openBulkDeleteDialog(cat) {
+  _bulkDel = { cat, sub: false, sel: new Set(), q: '' };
+  let ov = document.getElementById('bulkDelOverlay');
+  if (!ov) {
+    ov = document.createElement('div'); ov.className = 'ctx-overlay'; ov.id = 'bulkDelOverlay'; ov.style.zIndex = '1060';
+    ov.innerHTML = `<div class="menu-card editor-card bulkdel-card" onclick="event.stopPropagation()"><div id="bulkDelBody"></div></div>`;
+    ov.onclick = closeBulkDeleteDialog;
+    document.body.appendChild(ov);
+  }
+  ov.style.display = 'flex';
+  renderBulkDelete();
+}
+function closeBulkDeleteDialog() { const ov = document.getElementById('bulkDelOverlay'); if (ov) ov.style.display = 'none'; _bulkDel = null; }
+function bulkDeleteCards() {
+  const st = _bulkDel; if (!st) return [];
+  const cats = new Set(st.sub ? getAllSubcategories(st.cat) : [st.cat]);
+  const kw = st.q.trim().toLowerCase();
+  return sortCardsByNumber(db.filter(q => cats.has(q.category) && (!kw || String(q.question).toLowerCase().includes(kw) || String(q.answer).toLowerCase().includes(kw) || String(q.note || '').toLowerCase().includes(kw))));
+}
+function bulkDelCanDelete(q) { const a = getSharedAccess(q.sharedDocId); return !(a.shared && a.readOnly); }
+function renderBulkDelete() {
+  const st = _bulkDel; if (!st) return;
+  const body = document.getElementById('bulkDelBody');
+  const cards = bulkDeleteCards();
+  const hasSub = getAllSubcategories(st.cat).length > 1;
+  const keepScroll = (document.getElementById('bulkDelList') || {}).scrollTop || 0;
+  body.innerHTML = `
+    <div class="cat-edit-title">☑️ 問題を選んで削除</div>
+    <div class="cat-edit-path">📁 ${escapeHtml(st.cat)}</div>
+    <input type="text" id="bulkDelSearch" class="form-control" placeholder="🔍 問題・答え・メモで絞り込み" value="${escAttr(st.q)}" style="margin-top:8px;">
+    ${hasSub ? `<label class="toggle-pill" style="margin-top:6px; display:flex; align-items:center; gap:8px;"><input type="checkbox" id="bulkDelSub" ${st.sub ? 'checked' : ''}>下のフォルダーの問題も表示</label>` : ''}
+    <div class="bulkdel-bar">
+      <button type="button" class="chip" id="bulkDelAll">表示中を全部選ぶ</button>
+      <button type="button" class="chip" id="bulkDelNone">選択を外す</button>
+      <span class="hint-small">${st.sel.size} 件を選択中 ・ ${cards.length} 件を表示</span>
+    </div>
+    <div id="bulkDelList" class="bulkdel-list">${cards.map(q => {
+      const ok = bulkDelCanDelete(q);
+      return `<label class="bulkdel-row${ok ? '' : ' ro'}"><input type="checkbox" data-id="${escAttr(q.id)}" ${st.sel.has(q.id) ? 'checked' : ''} ${ok ? '' : 'disabled'}>
+        <div style="min-width:0; flex:1;"><div class="bulkdel-q">${q.no ? `<span class="card-no">No.${Number(q.no)}</span>` : ''}${escapeHtml(String(q.question).slice(0, 120))}</div>
+        <div class="hint-small">${escapeHtml(String(q.answer).slice(0, 80))}${st.sub && q.category !== st.cat ? `　📂 ${escapeHtml(q.category)}` : ''}${ok ? '' : '　🔒 閲覧専用'}</div></div></label>`;
+    }).join('') || '<div class="hint-small" style="padding:12px;">問題がありません。</div>'}</div>
+    <div class="plan-btns" style="margin-top:10px;">
+      <button type="button" class="btn btn-danger" id="bulkDelGo" ${st.sel.size ? '' : 'disabled'}>🗑️ ${st.sel.size} 件を削除</button>
+      <button type="button" class="btn btn-secondary" onclick="closeBulkDeleteDialog()">閉じる</button>
+    </div>`;
+  const list = document.getElementById('bulkDelList'); list.scrollTop = keepScroll;
+  list.querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = () => { if (cb.checked) st.sel.add(cb.dataset.id); else st.sel.delete(cb.dataset.id); renderBulkDelete(); });
+  const s = document.getElementById('bulkDelSearch');
+  s.oninput = () => { st.q = s.value; const pos = s.selectionStart; renderBulkDelete(); const s2 = document.getElementById('bulkDelSearch'); s2.focus(); try { s2.setSelectionRange(pos, pos); } catch (e) {} };
+  const sub = document.getElementById('bulkDelSub'); if (sub) sub.onchange = () => { st.sub = sub.checked; renderBulkDelete(); };
+  document.getElementById('bulkDelAll').onclick = () => { cards.filter(bulkDelCanDelete).forEach(q => st.sel.add(q.id)); renderBulkDelete(); };
+  document.getElementById('bulkDelNone').onclick = () => { st.sel.clear(); renderBulkDelete(); };
+  document.getElementById('bulkDelGo').onclick = runBulkDelete;
+}
+async function runBulkDelete() {
+  const st = _bulkDel; if (!st || !st.sel.size) return;
+  const targets = db.filter(q => st.sel.has(q.id) && bulkDelCanDelete(q));
+  if (!targets.length) return;
+  const shared = targets.filter(q => q.sharedDocId).length;
+  if (!confirm(`選んだ ${targets.length} 件の問題を削除しますか？${shared ? `\n\n⚠️ そのうち ${shared} 件は共有カテゴリーのカードなので、共有している全員の手元からも消えます。` : ''}\n（削除の前の状態は「復元ポイント」から戻せます）`)) return;
+  if (typeof takeSnapshot === 'function') await takeSnapshot(`問題の一括削除（${st.cat}・${targets.length}件）`);
+  const ids = targets.map(q => q.id), idSet = new Set(ids);
+  tombstoneCards(ids);
+  db = db.filter(q => !idSet.has(q.id));
+  const byDoc = {};
+  targets.forEach(q => { if (q.sharedDocId) (byDoc[q.sharedDocId] = byDoc[q.sharedDocId] || []).push(q.id); });
+  saveData(true);
+  for (const d of Object.keys(byDoc)) await removeCardsFromSharedDoc(d, byDoc[d]);
+  st.sel.clear();
+  if (typeof refreshVisibleViews === 'function') refreshVisibleViews(true);
+  renderBulkDelete();
+  if (typeof showAppToast === 'function') showAppToast(`🗑️ ${targets.length} 件を削除しました`); else alert(`🗑️ ${targets.length} 件を削除しました`);
+}
+
 function showCategoryPanel(html) {
   const panel = document.getElementById('catEditPanel');
   panel.innerHTML = `<div class="cat-edit-panel">${html}</div>`;
@@ -255,6 +335,7 @@ function runCategoryAction(catName, act, info) {
       return;
     }
     case 'skipauto': autoSkipSubfolders(catName); return;
+    case 'pickdel': closeCategoryEditor(); openBulkDeleteDialog(catName); return;
     case 'open': closeCategoryEditor(); currentViewContext = { type: 'category', value: catName }; openPage('pgBox'); return;
     case 'add': closeCategoryEditor(); currentViewContext = { type: 'category', value: catName }; showAddQModal(); return;
     case 'bulk': closeCategoryEditor(); showBulkAddModal(catName); return;
