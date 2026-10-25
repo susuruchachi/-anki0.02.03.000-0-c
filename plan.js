@@ -214,6 +214,7 @@ function renderPlanSettings() {
       <option value="1" ${p.monthly !== false && p.monthlyStars === 1 ? 'selected' : ''}>★ 以上の単語</option>
       <option value="3" ${p.monthly !== false && p.monthlyStars === 3 ? 'selected' : ''}>★★★ の単語</option>
       <option value="off" ${p.monthly === false ? 'selected' : ''}>しない</option></select>
+    <label class="toggle-pill" style="margin-top:8px; display:flex; align-items:center; gap:8px;"><input type="checkbox" id="planAutoOpen" ${p.autoOpen === false ? '' : 'checked'}>▶️ アプリを開いたら、残っている課題を自動で開く</label>
     <div class="plan-btns" style="margin-top:10px;"><button class="btn btn-primary" onclick="saveStudyPlan()" ${children.length ? '' : 'disabled'}>💾 ${planOk() ? '更新' : 'プランを作る'}</button>${planOk() ? '<button class="btn btn-secondary" onclick="stopStudyPlan()">やめる</button>' : ''}</div>
     ${roots.length ? '' : '<div class="hint-small drill-ng">サブフォルダーが2つ以上あるフォルダーがありません（例：鉄壁 の下に #1, #2 …）。</div>'}`;
 }
@@ -250,7 +251,8 @@ function saveStudyPlan() {
     enabled: true, root, weeks, start: planDateStr(mon),
     wordsFrom: Number(document.getElementById('planFrom').value), wordsDue: Number(document.getElementById('planDue').value),
     reviewDay: Number(document.getElementById('planReviewDay').value), sunday: document.getElementById('planSunday').value,
-    monthly: m !== 'off', monthlyStars: m === 'off' ? 2 : Number(m), log: keepLog, planAt: Date.now()
+    monthly: m !== 'off', monthlyStars: m === 'off' ? 2 : Number(m), log: keepLog, planAt: Date.now(),
+    autoOpen: !!(document.getElementById('planAutoOpen') || { checked: true }).checked
   };
   _planDraftRoot = null; _planDraftUnit = null;
   studyPlan.unit = unit;
@@ -293,4 +295,25 @@ function planSyncNotice() {
   if (!token) return; // 通知をオンにしていない
   _planNoticeKey = key;
   firestore.collection('susuru_anki_push').doc(currentUser.uid).set({ plan: info }, { merge: true }).catch(e => { _planNoticeKey = ''; console.warn('プランの通知の保存に失敗:', e.message); });
+}
+
+// ---------------- 自動で開く ----------------
+// ★【0.03.32】アプリを開いたとき、今日の課題が残っていれば、そこから始める（2時間に1回まで。設定で止められる）
+function planAutoOpen() {
+  if (!planOk() || studyPlan.autoOpen === false) return;
+  const active = (document.querySelector('.screen.active') || {}).id || '';
+  if (['pgShared', 'pgQuizPlayer', 'pgOnlineMatch', 'pgMatchHistory'].includes(active)) return;
+  if (document.querySelector('.modal-overlay[style*="flex"], #catEditOverlay[style*="flex"]')) return;
+  try { const last = Number(localStorage.getItem('susuru_anki_plan_autoopen')) || 0; if (Date.now() - last < 2 * 3600 * 1000) return; } catch (e) {}
+  const t = planTasks().find(x => !x.done && !x.upcoming && !x.locked && !x.optional);
+  if (!t) return;
+  try { localStorage.setItem('susuru_anki_plan_autoopen', String(Date.now())); } catch (e) {}
+  const cur = planWeekFolder(planWeekIndex());
+  if (t.key === 'words') {
+    try { localStorage.setItem('susuru_anki_drill_cat', cur); } catch (e) {}
+    openPage('pgDrill');
+    if (typeof drillLoadAll === 'function' && drillLoadAll()[cur]) drillResume(cur); // 途中経過があれば続きから
+    else if (typeof drillStart === 'function' && DG.length) drillStart();
+  } else planStartQuizFor(t.key);
+  if (typeof showAppToast === 'function') showAppToast(`📅 今週のプラン「${t.title.replace(/^\S+\s/, '')}」から始めます（${t.key === 'words' ? '⏸ 一時離脱' : '✕ 中断'}でほかの画面へ）`);
 }
