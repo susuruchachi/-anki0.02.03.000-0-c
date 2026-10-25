@@ -106,31 +106,48 @@ async function sendPlanReminders() {
   console.log(`週間プラン: ${sent} 件送信`);
 }
 
-function readVersionInfo() {
-  const v = (fs.readFileSync(path.join(ROOT, 'version-info.js'), 'utf8').match(/APP_VERSION\s*=\s*["']([^"']+)["']/) || [])[1];
+// ★【0.03.34】バージョンは公開しているサイトから読む（定期実行は main のファイルで動くが、サイトは別のブランチから公開していることがあるため）
+async function readSiteFile(name) {
+  try { const r = await fetch(APP_URL + name + '?t=' + Date.now(), { cache: 'no-store' }); if (r.ok) return await r.text(); } catch (e) {}
+  return fs.readFileSync(path.join(ROOT, name), 'utf8');
+}
+async function readVersionInfo() {
+  const v = ((await readSiteFile('version-info.js')).match(/APP_VERSION\s*=\s*["']([^"']+)["']/) || [])[1];
   let title = '';
   try {
     const ctx = {}; vm.createContext(ctx);
-    vm.runInContext(fs.readFileSync(path.join(ROOT, 'release-notes.js'), 'utf8').replace('const BUNDLED_RELEASE_NOTES', 'var BUNDLED_RELEASE_NOTES'), ctx);
+    vm.runInContext((await readSiteFile('release-notes.js')).replace('const BUNDLED_RELEASE_NOTES', 'var BUNDLED_RELEASE_NOTES'), ctx);
     const note = (ctx.BUNDLED_RELEASE_NOTES || []).find(n => n.version === v);
     if (note) title = note.title;
   } catch (e) {}
   return { version: v, title };
 }
 
+// ★【0.03.35】知らせ済みのバージョンは lastSiteVersion に記録する（公開しているサイトのバージョン）。
+// main にある古い送信側（v0.03.14 まで）は lastVersion と「main のファイルのバージョン」を比べるので、
+// lastVersion は main のバージョンにしておく（そうしないと古い送信側が「v0.03.14 が出ました」と送ってしまう）
+async function mainVersion() {
+  const repo = process.env.GITHUB_REPOSITORY;
+  if (!repo) return null;
+  try { const r = await fetch(`https://raw.githubusercontent.com/${repo}/main/version-info.js?t=${Date.now()}`); if (r.ok) return ((await r.text()).match(/APP_VERSION\s*=\s*["']([^"']+)["']/) || [])[1] || null; } catch (e) {}
+  return null;
+}
 async function sendUpdate() {
-  const { version, title } = readVersionInfo();
+  const { version, title } = await readVersionInfo();
   if (!version) return console.log('バージョンを読めませんでした');
   const metaRef = db.doc(META_DOC);
   const meta = (await metaRef.get()).data() || {};
-  if (!meta.lastVersion) { await metaRef.set({ lastVersion: version }, { merge: true }); return console.log(`初回なので v${version} を記録だけしました`); }
-  if (meta.lastVersion === version) return console.log(`v${version} は知らせ済み`);
+  const mv = await mainVersion();
+  const keepOld = mv ? { lastVersion: mv } : {};
+  const last = meta.lastSiteVersion || meta.lastVersion;
+  if (!last) { await metaRef.set(Object.assign({ lastSiteVersion: version }, keepOld), { merge: true }); return console.log(`初回なので v${version} を記録だけしました`); }
+  if (last === version) { await metaRef.set(Object.assign({ lastSiteVersion: version }, keepOld), { merge: true }); return console.log(`v${version} は知らせ済み`); }
   const snap = await db.collection(PUSH_COL).where('updates', '==', true).get();
   let sent = 0;
   for (const doc of snap.docs) {
     sent += await sendToUser(doc.ref, doc.data(), { kind: 'update', tag: 'update', version, title: `🆕 すするanki v${version}`, body: title || '新しい機能・修正があります。開いてお知らせを見てみましょう', url: APP_URL });
   }
-  await metaRef.set({ lastVersion: version }, { merge: true });
+  await metaRef.set(Object.assign({ lastSiteVersion: version }, keepOld), { merge: true });
   console.log(`アップデートのお知らせ v${version}: ${sent} 件送信`);
 }
 
