@@ -141,6 +141,28 @@ async function submitUserReport() {
   } catch(e) { alert("⚠️ 送信に失敗しました。"); }
 }
 
+// ★【0.03.26】文字をコピーする（クリップボードが使えないブラウザでも動くように）
+async function copyTextToClipboard(text) {
+  try { await navigator.clipboard.writeText(text); return true; }
+  catch (e) {
+    const ta = document.createElement('textarea'); ta.value = text; ta.style.cssText = 'position:fixed; left:-9999px; top:0;';
+    document.body.appendChild(ta); ta.select();
+    let ok = false; try { ok = document.execCommand('copy'); } catch (e2) {}
+    ta.remove(); return ok;
+  }
+}
+let _adminReports = [];
+function reportToText(r) { return `【${r.dateStr || '日時不明'}】${r.name || '名無し'}（v${r.version || '?'}・UID: ${r.uid || '?'}）\n${r.content || ''}`; }
+async function copyUserReport(i) {
+  const r = _adminReports[i]; if (!r) return;
+  alert(await copyTextToClipboard(reportToText(r)) ? '📋 コピーしました' : '⚠️ コピーできませんでした');
+}
+async function copyAllUserReports() {
+  if (!_adminReports.length) return alert('コピーする報告がありません。');
+  const text = _adminReports.map(reportToText).join('\n\n---\n\n');
+  alert(await copyTextToClipboard(text) ? `📋 ${_adminReports.length} 件をまとめてコピーしました` : '⚠️ コピーできませんでした');
+}
+
 // ★ 管理者用：要望一覧を読み込む
 async function loadUserReports() {
   if(!currentUser || currentUser.uid !== ADMIN_UID) return;
@@ -148,18 +170,22 @@ async function loadUserReports() {
   list.innerHTML = '<p style="text-align:center; color:var(--text3); font-size:0.8rem;">読み込み中...</p>';
   try {
     const snap = await firestore.collection('susuru_anki_reports').orderBy('date','desc').limit(50).get();
-    list.innerHTML = '';
+    list.innerHTML = ''; _adminReports = [];
     if(snap.empty) { list.innerHTML = '<p style="text-align:center; color:var(--text3); font-size:0.8rem;">まだ報告はありません。</p>'; return; }
     snap.forEach(doc => {
       const d = doc.data();
       const dateStr = d.date && d.date.toDate ? d.date.toDate().toLocaleString('ja-JP') : '';
+      const idx = _adminReports.push(Object.assign({ id: doc.id, dateStr }, d)) - 1;
       list.innerHTML += `<div style="background:var(--bg3); padding:10px; border-radius:8px; border:1px solid var(--border);">
         <div style="font-size:0.75rem; color:var(--text2); display:flex; justify-content:space-between;">
           <span>👤 ${escapeHtml(d.name)} (v${escapeHtml(d.version)})</span>
           <span>${dateStr}</span>
         </div>
         <div style="font-size:0.85rem; color:var(--text); margin-top:5px; white-space:pre-wrap;">${escapeHtml(d.content)}</div>
-        <button class="btn btn-danger" style="padding:4px 10px; font-size:0.75rem; margin-top:10px; width:auto;" onclick="deleteUserReport(${jsArg(doc.id)})">✅ 対応完了 (削除)</button>
+        <div style="display:flex; gap:8px; margin-top:10px;">
+          <button class="btn btn-secondary" style="padding:4px 10px; font-size:0.75rem; width:auto;" onclick="copyUserReport(${idx})">📋 コピー</button>
+          <button class="btn btn-danger" style="padding:4px 10px; font-size:0.75rem; width:auto;" onclick="deleteUserReport(${jsArg(doc.id)})">✅ 対応完了 (削除)</button>
+        </div>
       </div>`;
     });
   } catch(e) { list.innerHTML = '<p style="color:var(--danger); font-size:0.8rem;">読み込みエラー</p>'; }

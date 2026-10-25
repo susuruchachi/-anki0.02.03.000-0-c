@@ -777,7 +777,10 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
       <button class="btn btn-accent" onclick="postUpdate()">🚀 お知らせを配信する</button>
       <hr style="border:0; border-top:1px solid var(--border); margin:15px 0;">
       <div class="setting-box-title" style="color: var(--accent);">📥 ユーザーからのバグ報告・要望一覧</div>
-      <button class="btn btn-secondary" style="margin-bottom:10px; padding:6px 12px; font-size:0.8rem; width:auto;" onclick="loadUserReports()">🔄 更新</button>
+      <div style="display:flex; gap:8px; margin-bottom:10px;">
+        <button class="btn btn-secondary" style="padding:6px 12px; font-size:0.8rem; width:auto;" onclick="loadUserReports()">🔄 更新</button>
+        <button class="btn btn-secondary" style="padding:6px 12px; font-size:0.8rem; width:auto;" onclick="copyAllUserReports()">📋 全部コピー</button>
+      </div>
       <div id="adminReportsList" style="display:flex; flex-direction:column; gap:10px; max-height:400px; overflow-y:auto; padding:5px;"></div>
       <hr style="border:0; border-top:1px solid var(--border); margin:15px 0;">
       <div class="setting-box-title" style="color: var(--accent);">📥 バグ報告・要望 CSVインポート</div>
