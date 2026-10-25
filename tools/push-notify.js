@@ -108,6 +108,8 @@ async function sendPlanReminders() {
 
 // ★【0.03.34】バージョンは公開しているサイトから読む（定期実行は main のファイルで動くが、サイトは別のブランチから公開していることがあるため）
 async function readSiteFile(name) {
+  // バージョンを上げて push したときは、まだサイトに出る前なので、押されたブランチのファイルを使う
+  if (process.env.GITHUB_EVENT_NAME === 'push') return fs.readFileSync(path.join(ROOT, name), 'utf8');
   try { const r = await fetch(APP_URL + name + '?t=' + Date.now(), { cache: 'no-store' }); if (r.ok) return await r.text(); } catch (e) {}
   return fs.readFileSync(path.join(ROOT, name), 'utf8');
 }
