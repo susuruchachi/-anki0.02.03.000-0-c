@@ -181,7 +181,7 @@ async function startOnlineMatch(scope, qCount, timeLimit, isPrivate, quizFormat 
       }
     }
     // 共有カードだけから出題する（親フォルダーを選んだ場合はサブフォルダーもすべて）
-    const subCats = typeof getAllSubcategories === 'function' ? getAllSubcategories(scope) : [scope];
+    const subCats = typeof getQuizSubcategories === 'function' ? getQuizSubcategories(scope) : [scope];
     const subSet = new Set(subCats);
     const pool = db.filter(q => subSet.has(q.category) && q.sharedDocId);
     if (pool.length === 0) {

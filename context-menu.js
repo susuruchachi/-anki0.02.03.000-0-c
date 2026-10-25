@@ -175,6 +175,10 @@ function openCategoryEditor(catName) {
       <button type="button" class="chip" data-subj-custom="1">＋ 自分で入力</button>
       <button type="button" class="chip" data-subj-clear="1">${catSubjects && Object.prototype.hasOwnProperty.call(catSubjects, catName) ? '↩️ 設定を外す' : '— なし'}</button>
     </div>
+    ${path.length > 1 ? `<div class="cat-edit-sec">🚫 出題</div>
+    <label class="toggle-pill" style="display:flex; align-items:center; gap:8px;"><input type="checkbox" id="chkCatSkip" ${isCatSkipped(catName) ? 'checked' : ''}>上のフォルダー（${escapeHtml(path[path.length - 2])} など）から出題するときは、このフォルダーの問題を出さない</label>
+    <div class="hint-small">例文・Review Test などのフォルダー向け。このフォルダーを選べば、ここだけで出題できます。</div>` : ''}
+    ${children ? `<div class="cat-act-grid" style="margin-top:6px;">${btn('skipauto', '🚫', '下の「例文」「Review」「テスト」「チャンツ」フォルダーをまとめて出題から外す')}</div>` : ''}
     <div class="cat-edit-sec">共有</div>
     <div class="cat-act-grid">
       ${info.shared ? '' : btn('share', '🔗', '共有URLを発行', { disabled: isRoot })}
@@ -187,6 +191,9 @@ function openCategoryEditor(catName) {
     <button type="button" class="btn btn-secondary" style="margin-top:14px;" onclick="closeCategoryEditor()">閉じる</button>`;
 
   body.querySelectorAll('.cat-act').forEach(b => { b.onclick = () => runCategoryAction(catName, b.getAttribute('data-act'), info); });
+  // ★【0.03.30】上のフォルダーから出題するときに出さない
+  const skipChk = body.querySelector('#chkCatSkip');
+  if (skipChk) skipChk.onchange = () => { setCategorySkip(catName, skipChk.checked); };
   // ★【0.03.07】教科タグ
   const afterSubj = () => { afterCategoryChange(); openCategoryEditor(catName); };
   body.querySelectorAll('[data-subj]').forEach(b => { b.onclick = () => {
@@ -213,6 +220,23 @@ function openCategoryEditor(catName) {
   ov.style.display = 'flex';
 }
 
+function setCategorySkip(cat, on) {
+  catSkip = catSkip || {};
+  if (on) catSkip[cat] = true; else if (catSkip[cat]) catSkip[cat] = false;
+  saveData(true);
+  if (typeof refreshVisibleViews === 'function') refreshVisibleViews(true);
+}
+const CAT_SKIP_NAME_RE = /例文|review|テスト|チャンツ|chant|check/i;
+function autoSkipSubfolders(cat) {
+  const targets = getAllSubcategories(cat).filter(c => c !== cat && CAT_SKIP_NAME_RE.test(c) && !isCatSkipped(c));
+  if (!targets.length) return alert('名前に「例文」「Review」「テスト」「チャンツ」が入ったサブフォルダーで、まだ外していないものはありません。');
+  if (!confirm(`次の ${targets.length} 個のフォルダーを、上のフォルダーから出題するときに出さないようにしますか？\n\n${targets.slice(0, 30).join('\n')}${targets.length > 30 ? '\n…' : ''}`)) return;
+  targets.forEach(c => { catSkip[c] = true; });
+  saveData(true);
+  if (typeof refreshVisibleViews === 'function') refreshVisibleViews(true);
+  openCategoryEditor(cat);
+}
+
 function showCategoryPanel(html) {
   const panel = document.getElementById('catEditPanel');
   panel.innerHTML = `<div class="cat-edit-panel">${html}</div>`;
@@ -230,6 +254,7 @@ function runCategoryAction(catName, act, info) {
       closeCategoryEditor(); openPage('pgHome'); buildQuizScopeDropdown();
       return;
     }
+    case 'skipauto': autoSkipSubfolders(catName); return;
     case 'open': closeCategoryEditor(); currentViewContext = { type: 'category', value: catName }; openPage('pgBox'); return;
     case 'add': closeCategoryEditor(); currentViewContext = { type: 'category', value: catName }; showAddQModal(); return;
     case 'bulk': closeCategoryEditor(); showBulkAddModal(catName); return;
@@ -355,6 +380,7 @@ function renameCategory(oldName, newName) {
   db.forEach(q => { if (q.category === oldName) { q.category = newName; touchCard(q); } });
   renameInSharedMeta(oldName, newName);
   if (catSubjects && Object.prototype.hasOwnProperty.call(catSubjects, oldName)) { catSubjects[newName] = catSubjects[oldName]; delete catSubjects[oldName]; }
+  if (catSkip && Object.prototype.hasOwnProperty.call(catSkip, oldName)) { catSkip[newName] = catSkip[oldName]; delete catSkip[oldName]; }
   markCatsDeleted([oldName]);
   markCatCreated(newName);
   replaceInScopePaths(oldName, newName);

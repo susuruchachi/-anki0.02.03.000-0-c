@@ -14,6 +14,16 @@ let deletedCats = [];
 // ================================================================
 let catStamps = {};   // { フォルダー名: { a: 作成(復活)時刻, d: 削除時刻 } }
 let catSubjects = {}; // ★【0.03.07】フォルダーの教科タグ { フォルダー名: '英語' }（'' は「なし（親から引き継がない）」）
+// ★【0.03.30】上のフォルダーから出題するときに出さないフォルダー { フォルダー名: true }（false は「出す」を明示。同期で外せるように）
+let catSkip = {};
+function isCatSkipped(cat) { return !!(catSkip && catSkip[cat] === true); }
+// 出題に使うフォルダー：自分と、その下のフォルダー（ただし「上から出題するときは出さない」フォルダーとその下は除く）
+function getQuizSubcategories(cat, result = []) {
+  if (result.includes(cat)) return result;
+  result.push(cat);
+  (categoryTree[cat] || []).forEach(c => { if (!isCatSkipped(c)) getQuizSubcategories(c, result); });
+  return result;
+}
 let studyPlan = null; // ★【0.03.27】週間プラン（plan.js）。設定は新しく変えた方、達成の記録は両方を残す
 function mergeStudyPlans(a, b) {
   if (!a) return b || null; if (!b) return a;
@@ -177,6 +187,7 @@ function loadData() {
       if(p.deletedCats) deletedCats=p.deletedCats;
       if(p.catStamps) catStamps=p.catStamps;
       if(p.catSubjects) catSubjects=p.catSubjects;
+      if(p.catSkip) catSkip=p.catSkip;
       if(p.studyPlan) studyPlan=p.studyPlan;
       if(p.deletedCardsAt) deletedCardsAt=p.deletedCardsAt;
       if(p.docStamps) docStamps=p.docStamps;
@@ -245,7 +256,9 @@ function structFingerprint() {
   Object.keys(categoryTree || {}).sort().forEach(k => { tree[k] = categoryTree[k]; });
   const subj = {};
   Object.keys(catSubjects || {}).sort().forEach(k => { subj[k] = catSubjects[k]; });
-  return JSON.stringify([categories, tree, [...(subscribedDocs || [])].sort(), [...(ownedDocs || [])].sort(), subj]);
+  const skip = {};
+  Object.keys(catSkip || {}).sort().forEach(k => { skip[k] = catSkip[k]; });
+  return JSON.stringify([categories, tree, [...(subscribedDocs || [])].sort(), [...(ownedDocs || [])].sort(), subj, skip]);
 }
 // フォルダー構造が変わっていれば変更時刻を更新する（クラウドから取り込んだ変更では呼ばない）
 function updateStructStamp() {
@@ -255,7 +268,7 @@ function updateStructStamp() {
 }
 
 function buildSyncPayload() {
-  return { db, categories, categoryTree, subscribedDocs, ownedDocs, deletedCards, deletedCardsAt, deletedCats, catStamps, docStamps, structAt, catSubjects, studyPlan };
+  return { db, categories, categoryTree, subscribedDocs, ownedDocs, deletedCards, deletedCardsAt, deletedCats, catStamps, docStamps, structAt, catSubjects, catSkip, studyPlan };
 }
 
 let _quotaWarned = false;
@@ -502,6 +515,7 @@ function mergeSyncStates(L, C) {
     deletedCards: delCards, deletedCardsAt: delAt, deletedCats: deadCats, catStamps: cs, docStamps: ds,
     // 教科タグ：フォルダー構造を新しく変更した側を優先し、もう一方にしか無いものは足す
     catSubjects: (() => { const o = Object.assign({}, older.catSubjects || {}, newer.catSubjects || {}); Object.keys(o).forEach(k => { if (!aliveSet.has(k)) delete o[k]; }); return o; })(),
+    catSkip: (() => { const o = Object.assign({}, older.catSkip || {}, newer.catSkip || {}); Object.keys(o).forEach(k => { if (!aliveSet.has(k)) delete o[k]; }); return o; })(),
     structAt: Math.max(L.structAt || 0, C.structAt || 0),
     studyPlan: mergeStudyPlans(L.studyPlan, C.studyPlan),
     subscribedDocs: subs, ownedDocs: owned
@@ -513,7 +527,7 @@ function mergeIntoLocal(r) {
   const merged = mergeSyncStates(buildSyncPayload(), r);
   db = merged.db; categories = merged.categories; categoryTree = merged.categoryTree;
   deletedCards = merged.deletedCards; deletedCardsAt = merged.deletedCardsAt; deletedCats = merged.deletedCats;
-  catStamps = merged.catStamps; docStamps = merged.docStamps; structAt = merged.structAt; catSubjects = merged.catSubjects || {}; studyPlan = merged.studyPlan || null;
+  catStamps = merged.catStamps; docStamps = merged.docStamps; structAt = merged.structAt; catSubjects = merged.catSubjects || {}; catSkip = merged.catSkip || {}; studyPlan = merged.studyPlan || null;
   subscribedDocs = merged.subscribedDocs; ownedDocs = merged.ownedDocs;
   ensureSystemSanity();
   autoMerge(true);
@@ -543,7 +557,7 @@ function syncFingerprint(p) {
   return stableStringify({
     db: dbSorted, categories: [...(p.categories || [])].sort(), categoryTree: p.categoryTree || {},
     deletedCards: [...(p.deletedCards || [])].sort(), deletedCardsAt: p.deletedCardsAt || {}, deletedCats: [...(p.deletedCats || [])].sort(),
-    catStamps: p.catStamps || {}, docStamps: p.docStamps || {}, structAt: p.structAt || 0, catSubjects: p.catSubjects || {}, studyPlan: p.studyPlan || null,
+    catStamps: p.catStamps || {}, docStamps: p.docStamps || {}, structAt: p.structAt || 0, catSubjects: p.catSubjects || {}, catSkip: p.catSkip || {}, studyPlan: p.studyPlan || null,
     subscribedDocs: [...(p.subscribedDocs || [])].sort(), ownedDocs: [...(p.ownedDocs || [])].sort()
   });
 }
@@ -608,6 +622,7 @@ function ensureSystemSanity() {
   });
   for (const p in categoryTree) { if (categoryTree[p].length === 0) delete categoryTree[p]; }
   Object.keys(catSubjects || {}).forEach(k => { if (!categories.includes(k)) delete catSubjects[k]; });
+  Object.keys(catSkip || {}).forEach(k => { if (!categories.includes(k)) delete catSkip[k]; });
 
   const knownDocs = new Set([...(subscribedDocs || []), ...(ownedDocs || [])]);
   const delSet = new Set(deletedCards);
@@ -693,7 +708,7 @@ function resolveAccountSwitch() {
     if (!merge) {
       takeSnapshot('アカウント変更（置き換え）');
       db = []; categories = ['未分類']; categoryTree = {}; subscribedDocs = []; ownedDocs = [];
-      deletedCards = []; deletedCardsAt = {}; deletedCats = []; catStamps = {}; docStamps = {}; structAt = 0; catSubjects = {}; studyPlan = null;
+      deletedCards = []; deletedCardsAt = {}; deletedCats = []; catStamps = {}; docStamps = {}; structAt = 0; catSubjects = {}; catSkip = {}; studyPlan = null;
       sharedDocPermissions = {};
       _structHash = structFingerprint(); writeLocal();
     } else {

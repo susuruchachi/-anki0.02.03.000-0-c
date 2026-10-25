@@ -31,9 +31,12 @@ function drillBuild(cat) {
   db.forEach(q => { (byCat[q.category] = byCat[q.category] || []).push(q); });
   DG = []; let o = 0;
   const groupOf = {};
+  // ★【0.03.30】「上のフォルダーから出題するときは出さない」フォルダーの単語は出さない（選んだフォルダーそのものは出す）。
+  //  Check!（選択肢つきのテスト）は、グループの最後の確認として、そのフォルダーからも出す
+  const skipped = c => { for (let x = c; x && x !== cat; x = getCategoryParent(x)) { if (isCatSkipped(x)) return true; } return false; };
   cats.forEach(c => {
     const cards = sortCardsByNumber((byCat[c] || []).slice());
-    const words = cards.filter(drillIsWordCard), checks = cards.filter(drillIsCheckCard);
+    const words = skipped(c) ? [] : cards.filter(drillIsWordCard), checks = cards.filter(drillIsCheckCard);
     let g = null;
     if (words.length) { g = { name: c, items: [], checks: [] }; DG.push(g); }
     else if (checks.length) {

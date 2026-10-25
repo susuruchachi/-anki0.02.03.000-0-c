@@ -35,7 +35,7 @@ function planWordsDeadline(i) { const d = planParseDate(planWeekKey(i)); d.setDa
 // 範囲のカード
 function planCards(cat) { if (!cat) return []; const set = new Set(getAllSubcategories(cat)); return db.filter(q => set.has(q.category)); }
 function planIsExampleCard(q) { return q.kind === 'cloze' || (PLAN_EX_RE.test(q.category) && q.kind !== 'test'); }
-function planWordCards(cat) { return planCards(cat).filter(q => !planIsExampleCard(q) && (typeof drillIsWordCard !== 'function' || drillIsWordCard(q))); }
+function planWordCards(cat) { const ok = new Set(typeof getQuizSubcategories === 'function' ? getQuizSubcategories(cat) : getAllSubcategories(cat)); return planCards(cat).filter(q => ok.has(q.category)).filter(q => !planIsExampleCard(q) && (typeof drillIsWordCard !== 'function' || drillIsWordCard(q))); }
 function planExampleCards(cat) { return planCards(cat).filter(planIsExampleCard); }
 // その時刻より後に解いたカードの数
 function planAnsweredSince(cards, t) { return cards.filter(q => (q.statsAt || 0) >= t).length; }
@@ -181,18 +181,24 @@ function renderPlanSettings() {
   const box = document.getElementById('planSettings');
   if (!box) return;
   const p = studyPlan || {};
-  const roots = getSortedCategoriesForMenu().filter(c => getChildCategories(c).length >= 2);
+  // ★【0.03.30】どの階層のフォルダーでも選べる。1週の範囲は「直下」「2つ下」…「いちばん下」から選ぶ
+  const roots = getSortedCategoriesForMenu().filter(c => planUnitFolders(c, 'leaves').length >= 2);
   const root = [_planDraftRoot, p.root, roots[0]].find(c => c && categories.includes(c)) || '';
-  const children = root ? getChildCategories(root) : [];
-  const curIdx = planOk() && root === p.root ? Math.max(0, Math.min(children.length - 1, planWeekIndex())) : 0;
+  const unit = _planDraftUnit || p.unit || 'leaves';
+  const children = root ? planUnitFolders(root, unit) : [];
+  const curIdx = planOk() && root === p.root && unit === (p.unit || 'leaves') ? Math.max(0, Math.min(children.length - 1, planWeekIndex())) : 0;
+  const depth = root ? planMaxDepth(root) : 1;
+  const unitOpts = [['leaves', '単語が入っているいちばん下のフォルダー'], ['children', '直下のフォルダー']].concat(Array.from({ length: Math.max(0, depth - 1) }, (_, k) => ['d' + (k + 2), `${k + 2}つ下のフォルダー`]));
   const daySel = (id, v) => `<select id="${id}" class="form-control">${PLAN_DAYS.map((d, i) => `<option value="${i}" ${Number(v) === i ? 'selected' : ''}>${d}曜</option>`).join('')}</select>`;
   box.innerHTML = `
     ${planOk() ? `<div class="hint-small" style="margin-bottom:8px;">✅ 使っています：${escapeHtml(p.root)}（${p.weeks.length}週・${escapeHtml(p.start)} の週から）</div>` : '<div class="hint-small" style="margin-bottom:8px;">1週間に1つのフォルダーずつ進めるプランを作ります。</div>'}
     <label class="section-label" style="font-weight:500;">📚 単語帳（親フォルダー）</label>
-    <select id="planRoot" class="form-control" onchange="studyPlanDraftRoot(this.value)">${roots.map(c => `<option value="${escapeHtml(c)}" ${c === root ? 'selected' : ''}>${escapeHtml(c)}（${getChildCategories(c).length}フォルダー）</option>`).join('')}</select>
+    <select id="planRoot" class="form-control" onchange="studyPlanDraftRoot(this.value)">${roots.map(c => { const d = getCategoryPath(c).length - 1; return `<option value="${escapeHtml(c)}" ${c === root ? 'selected' : ''}>${'　'.repeat(d)}${d ? '└ ' : ''}${escapeHtml(c)}</option>`; }).join('')}</select>
+    <label class="section-label" style="font-weight:500; margin-top:8px;">📏 1週の範囲</label>
+    <select id="planUnit" class="form-control" onchange="studyPlanDraftUnit(this.value)">${unitOpts.map(([v, l]) => `<option value="${v}" ${v === unit ? 'selected' : ''}>${l}（${root ? planUnitFolders(root, v).length : 0}週）</option>`).join('')}</select>
     <label class="section-label" style="font-weight:500; margin-top:8px;">📍 今週の範囲</label>
     <select id="planCurrent" class="form-control">${children.map((c, k) => `<option value="${k}" ${k === curIdx ? 'selected' : ''}>${k + 1}週目：${escapeHtml(c)}</option>`).join('')}</select>
-    <div class="hint-small">下のフォルダーを、上から1週に1つずつ進めます（フォルダーの並び順で）。</div>
+    <div class="hint-small">選んだ階層のフォルダーを、上から1週に1つずつ進めます（フォルダーの並び順で）。「上のフォルダーから出題しない」にしたフォルダー（例文・Review Test など）は週に数えません。</div>
     <div class="form-row" style="margin-top:8px; align-items:center;">
       <div style="flex:1;"><label class="section-label" style="font-weight:500;">🧠 単語を始める日</label>${daySel('planFrom', p.wordsFrom ?? 2)}</div>
       <div style="flex:1;"><label class="section-label" style="font-weight:500;">⏰ 単語の期限（夜まで）</label>${daySel('planDue', p.wordsDue ?? 4)}</div>
@@ -211,11 +217,30 @@ function renderPlanSettings() {
     <div class="plan-btns" style="margin-top:10px;"><button class="btn btn-primary" onclick="saveStudyPlan()" ${children.length ? '' : 'disabled'}>💾 ${planOk() ? '更新' : 'プランを作る'}</button>${planOk() ? '<button class="btn btn-secondary" onclick="stopStudyPlan()">やめる</button>' : ''}</div>
     ${roots.length ? '' : '<div class="hint-small drill-ng">サブフォルダーが2つ以上あるフォルダーがありません（例：鉄壁 の下に #1, #2 …）。</div>'}`;
 }
-let _planDraftRoot = null;
+let _planDraftRoot = null, _planDraftUnit = null;
 function studyPlanDraftRoot(r) { _planDraftRoot = r; renderPlanSettings(); }
+function studyPlanDraftUnit(u) { _planDraftUnit = u; renderPlanSettings(); }
+// 1週の範囲にするフォルダー（「上から出題しない」フォルダーとその下は数えない）
+function planUnitFolders(root, unit) {
+  if (!root || !categories.includes(root)) return [];
+  const kids = c => getChildCategories(c).filter(x => !(typeof isCatSkipped === 'function' && isCatSkipped(x)));
+  if (unit === 'leaves') {
+    // いちばん下＝単語のカードが直接入っているフォルダー（例文・チャンツのフォルダーは除く）
+    const hasWords = new Set(db.filter(q => !planIsExampleCard(q) && (typeof drillIsWordCard !== 'function' || drillIsWordCard(q))).map(q => q.category));
+    const out = [];
+    const walk = c => { if (c !== root && hasWords.has(c) && !PLAN_EX_RE.test(c)) out.push(c); kids(c).forEach(walk); };
+    walk(root); return out;
+  }
+  const n = unit === 'children' ? 1 : Number(String(unit).replace(/\D/g, '')) || 1;
+  let level = [root];
+  for (let i = 0; i < n; i++) level = level.flatMap(kids);
+  return level;
+}
+function planMaxDepth(root) { const kids = c => getChildCategories(c).filter(x => !isCatSkipped(x)); const d = c => { const k = kids(c); return k.length ? 1 + Math.max(...k.map(d)) : 0; }; return d(root); }
 function saveStudyPlan() {
   const root = document.getElementById('planRoot').value;
-  const weeks = getChildCategories(root);
+  const unit = document.getElementById('planUnit').value || 'leaves';
+  const weeks = planUnitFolders(root, unit);
   if (!weeks.length) return alert('フォルダーを選んでください。');
   const idx = Number(document.getElementById('planCurrent').value) || 0;
   const mon = planMonday(new Date()); mon.setDate(mon.getDate() - idx * 7);
@@ -227,7 +252,8 @@ function saveStudyPlan() {
     reviewDay: Number(document.getElementById('planReviewDay').value), sunday: document.getElementById('planSunday').value,
     monthly: m !== 'off', monthlyStars: m === 'off' ? 2 : Number(m), log: keepLog, planAt: Date.now()
   };
-  _planDraftRoot = null;
+  _planDraftRoot = null; _planDraftUnit = null;
+  studyPlan.unit = unit;
   saveData(true);
   renderPlanViews();
   alert(`📅 プランを作りました。今週は「${weeks[idx]}」です。`);

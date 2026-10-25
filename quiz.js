@@ -301,7 +301,7 @@ async function startQuiz(modeType = 'normal') {
 
   if(scope.startsWith('cat:')) {
     const cName = scope.replace('cat:', '');
-    const targets = getAllSubcategories(cName);
+    const targets = getQuizSubcategories(cName); // ★【0.03.30】「上から出題するときは出さない」フォルダーを除く
     subset = subset.filter(q => targets.includes(q.category));
   }
   // ★【0.03.07】教科で絞り込み中なら、その教科のフォルダーの問題だけ
