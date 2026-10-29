@@ -466,7 +466,7 @@ function drillDraw() {
   else if (c.t === 'c' || dst.ph === 0) {
     const q = c.t === 'c';
     b = `<div class="card">${q ? `<div class="hint-small">Check!${c.retry ? ' ・ 再出題' : ''}</div><p class="drill-q">${dE(c.ck.q)} <button class="chip" onclick="drillSpeakQ()">🔊</button></p>${/^\d/.test(c.ck.ans) ? '<div class="hint-small">番号で答えてください（複数なら「1,2」のように）</div>' : ''}`
-      : `${W(c.it)}<div class="hint-small">${c.retry ? '再出題 ・ ' : ''}<span class="card-stars">${starsText(c.it.card.stars)}</span></div><p>${dst.msg ? dE(dst.msg) : (dst.ans.length ? '他にどのような意味（訳）がありますか？' : '和訳は？')}</p>${dst.cv && dst.cv.length && dst.sn ? `<div class="hint-small">⭕ ${dst.cv.map(i => dE(String(dst.sn[i].t).split('，')[0])).join('、')}　（あと${dst.sn.length - dst.cv.length}つ）</div>` : ''}`}
+      : `${W(c.it)}<div class="hint-small">${c.retry ? '再出題 ・ ' : ''}<span class="card-stars">${starsText(c.it.card.stars)}</span></div><p>${dst.msg ? dE(dst.msg) : drillAskText(c.it, dst.ans.length > 0)}</p>${dst.cv && dst.cv.length && dst.sn ? `<div class="hint-small">⭕ ${dst.cv.map(i => dE(String(dst.sn[i].t).split('，')[0])).join('、')}　（あと${dst.sn.length - dst.cv.length}つ）</div>` : ''}`}
       <input id="drillInput" class="form-control" autocomplete="off" onkeydown="if(event.key==='Enter'&&!event.isComposing)drillSubmit()">
       <div class="drill-btns"><button class="btn btn-primary" onclick="drillSubmit()">回答</button><button class="btn btn-secondary" onclick="drillDk()">わからない</button></div></div>`;
   }
@@ -481,6 +481,13 @@ function drillDraw() {
 }
 function drillQuit() { drillSave(); drillHome(); }
 
+// ★【0.03.70】問いかけの文：英語なら「和訳は？」、かなだけの語（古文単語など）は「意味は？」、文法の項目などは「答えは？」
+function drillAskText(it, more) {
+  const w = String(it.w || '').trim();
+  const kind = /^[\x00-\x7F’]+$/.test(w) ? 'en' : /^[\u3040-\u309f\u30a0-\u30ffー・]+$/.test(w) ? 'word' : 'other';
+  if (!more) return kind === 'en' ? '和訳は？' : kind === 'word' ? '意味は？' : '答えは？';
+  return kind === 'en' ? '他にどのような意味（訳）がありますか？' : kind === 'word' ? '他にどのような意味がありますか？' : '他にも答えることがあります。続けて答えてください。';
+}
 // ---------------- 単語：和訳 ----------------
 function drillSubmit() {
   if (dlock) return;
