@@ -44,7 +44,7 @@ function drillBuild(cat) {
     const cards = sortCardsByNumber((byCat[c] || []).slice());
     const words = skipped(c) ? [] : cards.filter(drillIsWordCard), checks = cards.filter(drillIsCheckCard);
     let g = null;
-    if (words.length) { g = { name: c, items: [], checks: [] }; DG.push(g); }
+    if (words.length) { g = { name: c, items: [], checks: [], intro: (byCat[c] || []).filter(q => q.kind === 'intro').map(q => String(q.answer || '').trim())[0] || '' }; DG.push(g); }
     else if (checks.length) {
       // テストだけのフォルダー（Review Test など）は、上のフォルダーのグループの最後に出す
       let p = getCategoryParent(c);
@@ -62,7 +62,7 @@ function drillBuild(cat) {
     const last = g.items.length ? g.items[g.items.length - 1].o : o;
     g.chk = g.checks.map((q, i) => ({ key: q.id, q: q.question, ans: q.answer, choices: Array.isArray(q.choices) ? q.choices : null, card: q, o: last + 0.5 + i / 1000 }));
     g.items.forEach(x => { DI[x.id] = x; x.gi = gi; });
-    g.chk.forEach(c => { DCK[c.key] = c; });
+    g.chk.forEach(c => { DCK[c.key] = c; c.gi = gi; });
   });
 }
 
@@ -211,7 +211,44 @@ function drillDiscard(cat) {
   if (!confirm('このフォルダーの途中経過を消しますか？')) return;
   const all = drillLoadAll(); delete all[cat]; drillStoreAll(all); drillHome();
 }
-function drillStart() {
+// ★【0.03.44】ネットにつながっていないときは、始める前に確かめる（そのまま続ける／4択で先週・1か月前の範囲の復習）
+function drillOfflineGate(go) {
+  if (navigator.onLine !== false || !(typeof aiAvailable === 'function' && aiAvailable())) return go();
+  const opts = [];
+  if (typeof planList === 'function') planList().forEach(p => {
+    planUse(p); const i = planWeekIndex(), prev = planWeekFolder(i - 1), month = planWeekFolder(i - 4);
+    if (prev) { const cs = planSundayCards(prev); if (cs.length) opts.push({ label: `🔁 4択で先週の範囲（${prev}）を復習（${cs.length}問）`, cards: cs }); }
+    if (month) { const cs = planMonthlyCards(month); if (cs.length) opts.push({ label: `🗓️ 4択で1か月前の範囲（${month}）を復習（${cs.length}問）`, cards: cs }); }
+  });
+  const here = DG.flatMap(g => g.items.map(x => x.card));
+  if (here.length) opts.push({ label: `🎯 4択でこの範囲をクイズ（${here.length}問）`, cards: here });
+  window._drillOffline = { go, opts };
+  drillSetActive(false);
+  document.getElementById('drillApp').innerHTML = `<div class="card drill-offline"><div class="setting-box-title">📡 ネットにつながっていません</div>
+    <p>ネット接続がないか不安定です。このまま続けると、<b>単語帳の訳と同じ答えだけが正解</b>になり、言い換えの判定・4択・解説・質問も使えません。</p>
+    <div class="drill-btns" style="flex-direction:column;"><button class="btn btn-primary" onclick="drillOfflineGo(-1)">このまま続ける</button>
+    ${opts.map((o, k) => `<button class="btn btn-secondary" onclick="drillOfflineGo(${k})">${dE(o.label)}</button>`).join('')}
+    <button class="btn btn-secondary" onclick="drillHome()">やめる</button></div>
+    <div class="hint-small" style="margin-top:6px;">ネットにつながったらお知らせします。</div></div>`;
+}
+function drillOfflineGo(k) {
+  const o = window._drillOffline; window._drillOffline = null; if (!o) return drillHome();
+  if (k < 0) return o.go();
+  if (typeof planStartQuiz === 'function') planStartQuiz(o.opts[k].cards, false, 'choice');
+}
+// ネットが切れた・つながったときのお知らせ（暗記テストを解いているとき・暗記タブを開いているとき）
+function drillNetNotice(on) {
+  const onDrill = _drillActive || ((document.querySelector('.screen.active') || {}).id === 'pgDrill');
+  if (!onDrill || !(typeof aiAvailable === 'function' && aiAvailable())) return;
+  const msg = on ? '🌐 ネットにつながりました。AI の判定・質問が使えます' : '📡 ネットが切れました。単語帳の訳と同じ答えだけが正解になります';
+  if (typeof showAppToast === 'function') showAppToast(msg);
+  if (on && document.hidden && typeof Notification !== 'undefined' && Notification.permission === 'granted' && navigator.serviceWorker) navigator.serviceWorker.ready.then(r => r.showNotification('すするanki', { body: msg, tag: 'net' })).catch(() => {});
+  if (on && !_drillActive && document.querySelector('.drill-offline')) drillHome();
+}
+window.addEventListener('online', () => drillNetNotice(true));
+window.addEventListener('offline', () => drillNetNotice(false));
+function drillStart() { drillOfflineGate(drillStartNow); }
+function drillStartNow() {
   if (!DG.length) return alert('この範囲に単語のカードがありません。');
   const cat = drillScopeCategory();
   const all = drillLoadAll();
@@ -232,7 +269,8 @@ function drillSave() {
   all[DS.cat || ''] = { cat: DS.cat, r: DS.r, gi: DS.gi, rv: DS.rv, gm: DS.gm.map(x => x.id), miss: [...DS.miss.values()].map(drillSer), ct: DS.ct, rec: DS.rec, Q: [dst.ph === 9 ? null : dcur, ...DQ].filter(Boolean).map(drillSer), hg: DS.hdr ? DG.indexOf(DS.hdr) : -1, at: Date.now() };
   drillStoreAll(all);
 }
-function drillResume(cat) {
+function drillResume(cat) { drillBuild(cat && categories.includes(cat) ? cat : ''); drillOfflineGate(() => drillResumeNow(cat)); }
+function drillResumeNow(cat) {
   try {
     const d = drillLoadAll()[cat || ''];
     if (!d) return drillHome();
@@ -255,6 +293,7 @@ function drillPop() {
     DQ = [...DS.gm.map(it => ({ t: 'q', it })), ...g.chk.map(ck => ({ t: 'c', ck }))]; DS.gm = [];
     return drillPop();
   }
+  if (dcur.t === 'gread') { dst.ph = 'gq'; drillSave(); return drillGread(); }
   if (dcur.t === 'c' && dcur.ck.choices) dst.op = dShuffle(dcur.ck.choices.slice());
   [dcur, ...DQ].filter(x => x.t === 'q').slice(0, 2).forEach(x => drillGetSn(x.it)); // 次の単語の意味のまとめを先に
   drillSave(); drillDraw();
@@ -277,9 +316,35 @@ function drillEndRound() {
     return;
   }
   const p = DS.r; DS.r++; DS.miss = new Map();
-  DQ = [{ t: 'msg', h: `【${DS.r}周目開始】${p}周目で間違えた${L.length}問の復習に入ります。` }, ...L.map(s => s.it ? { t: 'q', it: s.it } : { t: 'c', ck: s.ck })];
+  // ★【0.03.44】2周目は、グループの切れ目ごとに導入の文（AI があればその文からの4択 → 読む）
+  const seq = []; let lastG = -1;
+  L.forEach(s => {
+    const gi = s.it ? s.it.gi : s.ck.gi;
+    if (DS.r === 2 && gi !== lastG && DG[gi] && DG[gi].intro) seq.push({ t: 'gread', g: DG[gi] });
+    lastG = gi;
+    seq.push(s.it ? { t: 'q', it: s.it } : { t: 'c', ck: s.ck });
+  });
+  DQ = [{ t: 'msg', h: `【${DS.r}周目開始】${p}周目で間違えた${L.length}問の復習に入ります。` }, ...seq];
   drillPop();
 }
+
+// ---------------- 導入の文（2周目のグループの切れ目） ----------------
+async function drillGread() {
+  const g = dcur.g; DS.giq = DS.giq || {};
+  if (!drillAiOk()) { dst.ph = 'gr'; return drillDraw(); }
+  drillDraw();
+  if (!DS.giq[g.name]) {
+    try {
+      const r = await drillAi(`次の文章（単語帳のグループのはじめの「導入の文」）の内容を確かめる、やさしい4択問題を1問作る。文章に書いてあることだけで答えられ、正解がはっきり1つのもの。問題文・選択肢は日本語で短く。\n文章:\n${g.intro.slice(0, 2500)}\nJSONのみ：{"q":"","options":["","","",""],"answer":0}`);
+      if (r && r.q && Array.isArray(r.options) && r.options.length >= 3 && r.options[r.answer] !== undefined) DS.giq[g.name] = { q: String(r.q), options: r.options.map(String), answer: Number(r.answer) };
+    } catch (e) {}
+  }
+  if (dcur.t !== 'gread' || dcur.g !== g) return;
+  dst.giq = DS.giq[g.name] || null;
+  if (!dst.giq) dst.ph = 'gr';
+  drillDraw();
+}
+function drillGiPick(i) { if (dst.ph !== 'gq' || !dst.giq) return; dst.gpick = i; dst.ph = 'gr'; drillSave(); drillDraw(); }
 
 // ---------------- 読み上げ ----------------
 // ★【0.03.28】問題（単語・Check! の問題文）は出たときに、答えは結果の画面で読み上げる。🔊 でもう一度
@@ -291,15 +356,21 @@ function drillAText(c) {
   const seg = parseStructuredAnswer(c.it.m);
   return seg ? seg.map(x => x.text).join('。') : c.it.m;
 }
-function drillSpeakQ() { if (dcur && dcur.t !== 'msg' && typeof speakText === 'function') speakText(drillQText(dcur)); }
-function drillSpeakA() { if (dcur && dcur.t !== 'msg' && typeof speakText === 'function') speakText(drillAText(dcur)); }
+function drillSpeakQ() { if (dcur && (dcur.it || dcur.ck) && typeof speakText === 'function') speakText(drillQText(dcur)); }
+function drillSpeakA() { if (dcur && (dcur.it || dcur.ck) && typeof speakText === 'function') speakText(drillAText(dcur)); }
 
 // ---------------- 画面 ----------------
 function drillDraw() {
   if (DS.hdr) { dst.h = `<div class="card drill-group"><b>📁 ${dE(DS.hdr.name)}</b><div class="hint-small">${DS.hdr.items.length}語${DS.hdr.chk.length ? ` ・ Check! ${DS.hdr.chk.length}問` : ''}</div></div>`; DS.hdr = null; }
   const c = dcur; let b = '';
   const W = it => `<div class="drill-word">${dE(it.w)} <button class="chip" style="vertical-align:middle;" onclick="drillSpeakQ()" title="読み上げる">🔊</button></div>`;
-  if (c.t === 'msg') b = `<div class="card">${dE(c.h)}<br><button class="btn btn-primary" style="margin-top:8px;" onclick="drillPop()">次</button></div>`;
+  if (c.t === 'gread') {
+    const q = dst.giq, intro = `<div class="drill-intro">${dE(c.g.intro).replace(/\n/g, '<br>')}</div>`;
+    if (dst.ph === 'gq' && !q) b = `<div class="card"><b>📖 ${dE(c.g.name)}：導入の文</b><p class="hint-small">🤖 導入の文から問題を作っています…</p></div>`;
+    else if (dst.ph === 'gq') b = `<div class="card"><div class="hint-small">📖 ${dE(c.g.name)}：導入の文から</div><p class="drill-q">${dE(q.q)}</p>${q.options.map((o, i) => `<button class="btn btn-secondary drill-opt" onclick="drillGiPick(${i})">${'①②③④⑤'[i] || ''} ${dE(o)}</button>`).join('')}</div>`;
+    else b = `<div class="card">${q && dst.gpick !== undefined ? `<p>【判定】 <b class="${dst.gpick === q.answer ? 'drill-ok' : 'drill-ng'}">${dst.gpick === q.answer ? '〇' : '×'}</b> 正解：${dE(q.options[q.answer])}</p>` : ''}<b>📖 ${dE(c.g.name)}：導入の文を読みましょう</b>${intro}<button class="btn btn-primary" style="margin-top:8px;" onclick="drillPop()">読んだ → 次</button></div>`;
+  }
+  else if (c.t === 'msg') b = `<div class="card">${dE(c.h)}<br><button class="btn btn-primary" style="margin-top:8px;" onclick="drillPop()">次</button></div>`;
   else if (dst.ph === 9) b = dst.res + drillQaHTML();
   else if (c.t === 'c' && c.ck.choices) b = `<div class="card"><div class="hint-small">Check!${c.retry ? ' ・ 再出題' : ''}</div><p class="drill-q">${dE(c.ck.q)} <button class="chip" onclick="drillSpeakQ()">🔊</button></p>${dst.op.map((o, i) => `<button class="btn btn-secondary drill-opt" onclick="drillPick(${i})">${'①②③④⑤⑥'[i] || ''} ${dE(o)}</button>`).join('')}<button class="btn btn-secondary drill-opt" onclick="drillDk()">わからない</button></div>`;
   else if (c.t === 'c' || dst.ph === 0) {
@@ -399,21 +470,44 @@ async function drillChk(v) {
 
 // ---------------- 対義語・類義語・ニュアンスの4択 ----------------
 // メモ・答えの「↔ 単語」「= 単語」から（語源の「rive = river」や、例として並べた「regular ↔ irregular」は使わない）
+// ★【0.03.44】記号の左にある語句（その行の、句読点・カッコのあとから。「X (= Y)」の形なら X）
+function drillRelLeft(src, idx) {
+  let s = src.slice(0, idx).split('\n').pop().replace(/\s+$/, '');
+  if (/[(（]$/.test(s)) s = s.slice(0, -1);
+  return s.replace(/「[^」]*」/g, '').replace(/^.*[。、；;（(／/:：]/, '').trim();
+}
+const drillSameWord = (a, w) => String(a).trim().toLowerCase() === String(w).trim().toLowerCase();
 function drillArrowWords(src, w) {
-  const out = []; const re = /↔\s*([A-Za-z][A-Za-z \-'.]*[A-Za-z])/g; let m;
+  const out = []; const re = /[↔⇔]\s*([A-Za-z][A-Za-z \-'.]*[A-Za-z])/g; let m;
   while ((m = re.exec(src))) {
-    const left = src.slice(0, m.index).split('\n').pop().replace(/「[^」]*」/g, '').replace(/^.*[。、；;（(]/, '').trim();
-    if (!left || left.toLowerCase().endsWith(String(w).toLowerCase())) out.push(m[1].trim());
+    const left = drillRelLeft(src, m.index), right = m[1].trim();
+    // 「normal ↔ abnormal」「↔ abnormal」は normal の対義語。「abnormal ↔ normal」なら左が対義語（abnormal は normal で終わるが別の語）
+    if (drillSameWord(right, w)) { const l = (left.match(/([A-Za-z][A-Za-z\-']*)$/) || [])[1]; if (l && !drillSameWord(l, w)) out.push(l); }
+    else if (!left || drillSameWord(left, w)) out.push(right);
+  }
+  return [...new Set(out)];
+}
+// 類義語：「= 単語」が、その見出し語そのものについてのもの（「by accident (= accidentally)」は by accident の言い換えなので使わない）。
+//  見出し語の派生語（accident と accidentally など）は類義語にしない
+function drillSynWords(src, w) {
+  const out = []; const re = /[=＝≒]\s*([A-Za-z][A-Za-z \-']*[A-Za-z])/g; let m;
+  const lw = String(w).toLowerCase(), stem = lw.slice(0, Math.max(4, lw.length - 2));
+  while ((m = re.exec(src))) {
+    const left = drillRelLeft(src, m.index), s = m[1].trim(), ls = s.toLowerCase();
+    if (left && !drillSameWord(left, w)) continue;
+    if (ls === lw || ls.startsWith(stem) || lw.startsWith(ls.slice(0, Math.max(4, ls.length - 2)))) continue;
+    out.push(s);
   }
   return out;
 }
 function drillRelQs(it) {
   const z = [], note = String(it.card.note || ''), src = it.m + '\n' + note;
   const ants = drillArrowWords(src, it.w);
-  if (ants.length) z.push({ k: '対義語', a: ants[0], all: ants.join(', ') });
+  const ants2 = ants.filter(a => !drillSameWord(a, it.w));
+  if (ants2.length) z.push({ k: '対義語', a: ants2[0], all: ants2.join(', ') });
   if (note.length <= 60 && /比べ|に対し|否定的|ニュアンス/.test(note)) z.push({ k: 'ニュアンス・特徴', a: note });
-  const sy = src.match(/(?:^|[\n（(。、；;]\s*)[=＝≒]\s*([A-Za-z][A-Za-z \-']*[A-Za-z])/);
-  if (sy) z.push({ k: '類義語', a: sy[1].trim(), all: sy[1].trim() });
+  const sy = drillSynWords(src, it.w);
+  if (sy.length) z.push({ k: '類義語', a: sy[0], all: sy.join(', ') });
   return z;
 }
 function drillQuiz() { dst.z0 = drillAiOk() ? drillRelQs(dcur.it) : []; dst.qi = 0; drillNq(); }

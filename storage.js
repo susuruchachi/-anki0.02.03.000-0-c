@@ -82,7 +82,7 @@ function cardSenseList(card) {
   if (!st || st.length < 2) return null;
   const seen = {};
   return st.map((seg, i) => {
-    let key = seg.label || ('#' + (i + 1));
+    let key = seg.tagKey || seg.label || ('#' + (i + 1)); // ★【0.03.44】キーは前の版と同じ（成績を引き継ぐ）
     seen[key] = (seen[key] || 0) + 1;
     if (seen[key] > 1) key += '#' + seen[key];
     return { key, label: seg.label, text: seg.text };

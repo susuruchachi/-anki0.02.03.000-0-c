@@ -341,6 +341,7 @@ function isAnswerCorrect(input, correctAnswer) {
 function expandSenses(cards) {
   const result = [];
   cards.forEach(card => {
+    if (card.kind === 'intro') return; // ★【0.03.44】導入の文は問題にしない
     const list = cardSenseList(card);
     if (!list) { result.push(card); return; }
     const view = senseStatsView(card, list);
@@ -371,7 +372,7 @@ function expandStructuredForChoiceModes(cards) {
 }
 
 async function startQuiz(modeType = 'normal') {
-  currentCombo = 0; todayCorrectCount = 0;
+  currentCombo = 0; todayCorrectCount = 0; _quizModeOverride = null;
   if (selectedScopePath.length === 0 && lastQuizScopePath.length > 0) selectedScopePath = [...lastQuizScopePath];
   let scope = "all";
   if (selectedScopePath.length > 0 && selectedScopePath[0] !== "all") scope = "cat:" + selectedScopePath[selectedScopePath.length - 1];
@@ -380,7 +381,7 @@ async function startQuiz(modeType = 'normal') {
   const limitCount = parseInt(document.getElementById('numQCount').value) || 10;
 
   // ★【0.03.17】意味ごとに分けてから選ぶ（覚えた意味は出にくく、覚えていない意味が出やすくなる）
-  let subset = window.currentOnlineMatch ? [...db] : expandSenses(db);
+  let subset = window.currentOnlineMatch ? db.filter(q => q.kind !== 'intro') : expandSenses(db);
   if (modeType === 'tokkun') subset = subset.filter(q => q.level <= 0 || q.level === -1);
   else if (modeType === 'review') subset = subset.filter(q => isGraduated(q));
   else if (!includeGrad) subset = subset.filter(q => !(isGraduated(q)));
@@ -510,6 +511,7 @@ function arrangeVerbFlow(pool) {
   });
 }
 
+let _quizModeOverride = null; // ★【0.03.44】このクイズだけ形式を決める（planStartQuiz から）
 function loadQuizQuestion() {
   if (quizIndex === 0) _quizSession = { results: [], startedAt: Date.now() }; // ★【0.03.37】結果の画面用
   quizPhase='q'; selectedChoiceIdx=null; window.currentSelfJudge=null;
@@ -565,7 +567,7 @@ function loadQuizQuestion() {
     qEl.appendChild(chDiv);
   }
 
-  let mode = document.getElementById('selQuizMode').value;
+  let mode = _quizModeOverride || document.getElementById('selQuizMode').value;
   // ★【0.03.00】答えが構造式・漢文ブロック・数式の場合は文字入力できないので、記述・みんはや・文字タップは自己申告で出題する
   const _primary = getPrimaryAnswer(cur.answer);
   const richAnswer = hasRichBlock(_primary) || /\$[^$]+\$/.test(_primary);
@@ -860,6 +862,7 @@ function buildChoiceCandidates(cur, correctPrimary) {
   db.forEach(q => {
     if (q.id === cur.id || q.id === cur._sourceId) return;
     if (Array.isArray(q.choices) && q.choices.length) return; // テスト問題の Yes/No 等は混ぜない
+    if (q.kind === 'intro') return; // 導入の文
     const info = choiceInfoOf(q, swapped);
     const t = info.t;
     if (!t) return;

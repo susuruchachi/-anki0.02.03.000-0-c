@@ -183,7 +183,7 @@ async function startOnlineMatch(scope, qCount, timeLimit, isPrivate, quizFormat 
     // 共有カードだけから出題する（親フォルダーを選んだ場合はサブフォルダーもすべて）
     const subCats = typeof getQuizSubcategories === 'function' ? getQuizSubcategories(scope) : [scope];
     const subSet = new Set(subCats);
-    const pool = db.filter(q => subSet.has(q.category) && q.sharedDocId);
+    const pool = db.filter(q => subSet.has(q.category) && q.sharedDocId && q.kind !== 'intro');
     if (pool.length === 0) {
       removeOnlineMatchOverlay();
       return alert('⚠️ 出題できる問題カードがありません。先にカードを作成するか同期してください。');

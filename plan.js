@@ -45,7 +45,7 @@ function planWordsDeadline(i) { const d = planParseDate(planWeekKey(i)); d.setDa
 
 // 範囲のカード
 function planCards(cat) { if (!cat) return []; const set = new Set(getAllSubcategories(cat)); return db.filter(q => set.has(q.category)); }
-function planIsExampleCard(q) { return q.kind === 'cloze' || (PLAN_EX_RE.test(q.category) && q.kind !== 'test'); }
+function planIsExampleCard(q) { return q.kind === 'cloze' || (PLAN_EX_RE.test(q.category) && q.kind !== 'test' && q.kind !== 'intro'); }
 // チャンツ：熟語・チャンク（communicate with A など）と、チャンツのフォルダーのカード
 function planIsChantCard(q) {
   if (planIsExampleCard(q) || q.kind || (Array.isArray(q.choices) && q.choices.length)) return false;
@@ -196,7 +196,7 @@ function planStartQuizFor(key, id) {
   planStartQuiz(t.cards, key === 'chants');
 }
 // 決まったカードでクイズを始める（いつものクイズ画面）。inOrder：登録順のまま（チャンツ）
-function planStartQuiz(cards, inOrder) {
+function planStartQuiz(cards, inOrder, mode) {
   let subset = expandSenses(inOrder ? sortCardsByNumber(cards.slice()) : cards);
   if (!inOrder) {
     for (let i = subset.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [subset[i], subset[j]] = [subset[j], subset[i]]; }
@@ -204,6 +204,7 @@ function planStartQuiz(cards, inOrder) {
     subset.sort((a, b) => pri(a) - pri(b));
   }
   currentCombo = 0; todayCorrectCount = 0; currentQuizOrderScope = null;
+  _quizModeOverride = mode || null; // ★【0.03.44】ネットが無いときの4択の復習など
   quizPool = subset; quizIndex = 0;
   if (document.getElementById('chkSwapQA').checked) quizPool = quizPool.map(swapQuizEntry);
   quizPool = arrangeVerbFlow(quizPool);

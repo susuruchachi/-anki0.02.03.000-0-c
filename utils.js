@@ -179,12 +179,17 @@ function parseStructuredAnswer(answerText) {
   for (const raw of rawSegments) {
     const m = raw.match(segTagRe);
     if (!m) return null; // タグの無いパートが1つでもあれば「通常の複数候補解答」として扱う
-    const rest = m[2].trim();
-    if (!rest) return null; // タグしかない壊れたパートは対象外
     const tagInnerRe = /\(([^()]*)\)/g;
-    let labels = [], tm;
-    while ((tm = tagInnerRe.exec(m[1])) !== null) { const t = tm[1].trim(); if (t !== '') labels.push(t); }
-    result.push({ label: labels.join(' '), text: rest });
+    let labels = [], tm, keep = '', all = [];
+    // ★【0.03.44】2つ目からのカッコは、品詞のタグのときだけタグにする（「(名詞①)(偶然の)事故」の (偶然の) は訳の一部）
+    while ((tm = tagInnerRe.exec(m[1])) !== null) {
+      const t = tm[1].trim(); if (t === '') continue;
+      all.push(t);
+      if (labels.length && !isKnownPosTag(t) || keep) keep += tm[0]; else labels.push(t);
+    }
+    const rest = (keep + m[2]).trim();
+    if (!rest) return null; // タグしかない壊れたパートは対象外
+    result.push({ label: labels.join(' '), text: rest, tagKey: all.join(' ') }); // tagKey：前の版のタグ（意味ごとの成績のキーに使う）
   }
   return result.length > 0 ? result : null;
 }
@@ -207,6 +212,8 @@ function normalizeStructuredToken(str) {
 function structuredTokenForms(str) {
   const base = String(str || '').replace(/\([^()]*\)|（[^（）]*）/g, '').trim();
   const forms = [normalizeStructuredToken(str), normalizeStructuredToken(String(str || '').replace(/[\[［][^\]］]*[\]］]/g, ''))]; // ［ ］の言い換え部分を省いた形も正解
+  // ★【0.03.44】カッコの中も書いた形（「(偶然の)事故」→「偶然の事故」）も正解
+  if (/[(（]/.test(String(str || ''))) forms.push(normalizeStructuredToken(String(str).replace(/[(（]([^()（）]*)[)）]/g, '$1')));
   const m = base.match(/^[～〜~]\s*[をにのとがへでやも]/);
   if (m) forms.push(normalizeStructuredToken(base.slice(m[0].length)));
   return forms.filter(f => f !== '');

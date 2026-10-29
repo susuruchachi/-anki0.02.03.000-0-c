@@ -158,6 +158,7 @@ function openCategoryEditor(catName) {
       ${btn('bulk', '📋', '一括追加', { disabled: ro })}
       ${btn('scan', '📚', '単語帳取込', { disabled: ro })}
       ${btn('sub', '➕', 'サブフォルダー作成', { disabled: ro })}
+      ${btn('intro', '📖', getCategoryIntroCard(catName) ? '導入の文を編集' : '導入の文を登録', { disabled: ro })}
     </div>
     <div class="cat-edit-sec">整理</div>
     <div class="cat-act-grid">
@@ -317,6 +318,43 @@ async function runBulkDelete() {
   if (typeof showAppToast === 'function') showAppToast(`🗑️ ${targets.length} 件を削除しました`); else alert(`🗑️ ${targets.length} 件を削除しました`);
 }
 
+// ================================================================
+// ★【0.03.44】📖 フォルダーの導入の文（単語帳のグループのはじめの文章など）
+// 種類「導入」（kind: 'intro'）のカードとしてそのフォルダーに1枚だけ持つ（端末間の同期・共有カテゴリーにも乗る）。
+// クイズ・暗記テストの問題には出さない。暗記テストの2周目で、グループの切れ目ごとに読む（AI があればその文から4択も）
+// ================================================================
+function getCategoryIntroCard(cat) { return db.find(q => q.category === cat && q.kind === 'intro') || null; }
+function getCategoryIntro(cat) { const c = getCategoryIntroCard(cat); return c ? String(c.answer || '').trim() : ''; }
+function openCategoryIntroEditor(catName, info) {
+  const cur = getCategoryIntroCard(catName);
+  const panel = showCategoryPanel(`<div class="cat-edit-sec" style="margin-top:0;">📖 導入の文</div>
+    <textarea id="catIntroText" class="form-control" rows="7" placeholder="このフォルダー（グループ）のはじめの文章。暗記テストの2周目で、グループの切れ目ごとに読みます">${escapeHtml(cur ? cur.answer : '')}</textarea>
+    <div class="plan-btns" style="margin-top:8px;"><button type="button" class="btn btn-primary" id="catIntroSave">💾 保存</button>${cur ? '<button type="button" class="btn btn-secondary" id="catIntroDel">🗑️ 消す</button>' : ''}</div>`);
+  panel.querySelector('#catIntroSave').onclick = () => saveCategoryIntro(catName, panel.querySelector('#catIntroText').value, info);
+  const del = panel.querySelector('#catIntroDel'); if (del) del.onclick = () => { if (confirm('導入の文を消しますか？')) saveCategoryIntro(catName, '', info); };
+}
+async function saveCategoryIntro(catName, text, info) {
+  text = String(text || '').trim();
+  const cur = getCategoryIntroCard(catName);
+  if (!text) {
+    if (!cur) return;
+    tombstoneCards([cur.id]); db = db.filter(q => q !== cur); saveData(true);
+    if (cur.sharedDocId) await removeCardsFromSharedDoc(cur.sharedDocId, [cur.id]);
+  } else if (cur) {
+    cur.answer = text; touchCard(cur); saveData(true);
+    if (cur.sharedDocId) await updateCardInSharedDoc(cur.sharedDocId, cur, 'edit');
+  } else {
+    const card = { id: newCardId(), question: '📖 導入の文', answer: text, kind: 'intro', category: catName, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 };
+    touchCard(card);
+    if (info && info.shared && info.canEdit) card.sharedDocId = info.docId;
+    db.push(card); saveData(true);
+    if (card.sharedDocId) await updateCardInSharedDoc(card.sharedDocId, card, 'add');
+  }
+  if (typeof refreshVisibleViews === 'function') refreshVisibleViews(true);
+  openCategoryEditor(catName);
+  if (typeof showAppToast === 'function') showAppToast(text ? '📖 導入の文を保存しました' : '📖 導入の文を消しました');
+}
+
 function showCategoryPanel(html) {
   const panel = document.getElementById('catEditPanel');
   panel.innerHTML = `<div class="cat-edit-panel">${html}</div>`;
@@ -336,6 +374,7 @@ function runCategoryAction(catName, act, info) {
     }
     case 'skipauto': autoSkipSubfolders(catName); return;
     case 'pickdel': closeCategoryEditor(); openBulkDeleteDialog(catName); return;
+    case 'intro': openCategoryIntroEditor(catName, info); return;
     case 'open': closeCategoryEditor(); currentViewContext = { type: 'category', value: catName }; openPage('pgBox'); return;
     case 'add': closeCategoryEditor(); currentViewContext = { type: 'category', value: catName }; showAddQModal(); return;
     case 'bulk': closeCategoryEditor(); showBulkAddModal(catName); return;
