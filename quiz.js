@@ -313,7 +313,9 @@ function normalizeAnswer(str) {
 function isAnswerCorrect(input, correctAnswer) {
   // ★【0.03.00】構造式(SMILESの「/」)や漢文ブロックを区切り文字として誤分割しないようにマスクしてから分割する
   // ［ ］の中身まで書いた答え・［ ］の部分を省いた答えのどちらでも正解
-  const norms = splitAnswerAlternatives(correctAnswer).flatMap(a => [normalizeAnswer(a), normalizeAnswer(dropBracketParts(a))]).filter(x => x !== '');
+  // ★【0.03.58】先頭の品詞タグ「(名詞)」などを外した形も正解（4択の選択肢はタグを外して出すので、正しいものを選んでも×になっていた）
+  const untag = a => String(a).replace(/^\s*(?:\([^()]*\)\s*)+/, '');
+  const norms = splitAnswerAlternatives(correctAnswer).flatMap(a => [normalizeAnswer(a), normalizeAnswer(dropBracketParts(a)), normalizeAnswer(untag(a)), normalizeAnswer(dropBracketParts(untag(a)))]).filter(x => x !== '');
   const inNorm = normalizeAnswer(input);
   return norms.includes(inNorm);
 }
@@ -881,7 +883,9 @@ function buildFourChoices(cur) {
     while (options.length < 4) options.push(`選択肢_${Math.floor(Math.random()*1000)}`);
   }
   if (!cur._attrQ) options.sort(() => Math.random() - 0.5); // 自動詞・他動詞は決まった順
-
+  // ★【0.03.58】正解の選択肢は作ったときに覚えておく（選んだ文字を答えと比べ直すと、タグや記号の違いで×になることがあった）
+  const nc = normalizeAnswer(correctPrimary);
+  area._correctText = options.find(o => o === correctPrimary) || options.find(o => normalizeAnswer(o) === nc) || correctPrimary;
   options.forEach((text, i) => {
     const btn = document.createElement('button'); btn.className = 'choice-btn';
     btn.innerHTML = `<div class="choice-idx">${i+1}</div><div style="flex:1;">${renderRichText(text, { escape: true, kanbunRows: 8 })}</div>`;
@@ -1083,7 +1087,9 @@ function submitQuizAction() {
   if (mode === 'choice') {
     if (!selectedChoiceIdx) return;
     const given = selectedChoiceIdx;
-    return concludeAttempt(cur, isAnswerCorrect(given, cur.answer), { given, kind: 'wrong', choice: true });
+    const area = document.getElementById('boxChoiceArea');
+    const ok = (area && area._correctText !== undefined && given === area._correctText) || isAnswerCorrect(given, cur.answer);
+    return concludeAttempt(cur, ok, { given, kind: 'wrong', choice: true });
   }
   // ★【0.03.21】意味をいくつも並べた答え（地域社会、共同体 など）で、一部だけ答えたら、ほかの意味も聞き直す
   if (handleMultiMeaning(cur)) return;
