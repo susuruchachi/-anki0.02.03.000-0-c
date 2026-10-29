@@ -198,26 +198,34 @@ function vtCards(parsed, section) {
     const folder = `${code}-${gi + 1} ${g.name}`; // 番号を付けて、本の順に並ぶように
     folders.push(folder);
     if (g.intro) add({ folder, q: '📖 導入の文', a: g.intro, kind: 'intro' });
+    let lastBase = 0;
     g.items.forEach(w => {
       const base = parseInt(w.no, 10);
+      if (Number.isFinite(base)) lastBase = base;
       const ans = vtMeaning(w.mean, w.w);
       if (ans) add({ folder, q: w.w, a: ans, note: [...w.notes, ...w.related.map(r => '関連：' + r)].join('\n'), stars: w.stars, no: Number.isFinite(base) ? base : null, head: w.w, mean: w.mean });
-      const exprs = w.exprs.map(e => ({ e, head: w.w, mean: w.mean }));
+      // ★【0.03.55】番号の無い熟語・例文は、元の語の番号に続けて振る（1000 の表現は 1000-0-1, 1000-0-2 …、1000-1 の表現は 1000-1-1 …）
+      const exprs = w.exprs.map(e => ({ e, head: w.w, mean: w.mean, k: 0 }));
       w.derived.forEach(d => {
         const a = vtMeaning(d.mean, d.w);
         if (a) add({ folder, q: d.w, a, note: d.notes.join('\n'), stars: d.stars, no: Number.isFinite(base) ? base + d.k / 100 : null, head: d.w, mean: d.mean });
-        d.exprs.forEach(e => exprs.push({ e, head: d.w, mean: d.mean }));
+        d.exprs.forEach(e => exprs.push({ e, head: d.w, mean: d.mean, k: d.k }));
       });
-      exprs.forEach(({ e, head, mean }, j) => {
+      const seq = {};
+      exprs.forEach(({ e, head, mean, k }) => {
         const x = vtExpr(e, head); if (!x) return;
+        const j = seq[k] = (seq[k] || 0) + 1;
+        const no = Number.isFinite(base) ? base + k / 100 + j / 10000 : null;
         if (x.type === 'phrase') {
           const key = x.q.toLowerCase(); if (seenPhrase.has(key)) return; seenPhrase.add(key);
           // ◆の熟語は「チャンツ」フォルダーへ（元の試作と同じく暗記テストには出さない。クイズ・週間プランのチャンツで）
-          add({ folder: chFolder, q: x.q, a: x.a, no: Number.isFinite(base) ? base + (j + 1) / 10000 : null, note: `${head}：${vtPlainMeaning(mean)}` });
-        } else add({ folder: exFolder, q: x.q, a: x.a, kind: 'cloze', note: `${head}：${vtPlainMeaning(mean)}`, no: Number.isFinite(base) ? base : null });
+          add({ folder: chFolder, q: x.q, a: x.a, no, note: `${head}：${vtPlainMeaning(mean)}` });
+        } else add({ folder: exFolder, q: x.q, a: x.a, kind: 'cloze', note: `${head}：${vtPlainMeaning(mean)}`, no });
       });
     });
-    g.checks.forEach(c => vtChecks(c).forEach(x => add({ folder, q: x.q, a: x.a, kind: 'test', choices: x.choices || null })));
+    // Check! は表に出す番号を持たない（並び順のためだけに、グループの最後の語のうしろの番号を持つ）
+    let ci = 0;
+    g.checks.forEach(c => vtChecks(c).forEach(x => add({ folder, q: x.q, a: x.a, kind: 'test', choices: x.choices || null, no: lastBase + 0.99 + Math.min(++ci, 99) / 10000 })));
   });
   return { cards, folders, exFolder, chFolder, code };
 }

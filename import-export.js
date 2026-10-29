@@ -231,8 +231,8 @@ function planCSVImport(rows) {
     const kindRaw = iK !== -1 ? String(c[iK] || '').trim() : '';
     const kind = /テスト|test/i.test(kindRaw) ? 'test' : /例文|cloze/i.test(kindRaw) ? 'cloze' : /自己申告|self/i.test(kindRaw) ? 'self' : /導入|intro/i.test(kindRaw) ? 'intro' : '';
     // ★【0.03.45】派生語の「1000-1」も読む（1000.01 として持つ）
-    const noM = iNo !== -1 ? String(c[iNo] || '').replace(/[０-９]/g, d => String.fromCharCode(d.charCodeAt(0) - 0xFEE0)).match(/(\d+)(?:\s*[-.]\s*(\d+))?/) : null;
-    const noNum = noM ? Number(noM[1]) + (noM[2] ? Number(noM[2]) / 100 : 0) : NaN;
+    const noM = iNo !== -1 ? String(c[iNo] || '').replace(/[０-９]/g, d => String.fromCharCode(d.charCodeAt(0) - 0xFEE0)).match(/(\d+)(?:\s*-\s*(\d+))?(?:\s*-\s*(\d+))?/) : null;
+    const noNum = noM ? Number(noM[1]) + (noM[2] ? Number(noM[2]) / 100 : 0) + (noM[3] ? Number(noM[3]) / 10000 : 0) : NaN; // 1000-1-1 まで
     const no = Number.isFinite(noNum) && noNum > 0 ? noNum : null;
     // 同じフォルダーに同じ問題があれば、重複させずに更新する（同じ問題・同じ答え → 同じ問題が1枚だけ → 「（2つ）」などの数だけ違う）
     let ex = db.find(d => d.category === cat && String(d.question).trim() === q && String(d.answer).trim() === a && !usedIds.has(d.id));

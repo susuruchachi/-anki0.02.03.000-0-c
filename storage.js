@@ -665,6 +665,7 @@ function ensureSystemSanity() {
 function assignCardNumbers() {
   const maxNo = {};
   db.forEach(q => {
+    if (q.kind === 'intro') { if (q.no !== undefined) delete q.no; return; } // ★【0.03.55】導入の文は番号なし
     if (q.no !== undefined && q.no !== null && q.no !== '') {
       const n = Number(q.no);
       // ★【0.03.45】派生語・熟語の 1000.01 / 1000.0001 のような小数の番号はそのまま（「1000-1」と表示）
@@ -673,6 +674,7 @@ function assignCardNumbers() {
     }
   });
   db.forEach(q => {
+    if (q.kind === 'intro' || q.kind === 'test') return; // ★【0.03.55】導入の文・Check! には番号を振らない（ほかのフォルダーの番号と重なって見えていた）
     if (q.no === undefined || q.no === null || q.no === '') { q.no = (maxNo[q.category] || 0) + 1; maxNo[q.category] = q.no; }
   });
 }

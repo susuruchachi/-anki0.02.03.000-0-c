@@ -167,12 +167,14 @@ const KNOWN_POS_TAGS = ['名詞', '動詞', '他動詞', '自動詞', '形容詞
 function isKnownPosTag(label) {
   return KNOWN_POS_TAGS.includes(String(label || '').replace(/[①-⑳0-9０-９]/g, '').trim());
 }
-// ★【0.03.45】問題番号の表示（派生語の 1000.01 は「1000-1」、熟語の 1000.0001 は「1000」）
+// ★【0.03.45】問題番号の表示：派生語 1000.01 →「1000-1」。★【0.03.55】表現（熟語・例文）1000.0001 →「1000-0-1」、1000.0101 →「1000-1-1」
 function cardNoText(no) {
   const n = Number(no); if (!Number.isFinite(n)) return '';
-  const i = Math.floor(n), k = Math.round((n - i) * 100);
-  return k > 0 ? `${i}-${k}` : String(i);
+  const i = Math.floor(n), x = Math.round((n - i) * 10000), k = Math.floor(x / 100), j = x % 100;
+  return j > 0 ? `${i}-${k}-${j}` : k > 0 ? `${i}-${k}` : String(i);
 }
+// 番号を表に出すカードか（導入の文・Check! は出さない）
+function showsCardNo(q) { return !!(q && q.no) && q.kind !== 'intro' && q.kind !== 'test'; }
 function parseStructuredAnswer(answerText) {
   if (!answerText) return null;
   const rawSegments = splitAnswerAlternatives(answerText, '/');
