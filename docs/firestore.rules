@@ -104,6 +104,19 @@ service cloud.firestore {
     //   作る：自分を持ち主にして作る　消す：持ち主だけ
     //   書き換え：持ち主は何でも（持ち主は変えられない）／共同編集者はカードとフォルダーだけ／
     //            購読する人は「購読者一覧に自分を足す・外す」だけ
+    // 📇 公開カテゴリーの目次（★0.03.52。一覧はこれだけを読む。カードの中身は入れない）
+    //  書けるのは、元の公開カテゴリー（susuru_anki_shared）が公開中で、作成者・名前が元と同じときだけ（誰が書いても元と食い違わない）
+    match /susuru_anki_public_index/{docId} {
+      function srcPath() { return /databases/$(database)/documents/susuru_anki_shared/$(docId); }
+      allow read: if true;
+      allow create, update: if isAuthenticated() && exists(srcPath())
+        && get(srcPath()).data.get('isPublic', false) == true
+        && request.resource.data.isPublic == true
+        && request.resource.data.ownerId == get(srcPath()).data.ownerId
+        && request.resource.data.catName == get(srcPath()).data.catName;
+      allow delete: if isAuthenticated() && (!exists(srcPath()) || get(srcPath()).data.get('isPublic', false) != true || resource.data.ownerId == uid());
+    }
+
     match /susuru_anki_shared/{docId} {
       allow get: if true;
       allow list: if resource.data.isPublic == true || (isAuthenticated() && resource.data.ownerId == uid());

@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'all / reminders / update'
+        description: 'all / reminders / update / plan / taunt / friends / index'
         required: false
         default: 'all'
 

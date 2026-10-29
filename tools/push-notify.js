@@ -220,6 +220,24 @@ async function sendTaunts() {
   console.log(`フレンドの頑張りのお知らせ: ${sent} 件送信`);
 }
 
+// ★【0.03.52】公開カテゴリーの目次（アプリの一覧はこれだけを読む）を作り直す。目次に無い・食い違うものだけ書く
+async function rebuildPublicIndex() {
+  const idxCol = db.collection('susuru_anki_public_index');
+  const have = {}; (await idxCol.get()).docs.forEach(d => { have[d.id] = d.data(); });
+  const snap = await db.collection('susuru_anki_shared').where('isPublic', '==', true).get();
+  let wrote = 0; const alive = new Set();
+  for (const doc of snap.docs) {
+    const d = doc.data(); alive.add(doc.id);
+    const e = { isPublic: true, catName: d.catName || '', ownerId: d.ownerId || '', ownerName: d.ownerName || '', cardCount: (d.cards || []).length, subscriberCount: (d.subscriberUids || []).length, shareCode: d.shareCode || null };
+    const h = have[doc.id];
+    if (h && ['catName', 'ownerId', 'ownerName', 'cardCount', 'subscriberCount', 'shareCode'].every(k => h[k] === e[k])) continue;
+    await idxCol.doc(doc.id).set(Object.assign(e, { updatedAt: Date.now() })); wrote++;
+  }
+  let removed = 0;
+  for (const id of Object.keys(have)) if (!alive.has(id)) { await idxCol.doc(id).delete(); removed++; }
+  console.log(`公開カテゴリーの目次: ${snap.size} 件中 ${wrote} 件を書き直し、${removed} 件を削除`);
+}
+
 async function sendFriendNotices() {
   const col = db.collection('susuru_anki_friend_requests');
   let sent = 0;
@@ -255,6 +273,7 @@ async function sendFriendNotices() {
   if (MODE === 'all' || MODE === 'plan') await sendPlanReminders().catch(e => console.log('週間プランの通知に失敗:', e.message));
   if (MODE === 'all' || MODE === 'taunt') await sendTaunts().catch(e => console.log('フレンドの頑張りのお知らせに失敗:', e.message));
   if (MODE === 'all' || MODE === 'update') await sendUpdate();
+  if (MODE === 'update' || MODE === 'index') await rebuildPublicIndex().catch(e => console.log('公開カテゴリーの目次の作り直しに失敗:', e.message));
   // アプリ側が「送信側が動いている」と分かるように、最後に動いた時刻を書く
   await db.doc(META_DOC).set({ lastRunAt: Date.now() }, { merge: true });
 })().catch(e => { console.error(e); process.exit(1); });
