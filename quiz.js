@@ -1630,15 +1630,22 @@ async function recordDailyLogAdjust(delta) {
     await firestore.collection('susuru_anki_daily_scores').doc(`${d}_${currentUser.uid}`).set({ score: firebase.firestore.FieldValue.increment(delta) }, { merge: true });
   } catch (e) {}
 }
-async function recordDailyLog(isCorrect) {
+// ★【0.03.39】opts.drill：暗記テストの答え（ランキングの正解数は暗記テストの分を別に数える：drillScore）
+async function recordDailyLog(isCorrect, opts = {}) {
   if (typeof notifyMarkStudied === 'function') notifyMarkStudied(); // ★【0.03.14】今日は学習済み（催促しない）
   if(!currentUser) return;
   const d = getTodayStr(); 
+  const inc = firebase.firestore.FieldValue.increment;
   const lRef = firestore.collection('susuru_anki_logs').doc(`${d}_${currentUser.uid}`);
   const sRef = firestore.collection('susuru_anki_daily_scores').doc(`${d}_${currentUser.uid}`);
   try {
-    await lRef.set({ date:d, uid:currentUser.uid, name:currentUser.displayName, answered:firebase.firestore.FieldValue.increment(1), correct:firebase.firestore.FieldValue.increment(isCorrect?1:0) }, {merge:true});
-    if(isCorrect) await sRef.set({ date:d, uid:currentUser.uid, name:currentUser.displayName, score:firebase.firestore.FieldValue.increment(1) }, {merge:true});
+    if (opts.drill) {
+      await lRef.set({ date:d, uid:currentUser.uid, name:currentUser.displayName, answered:inc(1), correct:inc(isCorrect?1:0), drillAnswered:inc(1), drillCorrect:inc(isCorrect?1:0) }, {merge:true});
+      await sRef.set({ date:d, uid:currentUser.uid, name:currentUser.displayName, drillScore:inc(isCorrect?1:0), drillTotal:inc(1) }, {merge:true});
+      return;
+    }
+    await lRef.set({ date:d, uid:currentUser.uid, name:currentUser.displayName, answered:inc(1), correct:inc(isCorrect?1:0) }, {merge:true});
+    if(isCorrect) await sRef.set({ date:d, uid:currentUser.uid, name:currentUser.displayName, score:inc(1) }, {merge:true});
   } catch(e){}
 }
 

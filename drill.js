@@ -444,7 +444,9 @@ function drillRecord(card, ok) {
   st.at = Date.now();
   m.drillStats = st;
   touchStats(m); saveData();
-  if (typeof recordDailyLog === 'function') recordDailyLog(ok); // 学習した記録（ヒートマップ・催促）には入れる
+  // 学習した記録（ヒートマップ・催促）には入れる。ランキング・フレンドとの比較は暗記テストの分として別に数える
+  if (typeof recordDailyLog === 'function') recordDailyLog(ok, { drill: true });
+  if (typeof recordCategoryScore === 'function') recordCategoryScore(m.category, ok, 'drill');
 }
 async function drillFin(ok, ans, tip) {
   if (dst.fl) return; dst.fl = 1;

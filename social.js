@@ -4,6 +4,8 @@
 window.shareStats = localStorage.getItem('shareStats') === 'true';
 
 // ★ 本日のデイリーランキング表示
+let rankingMode = 'quiz'; // ★【0.03.39】'quiz'（通常のクイズ）／'drill'（暗記テスト）
+function setRankingMode(m) { rankingMode = m; document.querySelectorAll('[data-rankmode]').forEach(b => b.classList.toggle('active', b.dataset.rankmode === m)); loadDailyRanking(); }
 async function loadDailyRanking() {
   const listDiv = document.getElementById('rankingList');
   if (!currentUser) { listDiv.innerHTML = 'ログインしてください'; return; }
@@ -14,15 +16,18 @@ async function loadDailyRanking() {
     
     if(snap.empty) { listDiv.innerHTML = 'まだ今日のスコアがありません。あなたが1番乗りです！'; return; }
     
+    const key = rankingMode === 'drill' ? 'drillScore' : 'score';
     let scores = [];
-    snap.forEach(doc => scores.push(doc.data()));
-    scores.sort((a, b) => (b.score || 0) - (a.score || 0));
+    snap.forEach(doc => { const x = doc.data(); if ((x[key] || 0) > 0) scores.push(x); });
+    if (!scores.length) { listDiv.innerHTML = rankingMode === 'drill' ? '今日はまだ暗記テストのスコアがありません。' : 'まだ今日のスコアがありません。あなたが1番乗りです！'; return; }
+    scores.sort((a, b) => (b[key] || 0) - (a[key] || 0));
     scores = scores.slice(0, 10);
     
     listDiv.innerHTML = '';
     let rank = 1;
     scores.forEach(data => {
-      listDiv.innerHTML += `<div><span style="display:inline-block; width:24px; color:var(--warn); font-weight:bold;">${rank}</span>: ${escapeHtml(data.name)} <span style="color:var(--success); font-weight:bold;">(${data.score}問)</span></div>`;
+      const extra = rankingMode === 'drill' && data.drillTotal ? ` <span class="hint-small">正答率 ${Math.round(data.drillScore / data.drillTotal * 100)}%</span>` : '';
+      listDiv.innerHTML += `<div><span style="display:inline-block; width:24px; color:var(--warn); font-weight:bold;">${rank}</span>: ${escapeHtml(data.name)} <span style="color:var(--success); font-weight:bold;">(${data[key]}問)</span>${extra}</div>`;
       rank++;
     });
   } catch(e) {
@@ -238,7 +243,7 @@ async function loadCategoryRanking(catName) {
     if(snap.empty) { listDiv.innerHTML = `このカテゴリーはまだスコアがありません。`; return; }
     
     let scores = [];
-    snap.forEach(doc => scores.push(doc.data()));
+    snap.forEach(doc => { const x = doc.data(); if (x.mode !== 'drill') scores.push(x); });
     scores.sort((a, b) => (b.score || 0) - (a.score || 0));
     scores = scores.slice(0, 10);
     
@@ -255,16 +260,19 @@ async function loadCategoryRanking(catName) {
 }
 
 // ★ 成績保存
-async function recordCategoryScore(catName, isCorrect) {
+// ★【0.03.39】mode：'drill' なら暗記テストの成績として別に記録する（通常のクイズとは混ぜない）
+async function recordCategoryScore(catName, isCorrect, mode) {
   const isShared = typeof window.shareStats !== 'undefined' ? window.shareStats : (localStorage.getItem('shareStats') === 'true');
   if(!currentUser || !isShared) return;
 
   const d = getTodayStr();
-  const ref = firestore.collection('susuru_anki_category_scores').doc(`${d}_${currentUser.uid}_${catName}`);
+  const drill = mode === 'drill';
+  const ref = firestore.collection('susuru_anki_category_scores').doc(`${d}_${currentUser.uid}_${drill ? 'drill_' : ''}${catName}`);
   try {
     await ref.set({
       date: d,
       category: catName,
+      mode: drill ? 'drill' : 'quiz',
       uid: currentUser.uid,
       name: currentUser.displayName || 'Anonymous',
       score: firebase.firestore.FieldValue.increment(isCorrect ? 1 : 0),
@@ -319,6 +327,7 @@ let compareChartInstance = null;
 async function renderCompareStats() {
   const friendUid = document.getElementById('selCompareFriend').value;
   const category = document.getElementById('selCompareCategory').value;
+  const cmpMode = (document.getElementById('selCompareMode') || {}).value || 'quiz'; // ★【0.03.39】通常のクイズ／暗記テスト
   const area = document.getElementById('compareStatsArea');
 
   if (!friendUid) {
@@ -341,6 +350,7 @@ async function renderCompareStats() {
     const accumulate = (doc, isMe) => {
       const d = doc.data();
       if (category && d.category !== category) return;
+      if ((d.mode === 'drill' ? 'drill' : 'quiz') !== cmpMode) return;
       if (!dateMap[d.date]) dateMap[d.date] = { myScore: 0, myTotal: 0, friendScore: 0, friendTotal: 0, friendName: '?' };
       if (isMe) {
         dateMap[d.date].myScore += (d.score || 0);
@@ -371,7 +381,7 @@ async function renderCompareStats() {
 
     const titleDiv = document.createElement('div');
     titleDiv.style.cssText = 'font-size:0.85rem; color:var(--text2); margin-bottom:10px; text-align:center;';
-    titleDiv.innerText = category ? `📂 ${category} の正答率推移` : '🌐 全カテゴリー 正答率推移';
+    titleDiv.innerText = (cmpMode === 'drill' ? '🧠 暗記テスト：' : '') + (category ? `📂 ${category} の正答率推移` : '🌐 全カテゴリー 正答率推移');
     chartWrap.appendChild(titleDiv);
 
     const canvas = document.createElement('canvas');

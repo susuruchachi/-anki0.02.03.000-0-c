@@ -856,6 +856,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
       
       <div class="card" style="margin-bottom:15px; border-color:var(--warn);">
         <div class="setting-box-title" style="color:var(--warn);">👑 今日の正解数ランキング</div>
+        <div style="display:flex; gap:6px; margin-bottom:8px;"><button class="chip active" data-rankmode="quiz" onclick="setRankingMode('quiz')">🎯 クイズ</button><button class="chip" data-rankmode="drill" onclick="setRankingMode('drill')">🧠 暗記テスト</button></div>
         <div id="rankingList" style="font-size:0.9rem; display:flex; flex-direction:column; gap:8px;">(読み込み中...)</div>
         <button class="btn btn-secondary" style="margin-top:10px; font-size:0.75rem; padding:6px;" onclick="loadDailyRanking()">🔄 更新</button>
       </div>
@@ -1040,6 +1041,10 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
     
     <div class="card">
       <div style="font-size:0.85rem; color:var(--text2); margin-bottom:10px;">フレンドを選択してください</div>
+      <select id="selCompareMode" class="form-control" style="margin-bottom:10px;" onchange="renderCompareStats()">
+        <option value="quiz">🎯 通常のクイズの成績</option>
+        <option value="drill">🧠 暗記テストの成績</option>
+      </select>
       <select id="selCompareCategory" class="form-control" style="margin-bottom:10px;" onchange="renderCompareStats()">
         <option value="">🌐 全カテゴリー</option>
       </select>
