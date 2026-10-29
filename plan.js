@@ -186,11 +186,37 @@ function planHandleTaskParam(url) {
   return ok;
 }
 if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', e => { if (e.data && e.data.type === 'open-url') planHandleTaskParam(e.data.url); });
-function planStartQuizFor(key, id) {
+// ★【0.03.63】again：合格・終わった課題をもう一度（チャンツは全部、復習で対象が無ければその範囲の単語を全部）
+function planStartQuizFor(key, id, again) {
   if (id && !planUse(planById(id))) return;
   const t = planTasks().find(x => x.key === key);
-  if (!t || !t.cards.length) return alert('出題するカードがありません。');
-  planStartQuiz(t.cards, key === 'chants');
+  if (!t) return alert('出題するカードがありません。');
+  let cards = t.cards;
+  if (again) {
+    const i = planWeekIndex();
+    if (key === 'chants') cards = planChantQuizCards(planWeekFolder(i), Infinity);
+    else if (!cards.length && key === 'sunday') cards = planWordCards(planWeekFolder(i - 1));
+    else if (!cards.length && key === 'monthly') cards = planWordCards(planWeekFolder(i - 4));
+  }
+  if (!cards.length) return alert('出題するカードがありません。');
+  planStartQuiz(cards, key === 'chants');
+}
+// ★【0.03.63】復習をいつでも始める：'prev' 先週（1週前）の範囲 / 'month' 1か月前（4週前）の範囲
+function planReviewFolder(back) { return planOk() ? planWeekFolder(Math.min(planWeekIndex(), CP.weeks.length) - back) : null; }
+function planStartReview(id, which) {
+  if (!planUse(planById(id))) return;
+  const back = which === 'month' ? 4 : 1, f = planReviewFolder(back);
+  if (!f) return alert(which === 'month' ? '4週前の範囲はまだありません。' : '先週の範囲はまだありません。');
+  let cards = which === 'month' ? planMonthlyCards(f) : (CP.sunday === 'off' ? planWordCards(f) : planSundayCards(f));
+  if (!cards.length) cards = planWordCards(f); // 全部卒業していたら全部
+  if (!cards.length) return alert('出題するカードがありません。');
+  planStartQuiz(cards, false);
+}
+function planReviewChipsHTML(p, compact) {
+  const prev = planReviewFolder(1), month = planReviewFolder(4);
+  if (!prev && !month) return '';
+  const b = (w, f, label) => f ? `<button class="chip" onclick="planStartReview(${jsArg(p.id)}, '${w}')">${label}：${escapeHtml(f)}</button>` : '';
+  return `<div class="plan-review${compact ? ' compact' : ''}"><span class="hint-small">いつでも復習</span>${b('prev', prev, '🔁 先週')}${b('month', month, '🗓️ 1か月前')}</div>`;
 }
 // 決まったカードでクイズを始める（いつものクイズ画面）。inOrder：登録順のまま（チャンツ）
 function planStartQuiz(cards, inOrder, mode) {
@@ -240,28 +266,31 @@ function planTaskHTML(t) {
     <div class="hint-small">${escapeHtml(t.sub || '')}</div>${dl}
     ${!t.done && !t.upcoming && t.progress !== undefined ? `<div class="plan-bar"><div style="width:${pct}%"></div></div>` : ''}
     ${!t.done && !t.locked ? `<div class="plan-btns"><button class="btn btn-primary" onclick="${t.action}">${t.upcoming ? '先にやる' : '▶️ 始める'}</button>${['words', 'chants', 'examples'].includes(t.key) ? `<button class="btn btn-secondary" onclick="planMarkDone('${t.key}', ${jsArg(t.planId)})">✅ 済にする</button>` : ''}</div>` : ''}
+    ${t.done ? `<div class="plan-btns"><button class="btn btn-secondary" onclick="${planAgainAction(t)}">🔁 もう一度やる</button></div>` : ''}
   </div>`;
 }
+// 終わった課題をもう一度（単語は暗記テスト、ほかはクイズ）
+function planAgainAction(t) { return t.key === 'words' ? `planStartTask(${jsArg(t.planId)}, 'words')` : `planStartQuizFor('${t.key}', ${jsArg(t.planId)}, true)`; }
 function planSectionHTML(p, withTitle) {
   planUse(p);
   const i = planWeekIndex(), cur = planWeekFolder(i);
   const st = planStreak();
   const head = `<div class="plan-head"><span>📚 ${escapeHtml(p.root)}${cur ? `（${i + 1}週目）` : ''}</span>${st ? `<span class="plan-streak">🔥 ${st}週連続で期限内</span>` : ''}</div>`;
-  if (!cur && i >= p.weeks.length) return (withTitle ? head : '') + `<div class="hint-small">🎉 このプランの範囲は全部終わりました（${p.weeks.length}週）。</div>`;
-  return (withTitle ? head : '') + (cur ? '' : `<div class="hint-small">${escapeHtml(p.start)} の週から始まります。</div>`) + planTasks().map(planTaskHTML).join('');
+  if (!cur && i >= p.weeks.length) return (withTitle ? head : '') + `<div class="hint-small">🎉 このプランの範囲は全部終わりました（${p.weeks.length}週）。</div>` + planReviewChipsHTML(p);
+  return (withTitle ? head : '') + (cur ? '' : `<div class="hint-small">${escapeHtml(p.start)} の週から始まります。</div>`) + planTasks().map(planTaskHTML).join('') + planReviewChipsHTML(p);
 }
 function planCompactHTML(p) {
   planUse(p);
   const i = planWeekIndex(), cur = planWeekFolder(i), st = planStreak();
   const head = `<div class="plan-c-head">📚 ${escapeHtml(p.root)}${cur ? `（${i + 1}週目：${escapeHtml(cur)}）` : ''}${st ? ` <span class="plan-streak">🔥${st}</span>` : ''}</div>`;
-  if (!cur) return head + `<div class="hint-small">${i >= p.weeks.length ? '🎉 全部終わりました' : `${escapeHtml(p.start)} の週から`}</div>`;
+  if (!cur) return head + `<div class="hint-small">${i >= p.weeks.length ? '🎉 全部終わりました' : `${escapeHtml(p.start)} の週から`}</div>` + (i >= p.weeks.length ? planReviewChipsHTML(p, true) : '');
   return head + planTasks().map(t => {
     const pct = Math.round((t.progress || 0) * 100);
     const name = t.title.split('：')[0];
     const state = t.done ? '✅' : t.locked ? '🔒' : t.upcoming ? '⏳' : t.overdue ? '⏰' : '';
     const sub = t.done ? '終わりました' : t.locked ? (t.sub || '') : t.deadline ? planLeftText(t.deadline) : (t.sub || '');
-    return `<div class="plan-c-row${t.done ? ' done' : ''}${t.overdue ? ' over' : ''}"><div class="plan-c-main"><div class="plan-c-t">${state} ${escapeHtml(name)}${t.optional ? ' <span class="hint-small">（余裕があれば）</span>' : ''}</div><div class="hint-small">${escapeHtml(sub)}</div>${!t.done && !t.upcoming && !t.locked && t.progress !== undefined ? `<div class="plan-bar"><div style="width:${pct}%"></div></div>` : ''}</div>${!t.done && !t.locked ? `<button class="chip plan-c-go" onclick="${t.action}">▶️</button>` : ''}</div>`;
-  }).join('');
+    return `<div class="plan-c-row${t.done ? ' done' : ''}${t.overdue ? ' over' : ''}"><div class="plan-c-main"><div class="plan-c-t">${state} ${escapeHtml(name)}${t.optional ? ' <span class="hint-small">（余裕があれば）</span>' : ''}</div><div class="hint-small">${escapeHtml(sub)}</div>${!t.done && !t.upcoming && !t.locked && t.progress !== undefined ? `<div class="plan-bar"><div style="width:${pct}%"></div></div>` : ''}</div>${!t.done && !t.locked ? `<button class="chip plan-c-go" onclick="${t.action}">▶️</button>` : ''}${t.done ? `<button class="chip plan-c-go" title="もう一度" onclick="${planAgainAction(t)}">🔁</button>` : ''}</div>`;
+  }).join('') + planReviewChipsHTML(p, true);
 }
 function renderPlanHome() {
   const box = document.getElementById('planHomeCard');
