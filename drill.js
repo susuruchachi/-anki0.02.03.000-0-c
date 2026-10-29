@@ -644,7 +644,7 @@ async function drillFin(ok, ans, tip) {
     <p>【判定】 <b class="${ok ? 'drill-ok' : 'drill-ng'}">${ok ? '〇' : '×'}</b>${!ok ? '<span class="hint-small">（あとでもう一度出ます）</span>' : ''}${drillStatsText(c)}</p>
     <div>【公式の答え】 <button class="chip" onclick="drillSpeakA()" title="答えを読み上げる">🔊</button> ${official}</div>
     ${ns.length ? `<p>【解説・注意点】<br>${ns.map(dE).join('<br>')}</p>` : ''}
-    <div class="drill-btns"><button class="btn btn-primary" onclick="drillPop()">次</button>${drillAiOk() ? '<button class="btn btn-secondary" onclick="drillQo()">💬 質問する</button>' : ''}</div></div>`;
+    <div class="drill-btns"><button class="btn btn-primary" onclick="drillPop()">次</button>${drillAiOk() ? `<button class="btn btn-secondary" onclick="drillQo()">💬 質問する${drillQaList(c).length ? `（前の質問 ${drillQaList(c).length}）` : ''}</button>` : (drillQaList(c).length ? `<button class="btn btn-secondary" onclick="drillQo()">💬 前の質問（${drillQaList(c).length}）</button>` : '')}</div></div>`;
   drillSave(); drillDraw();
 }
 function drillStatsText(c) {
@@ -653,19 +653,48 @@ function drillStatsText(c) {
   return st ? ` <span class="hint-small">（暗記テスト通算 〇${st.c} ×${st.w}）</span>` : '';
 }
 // AI に質問する
-function drillQaHTML() {
-  return (dst.qa || []).map(x => `<div class="card"><div class="hint-small">Q：${dE(x.q)}</div>${dE(x.a).replace(/\n/g, '<br>')}</div>`).join('') +
-    (dst.qo ? `<div class="card"><input id="drillQaInput" class="form-control" placeholder="質問を入力" onkeydown="if(event.key==='Enter'&&!event.isComposing)drillAsk()"><button class="btn btn-primary" style="margin-top:6px;" onclick="drillAsk()">送信</button></div>` : '');
+// ★【0.03.56】質問と答えは単語（カード）ごとにこの端末に保存し、次に同じ単語で質問したときも続きとして聞ける
+const DRILL_QA_KEY = 'susuru_anki_drill_qa';
+function drillQaLoad() { try { return JSON.parse(localStorage.getItem(DRILL_QA_KEY) || '{}') || {}; } catch (e) { return {}; } }
+function drillQaCardId(c) { return c ? (c.it ? c.it.card.id : c.ck ? c.ck.card.id : null) : null; }
+function drillQaList(c) { const id = drillQaCardId(c); return id ? (drillQaLoad()[id] || []) : []; }
+function drillQaSave(c, item) {
+  const id = drillQaCardId(c); if (!id) return;
+  const all = drillQaLoad(); const l = all[id] = (all[id] || []).concat([item]).slice(-20); // 1語につき最近の20件
+  delete all[id]; all[id] = l; // 新しく使った語をうしろに
+  const ks = Object.keys(all); while (ks.length > 400) delete all[ks.shift()];
+  try { localStorage.setItem(DRILL_QA_KEY, JSON.stringify(all)); } catch (e) {}
 }
-function drillQo() { dst.qo = !dst.qo; drillDraw(); }
+function drillQaDelete(i) {
+  const id = drillQaCardId(dcur); if (!id || !confirm('この質問を消しますか？')) return;
+  const all = drillQaLoad(); (all[id] || []).splice(i, 1); if (all[id] && !all[id].length) delete all[id];
+  try { localStorage.setItem(DRILL_QA_KEY, JSON.stringify(all)); } catch (e) {}
+  drillDraw();
+}
+function drillQaHTML() {
+  const list = drillQaList(dcur), n0 = dst.qaStart ?? list.length; // この画面より前の質問はたたむ
+  const one = (x, i) => `<div class="card drill-qa"><div class="hint-small">Q：${dE(x.q)}${x.at ? `　<span style="opacity:.7">${new Date(x.at).toLocaleDateString('ja-JP')}</span>` : ''}<button class="chip" style="float:right; padding:2px 8px;" onclick="drillQaDelete(${i})" title="消す">🗑️</button></div>${dE(x.a).replace(/\n/g, '<br>')}</div>`;
+  const old = list.slice(0, n0), cur = list.slice(n0);
+  return (old.length ? `<details class="card drill-qa-old"${dst.qo ? ' open' : ''}><summary class="hint-small">💬 この${dcur.it ? '単語' : '問題'}の前の質問（${old.length}件）</summary>${old.map((x, i) => one(x, i)).join('')}</details>` : '') +
+    cur.map((x, i) => one(x, n0 + i)).join('') +
+    (dst.qo && drillAiOk() ? `<div class="card"><input id="drillQaInput" class="form-control" placeholder="${list.length ? '続けて質問（前の質問の続きとして答えます）' : '質問を入力'}" onkeydown="if(event.key==='Enter'&&!event.isComposing)drillAsk()">
+      ${list.length ? `<label class="hint-small" style="display:flex; align-items:center; gap:6px; margin-top:6px;"><input type="checkbox" id="drillQaCont" ${dst.qaNew ? '' : 'checked'} onchange="dst.qaNew = !this.checked">前の質問の続きとして聞く</label>` : ''}
+      <button class="btn btn-primary" style="margin-top:6px;" onclick="drillAsk()">送信</button></div>` : '');
+}
+function drillQo() { if (dst.qaStart === undefined) dst.qaStart = drillQaList(dcur).length; dst.qo = !dst.qo; drillDraw(); }
 async function drillAsk() {
   if (dlock) return;
   const q = (document.getElementById('drillQaInput') || {}).value; if (!q || !q.trim()) return;
   drillBusy();
   const c = dcur;
   const ctx = c.it ? `単語:${c.it.w}／意味:${c.it.m}／属性:${drillAttr(c.it)}／補足:${c.it.card.note || ''}` : `Check問題:${c.ck.q}／正解:${c.ck.ans}`;
+  // 続きとして聞く：この語のこれまでの質問と答え（最近の6件）を一緒に送る
+  const hist = dst.qaNew ? [] : drillQaList(c).slice(-6);
+  const histText = hist.length ? `\nこれまでのやりとり（この続きとして答える）:\n${hist.map((x, i) => `Q${i + 1}:${x.q}\nA${i + 1}:${String(x.a).slice(0, 400)}`).join('\n')}\n` : '';
   try {
-    const a = await aiRequest('あなたは英単語の家庭教師です。', [{ text: `${ctx}\n生徒の質問:${q.trim()}\n簡潔に（200字程度）日本語で答える。` }], { maxTokens: 600, timeout: 20000, totalTimeout: 30000 });
-    (dst.qa = dst.qa || []).push({ q: q.trim(), a: cleanAiHintText(String(a).replace(/\*\*|`/g, '')) }); dst.qo = false; dlock = false; drillDraw();
+    const a = await aiRequest('あなたは英単語の家庭教師です。', [{ text: `${ctx}${histText}\n生徒の${hist.length ? '続けての' : ''}質問:${q.trim()}\n簡潔に（200字程度）日本語で答える。` }], { maxTokens: 600, timeout: 20000, totalTimeout: 30000 });
+    if (dst.qaStart === undefined) dst.qaStart = drillQaList(c).length;
+    drillQaSave(c, { q: q.trim(), a: cleanAiHintText(String(a).replace(/\*\*|`/g, '')), at: Date.now() });
+    dst.qo = true; dlock = false; drillDraw(); // 続けて質問できるように入力欄は開いたまま
   } catch (e) { drillErr(e); }
 }
