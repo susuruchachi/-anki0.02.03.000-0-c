@@ -1,6 +1,7 @@
 // ★ すするanki 初期化処理
 
 window.onload = function() {
+  if (typeof initCollapsibleSections === 'function') initCollapsibleSections('pgBackup'); // ★【0.03.49】
   loadData(); ensureSystemSanity(); autoMerge();
   if (typeof loadQuizPrefs === 'function') loadQuizPrefs(); // ★【0.03.03】詳細設定を復元
   buildQuizScopeDropdown(); 

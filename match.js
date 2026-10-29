@@ -83,18 +83,14 @@ function initOnlineMatchPage() {
     container.innerHTML = '';
     const opts = onlineMatchScopeOptions();
     if (opts.length === 0) {
-      container.innerHTML = '<div style="color:var(--danger); font-size:0.85rem; padding:10px; background:var(--bg3); border-radius:8px; border:1px solid rgba(255,79,106,0.3);">⚠️ 共有カテゴリーがありません。オンライン対戦は共有カテゴリーのみ出題可能です。まずは公開カテゴリーを購読するか、共有URLから追加してください。</div>';
+      container.innerHTML = '<div style="color:var(--danger); font-size:0.85rem; padding:10px; background:var(--bg3); border-radius:8px; border:1px solid rgba(255,79,106,0.3);">⚠️ 共有カテゴリーがありません。オンライン対戦は共有カテゴリーのみ出題可能です。まずは公開カテゴリーを購読するか、共有URLから追加してください。<button class="btn btn-secondary" style="margin-top:8px;" onclick="openPage(\'pgPublicCategories\')">🌐 公開カテゴリーを探す</button></div>';
       selectedScopePath = [];
     } else {
-      const select = document.createElement('select');
-      select.className = 'form-control';
-      select.style.marginBottom = '8px';
+      // ★【0.03.49】フォルダーのツリーから選ぶ（picker.js）。共有カテゴリーのフォルダーだけ
       const keep = selectedScopePath && selectedScopePath.length === 1 && opts.some(o => o.cat === selectedScopePath[0]) ? selectedScopePath[0] : '';
-      select.innerHTML = `<option value="" disabled ${keep ? '' : 'selected'}>🌐 対戦する共有カテゴリーを選択...</option>` +
-        opts.map(o => `<option value="${escapeHtml(o.cat)}" ${o.cat === keep ? 'selected' : ''}>${'　'.repeat(o.depth)}${o.depth ? '└ ' : '🌐 '}${escapeHtml(o.cat)}（${o.count}問）</option>`).join('');
       if (!keep) selectedScopePath = [];
-      select.onchange = (e) => { selectedScopePath = [e.target.value]; updateOnlineWaitingCount(); };
-      container.appendChild(select);
+      const o = opts.find(x => x.cat === keep);
+      container.innerHTML = folderPickButtonHTML(keep, '共有カテゴリーを選んでください', 'pickOnlineMatchScope()', o ? `${o.count}問` : '');
     }
   }
   const gameView = document.getElementById('onlineGameView');
@@ -102,6 +98,13 @@ function initOnlineMatchPage() {
   updateOnlineWaitingCount();
 }
 
+function pickOnlineMatchScope() {
+  const opts = onlineMatchScopeOptions(), cnt = {}; opts.forEach(o => { cnt[o.cat] = o.count; });
+  openFolderPicker({ title: '📋 対戦するカテゴリー', current: selectedScopePath[0] || '',
+    hint: '対戦で出せるのは共有・公開カテゴリーの問題だけです（相手も同じ問題を持っているため）',
+    selectable: c => !!cnt[c], visible: c => !!cnt[c], count: c => cnt[c] || 0,
+    onPick: c => { if (!c) return; selectedScopePath = [c]; initOnlineMatchPage(); } });
+}
 async function updateOnlineWaitingCount() {
   const el = document.getElementById('onlineWaitingCountBadge');
   if (!el) return;

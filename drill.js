@@ -214,18 +214,24 @@ function drillHome() {
   const left = x => (x.Q || []).filter(y => y.t === 'q' || y.t === 'c').length;
   const others = Object.keys(all).filter(k => k !== cat && (k === '' || categories.includes(k)));
   const A = document.getElementById('drillApp');
-  A.innerHTML = `<div class="card"><div class="setting-box-title">🧠 暗記テスト</div>
+  // ★【0.03.49】画面を整理：出題範囲（フォルダーのツリーから選ぶ）→ 開始 → 途中経過 → そのほか。説明はたたむ
+  A.innerHTML = `<div class="card drill-main"><div class="setting-box-title">🧠 暗記テスト</div>
       <label class="section-label" style="font-weight:500;">🎯 出題範囲</label>
-      <select class="form-control" onchange="drillSetCategory(this.value)"><option value="">📚 すべてのフォルダー</option>${buildCategoryOptionsHTML(new Set(), false)}</select>
-      <div class="hint-small" style="margin-top:4px;">グループ ${DG.length} ・ 単語 ${words} 語 ・ Check! ${checks} 問</div>
+      ${folderPickButtonHTML(cat, 'すべてのフォルダー', 'drillPickScope()', `グループ ${DG.length} ・ 単語 ${words}語 ・ Check! ${checks}問`)}
       ${d ? `<div class="drill-saved"><b>▶️ 途中経過があります</b><div class="hint-small">${d.r}周目 ・ 残り${left(d)}問</div><div class="drill-btns"><button class="btn btn-primary" onclick="drillResume(${jsArg(cat)})">続きから</button><button class="btn btn-secondary" onclick="drillDiscard(${jsArg(cat)})">途中経過を消す</button></div></div>` : ''}
-      ${drillAiOk() ? '' : '<div class="hint-small drill-ng" style="margin-top:6px;">⚠️ AI が使えないため、単語帳の訳と同じ言葉だけを正解にします（言い換えの判定・意味のまとめ・4択・解説・質問は使えません）。設定 → 🤖 AI でキーを入れると使えます。</div>'}
       <button class="btn btn-start" style="margin-top:10px;" onclick="drillStart()" ${words + checks ? '' : 'disabled'}>🚀 ${d ? '最初から始める' : '開始'}</button>
-      <button class="btn btn-secondary" style="margin-top:8px;" onclick="vtOpen()">📄 テキストから問題を作る</button>
+      ${drillAiOk() ? '' : '<div class="drill-warn">⚠️ AI が使えないため、単語帳の訳と同じ言葉だけを正解にします（設定 → 🤖 AI でキーを入れると、言い換えの判定・4択・解説・質問が使えます）</div>'}
       ${others.length ? `<div class="hint-small" style="margin-top:10px;">ほかのフォルダーの途中経過：</div><div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:4px;">${others.map(k => `<button class="chip" onclick="drillSetCategory(${jsArg(k)})">📁 ${dE(k || 'すべて')}（${all[k].r}周目・残り${left(all[k])}）</button>`).join('')}</div>` : ''}
-      <div class="hint-small" style="margin-top:8px;">・グループ（フォルダー）ごとに、単語の<b>全部の意味</b>を答えます（言い換えても意味が変わらない訳は、どれか1つで OK。「完了、存続」「完了存続」のようにまとめて答えても OK）<br>・動詞は、自動詞か他動詞かも聞きます<br>・間違えたら、その場でもう一度出ます。グループの最後に、そのグループで間違えた単語と Check!（Review Test）<br>・1周目で間違えた問題を2周目で…と、全部〇になるまで続けます<br>・正解・不正解の回数は、暗記テストだけで数えます（いつものレベル・成績とは別）</div>
+      <div class="drill-sub"><button class="chip" onclick="vtOpen()">📄 テキストから問題を作る</button></div>
+      <details class="drill-howto"><summary>ℹ️ 暗記テストの進み方</summary>
+        <div class="hint-small">・グループ（フォルダー）ごとに、単語の<b>全部の意味</b>を答えます（言い換えても意味が変わらない訳は、どれか1つで OK。「完了、存続」「完了存続」のようにまとめて答えても OK）<br>・動詞は、自動詞か他動詞かも聞きます<br>・間違えたら、その場でもう一度出ます。グループの最後に、そのグループで間違えた単語と Check!（Review Test）<br>・1周目で間違えた問題を2周目で…と、全部〇になるまで続けます。2周目はグループの切れ目に導入の文<br>・正解・不正解の回数は、暗記テストだけで数えます（いつものレベル・成績とは別）</div>
+      </details>
     </div>`;
-  const sel = A.querySelector('select'); if (sel) sel.value = cat;
+}
+function drillPickScope() {
+  openFolderPicker({ title: '🎯 暗記テストの出題範囲', current: drillScopeCategory(), allLabel: '📚 すべてのフォルダー',
+    hint: 'フォルダーを選ぶと、その下のフォルダーもグループとして順に出題します',
+    onPick: c => drillSetCategory(c) });
 }
 function drillDiscard(cat) {
   if (!confirm('このフォルダーの途中経過を消しますか？')) return;

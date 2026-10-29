@@ -227,6 +227,54 @@ b.drill-ng { font-size: 1.3rem; }
 .race-ck { font-size:0.72rem; padding:2px 6px; border-radius:8px; background:var(--bg4); color:var(--text3); }
 .race-ck.on { color:var(--text); }
 .race-hc { grid-column:1 / -1; font-size:0.75rem; padding:3px 6px; border-radius:8px; background:var(--bg4); color:var(--text); border:1px solid var(--border); justify-self:start; }
+/* ★【0.03.49】画面の整理 */
+.page-head { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:14px; }
+.page-head h2 { margin:0; }
+.page-head-btns { display:flex; gap:6px; flex-shrink:0; }
+.fp-btn { display:flex; align-items:center; gap:10px; width:100%; text-align:left; padding:12px 14px; border-radius:12px; border:1px solid var(--border); background:var(--bg3); color:var(--text); font-family:inherit; font-size:0.92rem; cursor:pointer; }
+.fp-btn:active { transform:scale(0.99); }
+.fp-btn-ico { font-size:1.2rem; flex-shrink:0; }
+.fp-btn-txt { flex:1; min-width:0; font-weight:700; line-height:1.4; word-break:break-word; }
+.fp-btn-sub { display:block; font-weight:500; font-size:0.75rem; color:var(--text3); margin-top:2px; }
+.fp-btn-chg { flex-shrink:0; font-size:0.75rem; color:var(--primary); font-weight:700; }
+.fp-sep { color:var(--text3); font-weight:400; margin:0 2px; }
+.fp-card { max-width:520px; width:calc(100vw - 24px); max-height:86vh; display:flex; flex-direction:column; }
+.fp-list { margin-top:8px; overflow-y:auto; flex:1; min-height:120px; max-height:56vh; border:1px solid var(--border); border-radius:10px; background:var(--bg); }
+.fp-row { display:flex; align-items:center; gap:4px; padding:4px 8px; border-bottom:1px solid var(--border); }
+.fp-row:last-child { border-bottom:none; }
+.fp-row.cur { background:rgba(79,124,255,.15); }
+.fp-row.off .fp-name { color:var(--text3); }
+.fp-tog { width:28px; height:30px; flex-shrink:0; border:none; background:none; color:var(--text2); font-size:0.9rem; cursor:pointer; }
+.fp-name { flex:1; min-width:0; text-align:left; border:none; background:none; color:var(--text); font-family:inherit; font-size:0.9rem; padding:8px 4px; cursor:pointer; word-break:break-word; }
+.fp-meta { flex-shrink:0; font-size:0.72rem; color:var(--text3); }
+.plan-step { display:flex; align-items:center; gap:8px; margin:14px 0 6px; font-weight:700; font-size:0.9rem; }
+.plan-step-no { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:50%; background:var(--primary); color:#fff; font-size:0.75rem; flex-shrink:0; }
+.plan-weeks { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
+.plan-week { font-size:0.72rem; padding:3px 8px; border-radius:10px; background:var(--bg4); color:var(--text2); }
+.plan-week.cur { background:var(--primary); color:#fff; }
+.plan-c-head { font-weight:700; font-size:0.85rem; margin:8px 0 2px; }
+.plan-c-row { display:flex; align-items:center; gap:8px; padding:8px 0; border-top:1px solid var(--border); }
+.plan-c-row.done { opacity:.6; }
+.plan-c-row.over .plan-c-t { color:var(--danger); }
+.plan-c-main { flex:1; min-width:0; }
+.plan-c-t { font-weight:700; font-size:0.88rem; }
+.plan-c-go { flex-shrink:0; }
+.sec-card { padding-top:14px; padding-bottom:14px; }
+.sec-head { font-size:0.95rem !important; color:var(--text) !important; text-transform:none !important; letter-spacing:0 !important; cursor:pointer; display:flex; align-items:center; justify-content:space-between; margin-bottom:0 !important; border-bottom:none !important; padding-bottom:0 !important; }
+.sec-head::after { content:'▸'; color:var(--text3); font-size:0.9rem; transition:transform .2s; }
+.sec-card.open .sec-head::after { transform:rotate(90deg); }
+.sec-card.open .sec-head { margin-bottom:12px !important; }
+.sec-card:not(.open) .sec-body { display:none; }
+.set-sub { font-size:0.75rem; font-weight:700; color:var(--primary); margin:12px 0 6px; }
+.set-help { margin-top:10px; }
+.set-help summary, .drill-howto summary { cursor:pointer; font-size:0.8rem; color:var(--text2); }
+.drill-warn { margin-top:8px; padding:8px 10px; border-radius:10px; background:rgba(245,158,11,.12); font-size:0.78rem; color:var(--text2); }
+.drill-sub { display:flex; gap:6px; flex-wrap:wrap; margin-top:10px; }
+.drill-howto { margin-top:10px; }
+.guide-toc { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; }
+.guide-sec { border:1px solid var(--border); border-radius:10px; padding:4px 12px; margin-bottom:8px; background:var(--bg3); }
+.guide-sec > summary { cursor:pointer; font-weight:700; font-size:1rem; padding:8px 0; color:var(--primary); }
+.guide-sec[open] > summary { border-bottom:1px solid var(--border); margin-bottom:8px; }
 .plan-alert { display:flex; align-items:center; gap:8px; justify-content:space-between; margin:-4px -4px 10px; padding:10px 12px; border-radius:10px; background:rgba(245,158,11,.15); border:1px solid var(--warn); color:var(--text); font-weight:700; font-size:0.88rem; cursor:pointer; }
 .plan-alert.over { background:rgba(239,68,68,.15); border-color:var(--danger); }
 .plan-alert-go { flex-shrink:0; font-size:0.8rem; color:var(--primary); }
@@ -475,8 +523,8 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
   </nav>
 
   <div id="pgHome" class="screen active">
-    <h2>🏠 クイズに挑戦</h2>
-    <div id="planHomeCard" class="card plan-card" style="display:none;"></div>
+    <!-- ★【0.03.49】ホームを整理：見出しの横にガイド・お知らせ → お知らせバナー → 学習状況 → 今週のプラン（短く）→ クイズ -->
+    <div class="page-head"><h2>🏠 ホーム</h2><div class="page-head-btns"><button class="chip" onclick="openPage('pgTutorial')">📖 ガイド</button><button class="chip" onclick="openPage('pgUpdates'); loadUpdates();">📢 お知らせ</button></div></div>
 
     <!-- ★【0.03.00】新しいお知らせのバナー（未読のときだけ表示） -->
     <div id="releaseBanner" class="release-banner" style="display:none;" onclick="openReleaseNotesFromBanner()">
@@ -496,14 +544,17 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
       <div class="home-summary-item" onclick="filterBoxByStatus('grad')"><div class="home-summary-num" id="homeSumGrad" style="color:var(--success);">0</div><div class="home-summary-label">🎓 卒業</div></div>
     </div>
 
-    <div class="card">
+    <div id="planHomeCard" class="card plan-card" style="display:none;"></div>
+
+    <div class="card quiz-card">
+      <div class="setting-box-title">🎯 クイズ</div>
       <div class="form-group" id="scopeGroup">
-        <label>🎯 出題範囲</label>
+        <label class="section-label" style="font-weight:500;">出題範囲</label>
         <select id="selScopeSubject" class="form-control" style="margin-bottom:8px; display:none;" onchange="onScopeSubjectChange(this.value)"></select>
         <div id="scopeSelectors" style="display:flex; flex-direction:column; gap:8px;"></div>
       </div>
       <div class="form-group" style="margin-bottom:0;">
-        <label>🗂️ 出題モード</label>
+        <label class="section-label" style="font-weight:500;">出題モード</label>
         <select id="selQuizMode" class="form-control">
           <option value="desc">📝 記述式入力モード</option>
           <option value="choice">🎴 4択択一モード</option>
@@ -512,17 +563,16 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
           <option value="self">🧠 自己申告モード (Anki風)</option>
         </select>
       </div>
+      <button class="btn btn-start" style="margin:14px 0 10px;" onclick="startQuiz('normal')">🚀 クイズスタート</button>
+      <div class="form-row" style="margin:0;">
+        <button class="btn btn-accent home-sub-btn" style="flex:1;" onclick="startQuiz('tokkun')">🔥 集中特訓<span style="font-size:0.65rem; font-weight:500;">苦手・しっかりのみ</span></button>
+        <button class="btn btn-success home-sub-btn" style="flex:1;" onclick="startQuiz('review')">♻️ ランダム復習<span style="font-size:0.65rem; font-weight:500;">卒業済みから出題</span></button>
+      </div>
     </div>
-
-    <button class="btn btn-start" onclick="startQuiz('normal')">🚀 クイズスタート</button>
-    <div class="form-row" style="margin-bottom:15px;">
-      <button class="btn btn-accent home-sub-btn" style="flex:1;" onclick="startQuiz('tokkun')">🔥 集中特訓<span style="font-size:0.65rem; font-weight:500;">苦手・しっかりのみ</span></button>
-      <button class="btn btn-success home-sub-btn" style="flex:1;" onclick="startQuiz('review')">♻️ ランダム復習<span style="font-size:0.65rem; font-weight:500;">卒業済みから出題</span></button>
-    </div>
-    <button class="btn btn-secondary home-sub-btn" style="width:100%; margin:-6px 0 15px;" onclick="openDrill()">📝 暗記テスト<span style="font-size:0.65rem; font-weight:500;">グループごとに全部の意味を答える・全問〇まで周回（AI）</span></button>
 
     <details class="card" id="homeDetailSettings">
       <summary>⚙️ 詳細設定（難易度・出題数・オプション）</summary>
+      <div class="set-sub">基本</div>
       <div class="form-row" style="margin-bottom:12px;">
         <div style="flex:2;">
           <label class="section-label" style="font-weight:500;">⚡ 難易度</label>
@@ -546,8 +596,6 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
           <option value="off">オフ</option>
         </select>
       </div>
-      <div class="hint-small" style="margin:0 0 6px;">🎯 重点モード（詳細設定）：記述式・4択で、間違えた・足りなかった・答えられなかったときに、ヒントを見て答え直します（最大3回）。ヒントを1回見てからの正解は「ヒントを見た正解」、2回以上見てからの正解は不正解寄りとして記録します。</div>
-      <div class="hint-small" style="margin:0 0 12px;">難易度は制限時間・ヒントの出る速さ・レベルの上がりやすさ（難しいほど早く上がり、下がりにくい）に反映されます。ヒントを見て正解すると、レベルは上がりにくくなります。</div>
       <div class="form-group" style="margin-bottom:12px;">
         <label class="section-label" style="font-weight:500;">🔢 出題順</label>
         <select id="selQuizOrder" class="form-control">
@@ -556,6 +604,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
           <option value="continue">⏭️ 問題番号順（前回の続きから）</option>
         </select>
       </div>
+      <div class="set-sub">時間・卒業</div>
       <div class="form-row" style="margin-bottom:6px;">
         <div style="flex:1;">
           <label class="section-label" style="font-weight:500;">⏱️ 制限時間(秒)</label>
@@ -570,7 +619,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
           <input type="number" id="numGradThreshold" class="form-control" min="1" max="30" placeholder="5">
         </div>
       </div>
-      <div class="hint-small" style="margin:0 0 12px;">制限時間：空欄＝難易度どおり、0＝無制限。自動進行：答えを表示してから次へ進むまでの秒数（0＝自動で進まない）。卒業正解数：レベル5になってから何回正解で卒業か（レベルの上がり下がりの回数もこれに比例します）。</div>
+      <div class="set-sub">オプション</div>
       <div class="toggle-grid">
         <label class="toggle-pill"><input type="checkbox" id="chkTTS">🗣️ 問題を読み上げ</label>
         <label class="toggle-pill"><input type="checkbox" id="chkTimeAttack">⏱️ タイムアタック</label>
@@ -579,12 +628,14 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
         <label class="toggle-pill" title="動詞は 自動詞の意味→他動詞の意味→自動詞？他動詞？→熟語 の順に続けて出します"><input type="checkbox" id="chkVerbAttr" checked>🔀 動詞は自動詞・他動詞も聞く</label>
         <label class="toggle-pill"><input type="checkbox" id="chkFocusMode">🎯 重点モード</label>
       </div>
+      <details class="set-help"><summary>ℹ️ それぞれの設定の説明</summary>
+        <div class="hint-small">・難易度：制限時間・ヒントの出る速さ・レベルの上がりやすさ（難しいほど早く上がり、下がりにくい）に反映。ヒントを見て正解すると、レベルは上がりにくくなります<br>
+        ・制限時間：空欄＝難易度どおり、0＝無制限。自動進行：答えを表示してから次へ進むまでの秒数（0＝自動で進まない）<br>
+        ・卒業正解数：レベル5になってから何回正解で卒業か（レベルの上がり下がりの回数もこれに比例）<br>
+        ・🎯 重点モード：記述式・4択で、間違えた・足りなかった・答えられなかったときに、ヒントを見て答え直します（最大3回）。ヒントを1回見てからの正解は「ヒントを見た正解」、2回以上は不正解寄りとして記録<br>
+        ・🔀 動詞は自動詞・他動詞も聞く：自動詞の意味 → 他動詞の意味 → 自動詞？他動詞？ → 熟語 の順に続けて出します</div>
+      </details>
     </details>
-
-    <div class="form-row">
-      <button class="btn btn-secondary" style="flex:1;" onclick="openPage('pgTutorial')">📖 使い方ガイド</button>
-      <button class="btn btn-secondary" style="flex:1;" onclick="openPage('pgUpdates'); loadUpdates();">📢 お知らせ</button>
-    </div>
   </div>
 
   <div id="pgUpdates" class="screen">
@@ -698,6 +749,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
   </div>
 
   <div id="pgDrill" class="screen">
+    <div id="drillApp" class="drill-app"></div>
     <div id="drillPlanWrap" class="drill-app">
       <div class="card plan-card">
         <div class="setting-box-title">📅 週間プラン</div>
@@ -706,7 +758,6 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
       </div>
       <div class="card race-card"><div class="setting-box-title">⚔️ フレンドとバトル <button class="chip" style="float:right;" onclick="renderRace()">🔄</button></div><div class="race-box"></div></div>
     </div>
-    <div id="drillApp" class="drill-app"></div>
   </div>
 
   <div id="pgQuizResult" class="screen">
@@ -759,6 +810,27 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
     </div>
 
     <div class="card">
+      <div class="setting-box-title">👥 フレンド・ランキング</div>
+      <button class="btn btn-accent" onclick="openPage('pgFriends'); loadAppFriends(); loadDailyRanking();">🏆 フレンド・ランキング・チャットを開く <span class="friend-req-badge" style="display:none;"></span></button>
+      <div style="margin-top:12px;">
+        <label class="section-label" style="font-weight:500;">あなたのUID</label>
+        <div class="form-row">
+          <input type="text" id="txtMyUid" class="form-control" readonly>
+          <button class="btn btn-secondary" style="width:auto; padding:0 14px; font-size:0.8rem;" onclick="copyMyUid()">📋 コピー</button>
+        </div>
+        <button class="btn btn-secondary" style="margin-top:8px;" onclick="shareFriendLink()">🔗 フレンド申請のURLを送る</button>
+        <label class="section-label" style="font-weight:500; margin-top:10px;">🏷️ 表示名（ランキング・フレンド・対戦で表示）</label>
+        <div class="form-row">
+          <input type="text" id="txtMyDisplayName" class="form-control" maxlength="20" placeholder="ログインすると変更できます">
+          <button class="btn btn-secondary" style="width:auto; padding:0 14px; font-size:0.8rem;" onclick="saveMyDisplayName()">💾 変更</button>
+        </div>
+      </div>
+      <label class="toggle-pill" style="margin-top:12px;"><input type="checkbox" id="chkShareStats" onchange="toggleShareStats()">📊 成績をフレンドと共有する</label>
+      <div class="hint-small" style="margin-top:6px;">有効にすると、カテゴリーごとの成績（正解数・成績率）がフレンドと共有され、ランキングにも表示されます。</div>
+      <button class="btn btn-secondary" style="margin-top:10px;" onclick="openPage('pgCompareStats')">📊 フレンドと成績を比較</button>
+    </div>
+
+    <div class="card">
       <div class="setting-box-title">🤖 AI（意味で採点・ヒント・読み取り）</div>
       <div id="aiSettings" class="hint-small">読み込み中...</div>
     </div>
@@ -803,27 +875,6 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
       <div class="setting-box-title">🛟 復元ポイント</div>
       <div class="hint-small" style="margin-bottom:6px;">全消去・置き換え・フォルダーの削除・購読の解除・成績のリセットなどをする直前の状態が、この端末に自動で保存されます（新しい方から8つ）。「↩️ 戻す」でその時点のカード・フォルダー・成績に戻せます（その後に追加したカードは残ります）。📤 でJSONとして保存できます。</div>
       <div id="snapshotList" class="hint-small">読み込み中...</div>
-    </div>
-
-    <div class="card">
-      <div class="setting-box-title">👥 フレンド・ランキング</div>
-      <button class="btn btn-accent" onclick="openPage('pgFriends'); loadAppFriends(); loadDailyRanking();">🏆 フレンド・ランキング・チャットを開く <span class="friend-req-badge" style="display:none;"></span></button>
-      <div style="margin-top:12px;">
-        <label class="section-label" style="font-weight:500;">あなたのUID</label>
-        <div class="form-row">
-          <input type="text" id="txtMyUid" class="form-control" readonly>
-          <button class="btn btn-secondary" style="width:auto; padding:0 14px; font-size:0.8rem;" onclick="copyMyUid()">📋 コピー</button>
-        </div>
-        <button class="btn btn-secondary" style="margin-top:8px;" onclick="shareFriendLink()">🔗 フレンド申請のURLを送る</button>
-        <label class="section-label" style="font-weight:500; margin-top:10px;">🏷️ 表示名（ランキング・フレンド・対戦で表示）</label>
-        <div class="form-row">
-          <input type="text" id="txtMyDisplayName" class="form-control" maxlength="20" placeholder="ログインすると変更できます">
-          <button class="btn btn-secondary" style="width:auto; padding:0 14px; font-size:0.8rem;" onclick="saveMyDisplayName()">💾 変更</button>
-        </div>
-      </div>
-      <label class="toggle-pill" style="margin-top:12px;"><input type="checkbox" id="chkShareStats" onchange="toggleShareStats()">📊 成績をフレンドと共有する</label>
-      <div class="hint-small" style="margin-top:6px;">有効にすると、カテゴリーごとの成績（正解数・成績率）がフレンドと共有され、ランキングにも表示されます。</div>
-      <button class="btn btn-secondary" style="margin-top:10px;" onclick="openPage('pgCompareStats')">📊 フレンドと成績を比較</button>
     </div>
 
     <div class="card">
@@ -966,29 +1017,20 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 
   <div id="pgOnlineMatch" class="screen">
     <h2>⚔️ オンライン対戦</h2>
-    <p style="color:var(--text2); margin-bottom:15px; font-size:0.9rem;">他のユーザーとリアルタイムで対戦して、スコアを競い合います。</p>
+    <p class="hint-small" style="margin:-6px 0 12px;">ほかのユーザーとリアルタイムで同じ問題を解いて、スコアを競います。</p>
 
-    <div class="card" style="background:linear-gradient(135deg, var(--bg3) 0%, var(--bg4) 100%); border-color:var(--accent);">
-      <div style="display:flex; gap:10px; margin-bottom:15px;">
-        <button class="btn btn-accent" style="flex:1;" onclick="startOnlineMatching()">
-          <i style="margin-right:8px;">🎲</i>ランダムマッチ
-        </button>
-        <button class="btn btn-secondary" style="flex:1;" onclick="createQuickMatch()">
-          <i style="margin-right:8px;">🔑</i>合言葉で対戦
-        </button>
+    <!-- ★【0.03.49】①カテゴリー → ②設定 → ③対戦する の順に -->
+    <div class="card">
+      <div class="plan-step" style="margin-top:0;"><span class="plan-step-no">1</span>📋 出題するカテゴリー（共有カテゴリーから）</div>
+      <div id="onlineMatchCategorySelect">
+        <div id="onlineMatchScopeSelectors"></div>
+        <div id="onlineWaitingCountBadge" class="hint-small" style="min-height:1.2em; margin-top:6px;"></div>
       </div>
     </div>
 
-    <h3 style="margin:20px 0 10px 0; color:var(--text);">📋 カテゴリー選択</h3>
-    <div id="onlineMatchCategorySelect" style="margin-bottom:15px;">
-      <p style="color:var(--text2); font-size:0.85rem;">出題カテゴリー：</p>
-      <div id="onlineMatchScopeSelectors" style="display:flex; flex-direction:column; gap:10px; margin-bottom:8px;"></div>
-      <div id="onlineWaitingCountBadge" style="font-size:0.82rem; color:var(--text3); min-height:1.2em; padding:2px 0 8px 2px;"></div>
-    </div>
-
-    <h3 style="margin:20px 0 10px 0; color:var(--text);">⚙️ 対戦設定</h3>
-    <div class="form-group" style="margin-bottom:10px;">
-      <label style="font-size:0.8rem; color:var(--text2);">形式</label>
+    <div class="card">
+      <div class="plan-step" style="margin-top:0;"><span class="plan-step-no">2</span>⚙️ 対戦の設定</div>
+      <label class="section-label" style="font-weight:500;">形式</label>
       <select id="onlineMatchFormat" class="form-control">
         <option value="choice">🎴 4択択一モード</option>
         <option value="desc">📝 記述式入力モード</option>
@@ -996,35 +1038,26 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
         <option value="tap">👆 文字タップモード (Duolingo風)</option>
         <option value="self">🧠 自己申告モード (Anki風)</option>
       </select>
-    </div>
-    <div class="form-group" style="display:flex; gap:10px; flex-wrap:wrap;">
-      <div style="flex:1; min-width:150px;">
-        <label style="font-size:0.8rem; color:var(--text2);">問題数</label>
-        <input type="number" id="onlineMatchQuestionCount" class="form-control" value="10" min="5" max="50">
-      </div>
-      <div style="flex:1; min-width:150px;">
-        <label style="font-size:0.8rem; color:var(--text2);">制限時間（秒）</label>
-        <input type="number" id="onlineMatchTimeLimit" class="form-control" value="15" min="5" max="60">
+      <div class="form-row" style="margin-top:8px;">
+        <div style="flex:1;"><label class="section-label" style="font-weight:500;">問題数</label><input type="number" id="onlineMatchQuestionCount" class="form-control" value="10" min="5" max="50"></div>
+        <div style="flex:1;"><label class="section-label" style="font-weight:500;">制限時間（秒）</label><input type="number" id="onlineMatchTimeLimit" class="form-control" value="15" min="5" max="60"></div>
       </div>
     </div>
 
-    <div style="margin:20px 0; padding:15px; background:var(--bg3); border-radius:8px; border-left:4px solid var(--primary);">
-      <p style="color:var(--text); font-weight:500; margin-bottom:8px;">💡 対戦の流れ</p>
-      <ol style="color:var(--text2); font-size:0.85rem; padding-left:20px; line-height:1.6;">
-        <li>カテゴリーと設定を選択</li>
-        <li>「ランダム」か「合言葉」を選択</li>
-        <li>相手が見つかるまで待機</li>
-        <li>同時にクイズ開始（リアルタイム）</li>
-        <li>成績比較・ランキング更新</li>
-      </ol>
+    <div class="card" style="border-color:var(--accent);">
+      <div class="plan-step" style="margin-top:0;"><span class="plan-step-no">3</span>🎮 対戦する</div>
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-accent" style="flex:1;" onclick="startOnlineMatching()">🎲 ランダムマッチ</button>
+        <button class="btn btn-secondary" style="flex:1;" onclick="createQuickMatch()">🔑 合言葉で対戦</button>
+      </div>
+      <div class="hint-small" style="margin-top:6px;">ランダム：同じカテゴリーで待っている人と対戦／合言葉：友だちと同じ合言葉を入れて対戦</div>
     </div>
 
     <div id="onlineMatchInfo" style="display:none; margin-top:20px; padding:15px; background:var(--bg3); border-radius:8px; border-left:4px solid var(--success); color:var(--text);">
       <p id="onlineMatchInfoText"></p>
     </div>
 
-    <button class="btn btn-secondary" style="margin-top:12px; width:100%;" onclick="openPage('pgMatchHistory'); renderMatchHistory();">📋 対戦履歴を見る</button>
-    <button class="btn btn-secondary" style="margin-top:10px; width:100%;" onclick="openPage('pgStats')">戻る</button>
+    <button class="btn btn-secondary" style="margin-top:4px; width:100%;" onclick="openPage('pgMatchHistory'); renderMatchHistory();">📋 対戦履歴を見る</button>
   </div>
 
   <div id="pgMatchHistory" class="screen">
@@ -1397,6 +1430,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 <script src="notify-kv.js"></script>
 <script src="notify.js"></script>
 <script src="ai.js"></script>
+<script src="picker.js"></script>
 <script src="drill.js"></script>
 <script src="plan.js"></script>
 <script src="race.js"></script>

@@ -115,7 +115,7 @@ function buildQuizScopeDropdown() {
   const container = document.getElementById('scopeSelectors'); if(!container) return;
   loadScopePath();
   renderScopeSubjectSelect();
-  // ★【0.03.02】保存されたパスを「全階層」復元する（以前は最上位しか復元されず、クイズ後にトップだけの表示に戻っていた）
+  // ★【0.03.02】保存されたパスを「全階層」復元する
   let path = [];
   if (selectedScopePath[0] === 'all') path = ['all'];
   else {
@@ -127,30 +127,15 @@ function buildQuizScopeDropdown() {
     }
   }
   selectedScopePath = path;
-  container.innerHTML = ''; createScopeSelect(0, getTopLevelCategories().filter(scopeVisible));
-  if (path[0] === 'all') { const s0 = container.querySelector('select'); if (s0) s0.value = 'all'; return; }
-  path.forEach((val, depth) => {
-    const sel = container.querySelectorAll('select')[depth];
-    if (!sel) return;
-    sel.value = val;
-    const children = getChildCategories(val).filter(scopeVisible);
-    if (children.length > 0) createScopeSelect(depth + 1, children);
-  });
+  // ★【0.03.49】段々のプルダウンをやめて、フォルダーのツリーから選ぶ（picker.js）
+  const cur = path.length && path[0] !== 'all' ? path[path.length - 1] : '';
+  container.innerHTML = folderPickButtonHTML(cur, 'すべてのフォルダーから出題', 'pickQuizScope()', cur ? `${(fpCardCounts()[cur] || 0)}問` : `${db.filter(q => q.kind !== 'intro').length}問`);
 }
-function createScopeSelect(depth, categoriesToShow) {
-  if (categoriesToShow.length === 0) return;
-  const select = document.createElement('select'); select.className = 'form-control';
-  if (depth === 0) { const optAll = document.createElement('option'); optAll.value = "all"; optAll.innerText = "🌐 全てから出題"; select.appendChild(optAll); }
-  const optDefault = document.createElement('option'); optDefault.value = ""; optDefault.innerText = depth === 0 ? "📁 トップカテゴリー..." : "📂 サブカテゴリー..."; optDefault.disabled = true; optDefault.selected = true; select.appendChild(optDefault);
-  categoriesToShow.forEach(cat => { const opt = document.createElement('option'); opt.value = cat; opt.innerText = depth === 0 ? `📁 ${cat}` : `📂 ${cat}`; select.appendChild(opt); });
-  select.onchange = (e) => {
-    const val = e.target.value; const container = document.getElementById('scopeSelectors');
-    const selects = Array.from(container.querySelectorAll('select')); selects.forEach((sel, idx) => { if (idx > depth) sel.remove(); });
-    if (val === "all") { selectedScopePath = ["all"]; saveScopePath(); return; }
-    selectedScopePath[depth] = val; selectedScopePath = selectedScopePath.slice(0, depth + 1); saveScopePath();
-    const children = getChildCategories(val).filter(scopeVisible); if (children.length > 0) createScopeSelect(depth + 1, children);
-  };
-  document.getElementById('scopeSelectors').appendChild(select);
+function pickQuizScope() {
+  const cur = selectedScopePath.length && selectedScopePath[0] !== 'all' ? selectedScopePath[selectedScopePath.length - 1] : '';
+  openFolderPicker({ title: '🎯 出題範囲を選ぶ', current: cur, allLabel: '🌐 すべてのフォルダーから出題', selectable: scopeVisible,
+    hint: 'フォルダーを選ぶと、その下のフォルダーの問題も出題します（「上から出題しない」にしたフォルダーは除く）',
+    onPick: c => { selectedScopePath = c ? getCategoryPath(c) : ['all']; saveScopePath(); buildQuizScopeDropdown(); } });
 }
 
 // ★【0.02.63】このラウンドの構造化解答（品詞タグ付き複数解答）。null なら通常の単一解答。
