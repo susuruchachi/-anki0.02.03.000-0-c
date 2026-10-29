@@ -217,6 +217,15 @@ b.drill-ng { font-size: 1.3rem; }
 .bulkdel-row input { width: 20px; height: 20px; flex-shrink: 0; }
 .bulkdel-row.ro { opacity: .5; }
 .bulkdel-q { font-weight: 700; color: var(--text); word-break: break-word; font-size: 0.9rem; }
+.race-taunt { margin:6px 0 8px; padding:8px 10px; border-radius:10px; background:rgba(239,68,68,.12); border:1px dashed var(--danger); font-weight:700; font-size:0.88rem; }
+.race-row { display:grid; grid-template-columns:1fr auto; gap:4px 8px; align-items:center; padding:8px 10px; margin-top:6px; border:1px solid var(--border); border-radius:10px; background:var(--bg3); }
+.race-row.me { border-color:var(--primary); }
+.race-name { font-weight:700; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.race-score b { font-size:1.15rem; color:var(--warn); }
+.race-cks { grid-column:1 / -1; display:flex; flex-wrap:wrap; gap:4px; }
+.race-ck { font-size:0.72rem; padding:2px 6px; border-radius:8px; background:var(--bg4); color:var(--text3); }
+.race-ck.on { color:var(--text); }
+.race-hc { grid-column:1 / -1; font-size:0.75rem; padding:3px 6px; border-radius:8px; background:var(--bg4); color:var(--text); border:1px solid var(--border); justify-self:start; }
 .plan-alert { display:flex; align-items:center; gap:8px; justify-content:space-between; margin:-4px -4px 10px; padding:10px 12px; border-radius:10px; background:rgba(245,158,11,.15); border:1px solid var(--warn); color:var(--text); font-weight:700; font-size:0.88rem; cursor:pointer; }
 .plan-alert.over { background:rgba(239,68,68,.15); border-color:var(--danger); }
 .plan-alert-go { flex-shrink:0; font-size:0.8rem; color:var(--primary); }
@@ -694,6 +703,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
         <div id="drillPlanBox"></div>
         <details style="margin-top:6px;"><summary class="hint-small" style="cursor:pointer;">⚙️ 週間プランの設定</summary><div id="planSettings" style="margin-top:8px;"></div></details>
       </div>
+      <div class="card race-card"><div class="setting-box-title">⚔️ フレンドとバトル <button class="chip" style="float:right;" onclick="renderRace()">🔄</button></div><div class="race-box"></div></div>
     </div>
     <div id="drillApp" class="drill-app"></div>
   </div>
@@ -863,6 +873,11 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
         <div style="display:flex; gap:6px; margin-bottom:8px;"><button class="chip active" data-rankmode="quiz" onclick="setRankingMode('quiz')">🎯 クイズ</button><button class="chip" data-rankmode="drill" onclick="setRankingMode('drill')">🧠 暗記テスト</button></div>
         <div id="rankingList" style="font-size:0.9rem; display:flex; flex-direction:column; gap:8px;">(読み込み中...)</div>
         <button class="btn btn-secondary" style="margin-top:10px; font-size:0.75rem; padding:6px;" onclick="loadDailyRanking()">🔄 更新</button>
+      </div>
+
+      <div class="card race-card" style="margin-bottom:15px;">
+        <div class="setting-box-title">⚔️ 週間プランのバトル（例：鉄壁） <button class="chip" style="float:right;" onclick="renderRace()">🔄</button></div>
+        <div class="race-box"></div>
       </div>
 
       <div class="card" style="margin-bottom:15px;">
@@ -1377,6 +1392,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 <script src="ai.js"></script>
 <script src="drill.js"></script>
 <script src="plan.js"></script>
+<script src="race.js"></script>
 <script src="shared.js"></script>
 <script src="main.js"></script>
 

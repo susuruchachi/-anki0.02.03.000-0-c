@@ -20,7 +20,7 @@ let _periodicOk = null;
 function getNotifyPrefs() {
   let p = {};
   try { p = JSON.parse(localStorage.getItem(NOTIFY_PREFS_KEY) || '{}') || {}; } catch (e) {}
-  return { reminder: !!p.reminder, time: /^\d{1,2}:\d{2}$/.test(p.time || '') ? p.time : '20:00', updates: p.updates !== false, friends: p.friends !== false };
+  return { reminder: !!p.reminder, time: /^\d{1,2}:\d{2}$/.test(p.time || '') ? p.time : '20:00', updates: p.updates !== false, friends: p.friends !== false, taunt: p.taunt !== false };
 }
 function saveNotifyPrefs(p) {
   try { localStorage.setItem(NOTIFY_PREFS_KEY, JSON.stringify(p)); } catch (e) {}
@@ -155,7 +155,7 @@ function syncPushDoc(immediate) {
     const p = getNotifyPrefs();
     let lastStudy = null; try { lastStudy = localStorage.getItem('susuru_anki_last_study'); } catch (e) {}
     const body = {
-      uid: currentUser.uid, reminder: p.reminder, time: p.time, updates: p.updates, friends: p.friends,
+      uid: currentUser.uid, reminder: p.reminder, time: p.time, updates: p.updates, friends: p.friends, taunt: p.taunt,
       tzOffset: new Date().getTimezoneOffset(), weakCount: weakCardCount(), updatedAt: Date.now(),
       tokens: { [token]: { at: Date.now(), ua: (isAndroidDevice() ? 'android' : isIOSDevice() ? 'ios' : 'other') + (isStandaloneApp() ? '-app' : '') } }
     };
@@ -234,6 +234,7 @@ function onNotifyPrefChange() {
   if (t && /^\d{1,2}:\d{2}$/.test(t.value)) p.time = t.value;
   if (u) p.updates = u.checked;
   const f = document.getElementById('chkNotifyFriends'); if (f) p.friends = f.checked;
+  const tn = document.getElementById('chkNotifyTaunt'); if (tn) p.taunt = tn.checked;
   saveNotifyPrefs(p);
   if ((p.reminder || p.updates || p.friends) && typeof Notification !== 'undefined' && Notification.permission === 'default') enableNotifications();
   renderNotifySettings();
@@ -274,6 +275,7 @@ function renderNotifySettings() {
     </div>
     <label class="toggle-pill" style="margin-top:8px; display:flex; align-items:center; gap:8px;"><input type="checkbox" id="chkNotifyUpdates" ${p.updates ? 'checked' : ''} onchange="onNotifyPrefChange()">🆕 アップデートのお知らせ</label>
     <label class="toggle-pill" style="margin-top:8px; display:flex; align-items:center; gap:8px;"><input type="checkbox" id="chkNotifyFriends" ${p.friends ? 'checked' : ''} onchange="onNotifyPrefChange()">🤝 フレンド申請・承認のお知らせ</label>
+    <label class="toggle-pill" style="margin-top:8px; display:flex; align-items:center; gap:8px;"><input type="checkbox" id="chkNotifyTaunt" ${p.taunt ? 'checked' : ''} onchange="onNotifyPrefChange()">🔥 フレンドの頑張りのお知らせ（フレンドのほうが進んでいたら、1日1回あおります）</label>
     <div class="hint-small" style="margin-top:8px; line-height:1.6;">${[how, bg].filter(Boolean).join('<br>')}</div>
     ${perm === 'granted' ? '<button class="btn btn-secondary" style="margin-top:8px;" onclick="sendTestNotification()">🔔 テスト通知を送る</button>' : ''}
   `;

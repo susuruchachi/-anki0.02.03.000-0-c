@@ -169,7 +169,7 @@ function drillStoreAll(all) { try { localStorage.setItem(DRILL_KEY + '_v2', JSON
 // ★【0.03.27】暗記テストは専用のタブ。ほかの画面に行っても（一時離脱）、タブに戻るとその問題から続く
 let _drillActive = false;
 function openDrill() { openPage('pgDrill'); }
-function drillOnOpen() { if (_drillActive && dcur) drillDraw(); else drillHome(); }
+function drillOnOpen() { if (_drillActive && dcur) drillDraw(); else drillHome(); if (typeof renderRace === 'function') renderRace(); }
 function drillSetActive(on) {
   _drillActive = on;
   document.querySelectorAll('.drill-active-dot').forEach(el => { el.style.display = on ? 'inline-flex' : 'none'; });
@@ -432,11 +432,13 @@ function drillRecord(card, ok) {
   const st = Object.assign({ c: 0, w: 0 }, m.drillStats || {});
   if (ok) st.c++; else st.w++;
   st.at = Date.now();
+  if (typeof raceCountDrill === 'function') raceCountDrill(st, ok); // ★【0.03.42】今週の正解数（プランバトル）
   m.drillStats = st;
   touchStats(m); saveData();
   // 学習した記録（ヒートマップ・催促）には入れる。ランキング・フレンドとの比較は暗記テストの分として別に数える
   if (typeof recordDailyLog === 'function') recordDailyLog(ok, { drill: true });
   if (typeof recordCategoryScore === 'function') recordCategoryScore(m.category, ok, 'drill');
+  if (typeof raceSync === 'function') raceSync();
 }
 async function drillFin(ok, ans, tip) {
   if (dst.fl) return; dst.fl = 1;

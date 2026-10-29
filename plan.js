@@ -392,6 +392,7 @@ function renderPlanViews() {
   if (dp) { const list = planList(); dp.innerHTML = list.length ? list.map(p => `<div class="plan-section">${planSectionHTML(p, list.length > 1)}</div>`).join('') : '<div class="hint-small">プランはまだありません。下の「⚙️ 週間プランの設定」から登録できます。</div>'; }
   renderPlanSettings();
   planSyncNotice();
+  if (typeof raceSync === 'function') raceSync();
 }
 
 // ---------------- 通知 ----------------

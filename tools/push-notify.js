@@ -170,6 +170,56 @@ async function sendUpdate() {
 }
 
 // ★【0.03.25】フレンド申請が届いた・承認された、を知らせる（それぞれ1回だけ）
+// ★【0.03.42】フレンドの頑張りで煽る（1日1回、通知の時刻を過ぎてから）。
+//  プランバトル（同じ単語帳のプラン）で負けていればその差を、そうでなければ今日の正解数で負けていれば知らせる
+function weekKeyOf(dateStr) { const [y, m, d] = dateStr.split('-').map(Number); const x = new Date(Date.UTC(y, m - 1, d)); x.setUTCDate(x.getUTCDate() - (x.getUTCDay() + 6) % 7); return x.toISOString().slice(0, 10); }
+function racePoints(r) { return (r.words ? 30 : 0) + (r.words && r.onTime ? 10 : 0) + (r.chants ? 20 : 0) + (r.examples ? 20 : 0) + (r.sunday ? 15 : 0) + (r.monthly ? 15 : 0) + (Number(r.dc) || 0); }
+function tauntMessage(myName, me, friends) {
+  // me / friends: { name, today, races: [{root, week, points, words, chants}] }
+  let best = null;
+  friends.forEach(f => (f.races || []).forEach(r => {
+    const mine = (me.races || []).find(x => x.root === r.root);
+    if (!mine) return;
+    const d = r.points - mine.points;
+    if (d > 0 && (!best || d > best.d)) best = { d, f, r, mine };
+  }));
+  if (best) {
+    const extra = best.r.words && !best.mine.words ? `${best.f.name}さんはもう今週の単語に合格。` : best.r.chants && !best.mine.chants ? `${best.f.name}さんはチャンツまで終わってます。` : '';
+    return { title: `⚔️ ${best.r.root}バトル：${best.f.name}さんに ${best.d}点差`, body: `${extra}このままだと置いていかれるよ？押して巻き返そう` };
+  }
+  const top = friends.filter(f => f.today > me.today && f.today > 0).sort((a, b) => b.today - a.today)[0];
+  if (top) return { title: `🔥 ${top.name}さんは今日もう ${top.today}問 正解！`, body: me.today ? `あなたは ${me.today}問。まだ追いつけます` : 'あなたはまだ0問…1問だけでも始めよう' };
+  return null;
+}
+async function sendTaunts() {
+  const snap = await db.collection(PUSH_COL).get();
+  let sent = 0;
+  const cache = {};
+  const todayOf = async (uid, date) => { const k = date + '_' + uid; if (!(k in cache)) { const s = await db.collection('susuru_anki_daily_scores').doc(k).get(); const d = s.exists ? s.data() : {}; cache[k] = (Number(d.score) || 0) + (Number(d.drillScore) || 0); } return cache[k]; };
+  const racesOf = async (uid, wk) => { const k = 'race:' + uid; if (!(k in cache)) cache[k] = (await db.collection('susuru_anki_category_scores').where('uid', '==', uid).where('mode', '==', 'race').get()).docs.map(d => d.data()); return cache[k].filter(r => r.week === wk).map(r => Object.assign({}, r, { points: racePoints(r) })); };
+  for (const doc of snap.docs) {
+    const d = doc.data();
+    if (d.taunt === false || !Object.keys(d.tokens || {}).length) continue;
+    const now = localNow(d.tzOffset);
+    const [h, m] = String(d.time || '20:00').split(':').map(Number);
+    if (now.minutes < h * 60 + m || d.lastTauntDate === now.date) continue;
+    const prof = await db.collection('susuru_anki_profiles').doc(doc.id).get();
+    const fl = prof.exists ? (prof.data().friends || []) : [];
+    if (!fl.length) continue;
+    const wk = weekKeyOf(now.date);
+    const me = { today: await todayOf(doc.id, now.date), races: await racesOf(doc.id, wk) };
+    const friends = [];
+    for (const f of fl.slice(0, 30)) {
+      const fp = await db.collection('susuru_anki_profiles').doc(f).get();
+      friends.push({ name: (fp.exists && fp.data().displayName) || 'フレンド', today: await todayOf(f, now.date), races: await racesOf(f, wk) });
+    }
+    const msg = tauntMessage(prof.data().displayName, me, friends);
+    await doc.ref.update({ lastTauntDate: now.date });
+    if (msg) sent += await sendToUser(doc.ref, d, { kind: 'taunt', tag: 'taunt', title: msg.title, body: msg.body, url: APP_URL + '?page=pgDrill' });
+  }
+  console.log(`フレンドの頑張りのお知らせ: ${sent} 件送信`);
+}
+
 async function sendFriendNotices() {
   const col = db.collection('susuru_anki_friend_requests');
   let sent = 0;
@@ -195,6 +245,7 @@ async function sendFriendNotices() {
   if (MODE === 'all' || MODE === 'friends') await sendFriendNotices().catch(e => console.log('フレンド申請のお知らせに失敗:', e.message));
   if (MODE === 'all' || MODE === 'reminders') await sendReminders();
   if (MODE === 'all' || MODE === 'plan') await sendPlanReminders().catch(e => console.log('週間プランの通知に失敗:', e.message));
+  if (MODE === 'all' || MODE === 'taunt') await sendTaunts().catch(e => console.log('フレンドの頑張りのお知らせに失敗:', e.message));
   if (MODE === 'all' || MODE === 'update') await sendUpdate();
   // アプリ側が「送信側が動いている」と分かるように、最後に動いた時刻を書く
   await db.doc(META_DOC).set({ lastRunAt: Date.now() }, { merge: true });

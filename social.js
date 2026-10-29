@@ -185,6 +185,7 @@ async function loadAppFriends() {
       listDiv.appendChild(div);
     }
   } catch (e) { listDiv.innerHTML = '<p style="color:var(--danger); font-size:0.8rem; text-align:center;">エラーが発生しました。</p>'; }
+  if (typeof renderRace === 'function') renderRace();
 }
 
 let currentChatUnsubscribe = null, currentChatFriendUid = null;
@@ -349,6 +350,7 @@ async function renderCompareStats() {
 
     const accumulate = (doc, isMe) => {
       const d = doc.data();
+      if (d.mode === 'race') return;
       if (category && d.category !== category) return;
       if ((d.mode === 'drill' ? 'drill' : 'quiz') !== cmpMode) return;
       if (!dateMap[d.date]) dateMap[d.date] = { myScore: 0, myTotal: 0, friendScore: 0, friendTotal: 0, friendName: '?' };
