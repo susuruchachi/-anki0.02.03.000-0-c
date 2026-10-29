@@ -23,8 +23,22 @@ function getBestVoice(langPrefix) {
 }
 
 // 読み上げ用に記号を整える（[to be] → to be、空欄 ( ) → 「ブランク」など）
+// ★【0.03.66】1文字だけの大文字（be worth A の A など）は、端末によって「capital A」と読まれるので、文字の名前で読ませる。
+// 文の始めの冠詞の A（A man came.）は小文字に、I（私）はそのまま
+const SPEECH_LETTER_NAMES = { A: 'ay', B: 'bee', C: 'see', D: 'dee', E: 'ee', F: 'eff', G: 'gee', H: 'aitch', J: 'jay', K: 'kay', L: 'el', M: 'em', N: 'en', O: 'oh', P: 'pee', Q: 'cue', R: 'ar', S: 'ess', T: 'tee', U: 'you', V: 'vee', W: 'double you', X: 'ex', Y: 'why', Z: 'zee' };
+function speechLetters(text) {
+  return String(text || '').replace(/(^|[^A-Za-z0-9.])([A-Z])(?![A-Za-z0-9]|\.[A-Za-z])/g, (m, pre, L, off, all) => {
+    if (L === 'I') return m;
+    if (L === 'A') {
+      const before = all.slice(0, off + pre.length), after = all.slice(off + m.length);
+      // 文の始めで、すぐ後ろに小文字の単語が続くなら冠詞
+      if (/(^|[.!?。！？「『"“]\s*)$/.test(before.replace(/\s+$/, '')) && /^\s+[a-z]/.test(after) && !/^\s+(or|and|to|with|of|in|on|at|for|from|as|than|by|into|is|are|was|were|and|nor)\b/.test(after)) return pre + 'a';
+    }
+    return pre + SPEECH_LETTER_NAMES[L];
+  });
+}
 function cleanTextForSpeech(text) {
-  return String(text || '')
+  return speechLetters(String(text || ''))
     .replace(/[\[\]［］]/g, ' ')
     .replace(/\(\s*\)|（\s*）|\(　+\)|（　+）|_{2,}|＿{2,}/g, ' blank ')
     .replace(/[～〜~]/g, ' ')
