@@ -814,6 +814,12 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
           <input type="text" id="txtMyUid" class="form-control" readonly>
           <button class="btn btn-secondary" style="width:auto; padding:0 14px; font-size:0.8rem;" onclick="copyMyUid()">📋 コピー</button>
         </div>
+        <button class="btn btn-secondary" style="margin-top:8px;" onclick="shareFriendLink()">🔗 フレンド申請のURLを送る</button>
+        <label class="section-label" style="font-weight:500; margin-top:10px;">🏷️ 表示名（ランキング・フレンド・対戦で表示）</label>
+        <div class="form-row">
+          <input type="text" id="txtMyDisplayName" class="form-control" maxlength="20" placeholder="ログインすると変更できます">
+          <button class="btn btn-secondary" style="width:auto; padding:0 14px; font-size:0.8rem;" onclick="saveMyDisplayName()">💾 変更</button>
+        </div>
       </div>
       <label class="toggle-pill" style="margin-top:12px;"><input type="checkbox" id="chkShareStats" onchange="toggleShareStats()">📊 成績をフレンドと共有する</label>
       <div class="hint-small" style="margin-top:6px;">有効にすると、カテゴリーごとの成績（正解数・成績率）がフレンドと共有され、ランキングにも表示されます。</div>

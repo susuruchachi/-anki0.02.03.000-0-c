@@ -39,11 +39,16 @@ auth.onAuthStateChanged(user => {
     const txtUid = document.getElementById('txtMyUid');
     if(txtUid) txtUid.value = user.uid;
     
-    firestore.collection('susuru_anki_profiles').doc(user.uid).set({ 
-      displayName: user.displayName||'名無し', 
-      uid: user.uid,
-      lastLogin: firebase.firestore.FieldValue.serverTimestamp()
-    }, { merge: true }).catch(e => console.error("プロフィール保存エラー:", e));
+    // ★【0.03.47】自分で決めた表示名（customName）があれば、Google の名前で上書きしない
+    firestore.collection('susuru_anki_profiles').doc(user.uid).get().then(p => {
+      const cn = p.exists && p.data().customName;
+      return firestore.collection('susuru_anki_profiles').doc(user.uid).set({
+        displayName: cn || user.displayName || '名無し',
+        uid: user.uid,
+        lastLogin: firebase.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+    }).catch(e => console.error("プロフィール保存エラー:", e));
+    if (typeof onFriendAuthReady === 'function') onFriendAuthReady(); // 表示名・URL のフレンド申請
     
     syncToCloud(true);
     

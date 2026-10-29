@@ -19,9 +19,9 @@ const dKey = s => s.it ? s.it.id : 'c:' + s.ck.key;
 // ---------------- カードからグループを作る ----------------
 function drillIsWordCard(q) {
   return !q.kind && !(Array.isArray(q.choices) && q.choices.length) && String(q.question || '').trim() && String(q.answer || '').trim()
-    && !(typeof hasRichBlock === 'function' && hasRichBlock(q.answer)) && !drillIsPhraseCard(q);
+    && !(typeof hasRichBlock === 'function' && hasRichBlock(q.answer));
 }
-// ★【0.03.40】熟語・チャンク（communicate with A など）は暗記テストに出さない（通常のクイズ・週間プランのチャンツで）
+// 熟語・チャンク（communicate with A など）か。★【0.03.47】元の試作と同じく、暗記テストにも出す（週間プランのチャンツにも入る）
 function drillIsPhraseCard(q) {
   const w = String(q.question || '').trim();
   if (/^[\x00-\x7F’]+$/.test(w) && /\s/.test(w)) return true; // 英語の2語以上
@@ -83,22 +83,41 @@ function drillSenses(it) {
     const p = drillPos(seg.label);
     const ch = String(seg.text).replace(/\s*[（(]\s*[=＝↔][^)）]*[)）]/g, '').trim();
     const parts = /[①②③④⑤⑥]/.test(ch) ? ch.split(/[①②③④⑤⑥]/) : ch.split(/[；;]/);
-    // ★【0.03.40】並べた訳はそれぞれ別の意味（地域社会　共同体 → 両方答える）。語尾・送り仮名だけ違うものは1つにまとめる
-    parts.forEach(x => { x = x.trim(); if (!x) return; const ws = splitAnswerMeanings(x); (ws.length ? ws : [x]).forEach(w => {
-      const k = drillStem(w), same = out.find(o => o.c === c && String(o.t).split('，').some(t => drillStem(t) === k));
-      if (same) same.t += '，' + w; else out.push({ p, t: w, c });
-    }); });
+    // ★【0.03.47】元の試作と同じく、①②・；で分けた1つの意味の中に並べた訳は「，」でつないでおき、AI がまとめる（drillGroupSenses）
+    parts.forEach(x => { x = x.trim(); if (!x) return; const ws = splitAnswerMeanings(x); out.push({ p, t: (ws.length ? ws : [x]).join('，'), c }); });
   });
   return out;
 }
 function drillGetSn(it) { return DP[it.id] || (DP[it.id] = drillGroupSenses(it)); }
-// ★【0.03.40】AI でまとめるのはやめた（単語帳に並べた訳は全部答える）
+// 「，」でつないだ訳を、ニュアンスの違う意味ごとに AI に分けてもらう（元の試作と同じ指示。結果は端末に保存して使い回す）。
+//  AI が使えないときは、並べた訳をそれぞれ別の意味として全部答える
+const DRILL_SENSE_CACHE = 'susuru_anki_drill_senses_v3';
+function drillLoadSenseCache() { try { return JSON.parse(localStorage.getItem(DRILL_SENSE_CACHE) || '{}') || {}; } catch (e) { return {}; } }
+function drillSplitAll(b) { return b.flatMap(x => String(x.t).split('，').map(t => ({ p: x.p, c: x.c, t }))); }
 async function drillGroupSenses(it) {
   if (DS.sp && DS.sp[it.id]) return DS.sp[it.id];
-  return (DS.sp[it.id] = drillSenses(it));
+  const cache = drillLoadSenseCache(), c = cache[it.id];
+  if (c && c.a === it.m && Array.isArray(c.s)) return (DS.sp[it.id] = c.s);
+  const b = drillSenses(it), cm = b.filter(x => /[，,]/.test(x.t));
+  if (!cm.length) return (DS.sp[it.id] = b);
+  if (!drillAiOk()) return (DS.sp[it.id] = drillSplitAll(b));
+  try {
+    const r = await drillAi(`日本語訳の分類。各行の「，」で区切られた訳について、日本語としてニュアンスが異なり別の意味として覚えるべきものは別グループに、ほぼ同義の言い換えは同じグループにする。迷う場合は同じグループにする。\n${cm.map((x, i) => `${i}: ${x.t}`).join('\n')}\nJSONのみ。行ごとのグループ配列を並べる。例：{"r":[[["社交的な"],["愛想のいい"]],[["親しい","親密な"]]]}`);
+    let k = 0; const out = [];
+    b.forEach(x => {
+      if (!cm.includes(x)) { out.push(x); return; }
+      const gr = r.r && r.r[k++];
+      if (Array.isArray(gr) && gr.length && gr.every(Array.isArray)) gr.forEach(g => out.push({ p: x.p, c: x.c, t: g.join('，') }));
+      else out.push(x);
+    });
+    DS.sp[it.id] = out;
+    cache[it.id] = { a: it.m, s: out }; const ks = Object.keys(cache); if (ks.length > 3000) delete cache[ks[0]];
+    try { localStorage.setItem(DRILL_SENSE_CACHE, JSON.stringify(cache)); } catch (e) {}
+    return out;
+  } catch (e) { delete DP[it.id]; return drillSplitAll(b); }
 }
 // ★【0.03.27】もう答えた意味の言い換え・語形の違い（「意思疎通」のあとの「意思疎通すること」など）か
-try { localStorage.removeItem('susuru_anki_drill_senses_v2'); } catch (e) {} // 前の AI のまとめ（もう使わない）
+try { localStorage.removeItem('susuru_anki_drill_senses_v2'); } catch (e) {} // 前の版の AI のまとめ（指示が違う）
 const DRILL_ENDINGS_RE = /(すること|させること|されること|すること|させる|される|すること|こと|する|的な|的|な|の|に|だ|である)$/;
 function drillStem(w) { let n = normalizeStructuredToken(w); for (let i = 0; i < 2; i++) n = n.replace(DRILL_ENDINGS_RE, ''); return n; }
 function drillIsRepeat(v, sn, cv) {
@@ -204,7 +223,7 @@ function drillHome() {
       <button class="btn btn-start" style="margin-top:10px;" onclick="drillStart()" ${words + checks ? '' : 'disabled'}>🚀 ${d ? '最初から始める' : '開始'}</button>
       <button class="btn btn-secondary" style="margin-top:8px;" onclick="vtOpen()">📄 テキストから問題を作る</button>
       ${others.length ? `<div class="hint-small" style="margin-top:10px;">ほかのフォルダーの途中経過：</div><div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:4px;">${others.map(k => `<button class="chip" onclick="drillSetCategory(${jsArg(k)})">📁 ${dE(k || 'すべて')}（${all[k].r}周目・残り${left(all[k])}）</button>`).join('')}</div>` : ''}
-      <div class="hint-small" style="margin-top:8px;">・グループ（フォルダー）ごとに、単語の<b>全部の意味</b>を答えます（単語帳に並んでいる訳は全部。「完了、存続」「完了存続」のようにまとめて答えても OK）<br>・熟語・チャンク（communicate with A など）と、自動詞・他動詞を聞く問題は、通常のクイズで出ます<br>・間違えたら、その場でもう一度出ます。グループの最後に、そのグループで間違えた単語と Check!（Review Test）<br>・1周目で間違えた問題を2周目で…と、全部〇になるまで続けます<br>・正解・不正解の回数は、暗記テストだけで数えます（いつものレベル・成績とは別）</div>
+      <div class="hint-small" style="margin-top:8px;">・グループ（フォルダー）ごとに、単語の<b>全部の意味</b>を答えます（言い換えても意味が変わらない訳は、どれか1つで OK。「完了、存続」「完了存続」のようにまとめて答えても OK）<br>・動詞は、自動詞か他動詞かも聞きます<br>・間違えたら、その場でもう一度出ます。グループの最後に、そのグループで間違えた単語と Check!（Review Test）<br>・1周目で間違えた問題を2周目で…と、全部〇になるまで続けます<br>・正解・不正解の回数は、暗記テストだけで数えます（いつものレベル・成績とは別）</div>
     </div>`;
   const sel = A.querySelector('select'); if (sel) sel.value = cat;
 }
@@ -381,6 +400,8 @@ function drillDraw() {
       <input id="drillInput" class="form-control" autocomplete="off" onkeydown="if(event.key==='Enter'&&!event.isComposing)drillSubmit()">
       <div class="drill-btns"><button class="btn btn-primary" onclick="drillSubmit()">回答</button><button class="btn btn-secondary" onclick="drillDk()">わからない</button></div></div>`;
   }
+  else if (dst.ph === 3) { const x = dst.vk[dst.vi]; b = `<div class="card">${W(c.it)}<p>「${dE(x.t.join('，'))}」の意味のとき、自動詞？他動詞？</p><button class="btn btn-secondary drill-opt" onclick="drillAt2(1)">① 自動詞</button><button class="btn btn-secondary drill-opt" onclick="drillAt2(2)">② 他動詞</button></div>`; }
+  else if (dst.ph === 1) b = `<div class="card">${W(c.it)}<p>この動詞は次のどれですか？${dst.extra && dst.extra.length ? '<br><b>単語帳に載っている意味についての質問です。</b>' : ''}</p><button class="btn btn-secondary drill-opt" onclick="drillAt(1)">① 自動詞</button><button class="btn btn-secondary drill-opt" onclick="drillAt(2)">② 他動詞</button><button class="btn btn-secondary drill-opt" onclick="drillAt(3)">③ 自動詞・他動詞の両方</button></div>`;
   else if (dst.ph === 2) b = `<div class="card">${W(c.it)}<p>【${dE(dst.z.k)}】この単語の${dE(dst.z.k)}として正しいものを選んでください。</p>${dst.op.map((o, i) => `<button class="btn btn-secondary drill-opt" onclick="drillCh(${i})">${'①②③④'[i]} ${dE(o)}</button>`).join('')}</div>`;
   const A = document.getElementById('drillApp');
   A.innerHTML = `<div class="drill-top"><span class="hint-small">${DS.r}周目 ・ 残り${DQ.length}問</span><span style="display:flex; gap:6px;"><button class="chip" onclick="drillToggleTts()" title="読み上げのオン・オフ">${drillTtsOn() ? '🔊' : '🔇'}</button><button class="chip" onclick="drillPause()">⏸ 一時離脱</button><button class="chip" onclick="drillQuit()">🏁 やめる</button></span></div>${dst.h || ''}${b}`;
@@ -437,7 +458,9 @@ async function drillJudge(v) {
       dst.msg = hs.some(h => !h.exact) ? '意味は合っています。単語帳に載っている訳で答えてください。' : ex && !hs.length ? '辞書的には正しい意味ですが、単語帳には載っていません。単語帳に載っている意味を答えてください。' : '';
       dst.ph = 0; drillDraw(); return;
     }
-    drillQuiz(); // ★【0.03.40】自動詞・他動詞を聞く問題は通常のクイズで（暗記テストは回数を積むことに集中）
+    // ★【0.03.47】元の試作と同じく、動詞は「自動詞？他動詞？両方？」→（両方なら）意味ごとに自動詞か他動詞か
+    if (drillIsVerb(it) && !(dst.mn === 'ok' && !ex)) { dst.ph = 1; drillDraw(); return; }
+    drillQuiz();
   } catch (e) { dst.ans.pop(); drillErr(e); }
 }
 // 意味は合うが単語帳の訳と違う言葉で答えたとき、そのニュアンスの違いを解説（似た単語があれば、その単語にも注意を残す）
@@ -467,6 +490,23 @@ async function drillChk(v) {
   drillBusy();
   try { const r = await drillAi(`問題:${k.q}\n正解:${k.ans}\n生徒の答え:${v}\n意味が同じなら ok。順序の違い・表記の軽微な違いは許容。JSONのみ：{"v":"ok|x"}`); dlock = false; drillFin(r.v === 'ok', k.ans, ''); }
   catch (e) { drillErr(e); }
+}
+
+// ---------------- 自動詞・他動詞 ----------------
+function drillAt(n) {
+  if (dlock) return;
+  const a = drillAttr(dcur.it), j = /自動詞/.test(a), t = /他動詞/.test(a), ex = j && t ? 3 : j ? 1 : 2;
+  if (n !== ex) { dst.tip = '自動詞・他動詞の属性が違います。'; return drillFin(false); }
+  const m = new Map();
+  dst.sn.forEach(x => { if (x.p === '自' || x.p === '他') { const o = m.get(x.c) || { p: x.p, t: [] }; o.t.push(x.t); m.set(x.c, o); } });
+  dst.vk = [...m.values()];
+  if (ex === 3 && new Set(dst.vk.map(x => x.p)).size > 1) { dst.vi = 0; dst.ph = 3; drillDraw(); } else drillQuiz();
+}
+function drillAt2(n) {
+  if (dlock) return;
+  const x = dst.vk[dst.vi];
+  if (n !== (x.p === '自' ? 1 : 2)) { dst.tip = `「${x.t.join('，')}」の意味のときは${x.p}動詞です。`; return drillFin(false); }
+  dst.vi++; dst.vi < dst.vk.length ? drillDraw() : drillQuiz();
 }
 
 // ---------------- 対義語・類義語・ニュアンスの4択 ----------------

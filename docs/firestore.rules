@@ -69,6 +69,22 @@ service cloud.firestore {
       allow delete: if isAuthenticated() && (resource.data.to == uid() || resource.data.from == uid());
     }
 
+    // 🤝 フレンドの紹介（★0.03.47。文書IDは「紹介した人_受け取る人_紹介される人」。紹介できるのは、両方のフレンドだけ）
+    match /susuru_anki_friend_intros/{introId} {
+      function friendsOf(u) {
+        let p = get(/databases/$(database)/documents/susuru_anki_profiles/$(u));
+        return p != null && p.data.get('friends', []) is list ? p.data.get('friends', []) : [];
+      }
+      allow create: if isAuthenticated()
+        && request.resource.data.from == uid()
+        && request.resource.data.to is string && request.resource.data.intro is string
+        && request.resource.data.to != uid() && request.resource.data.intro != uid() && request.resource.data.to != request.resource.data.intro
+        && introId == uid() + '_' + request.resource.data.to + '_' + request.resource.data.intro
+        && request.resource.data.to in friendsOf(uid()) && request.resource.data.intro in friendsOf(uid());
+      allow update: if false;
+      allow read, delete: if isAuthenticated() && (resource.data.to == uid() || resource.data.from == uid());
+    }
+
     // ⚔️ オンライン対戦（待っている部屋を探すため読むのはログインした人なら誰でも。
     //    書き換えは対戦している2人だけ。待っている部屋に「2人目として入る」ことは誰でもできる）
     match /susuru_anki_matches/{matchId} {

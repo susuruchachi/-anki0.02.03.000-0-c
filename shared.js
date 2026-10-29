@@ -316,6 +316,8 @@ async function shareCategory(catName) {
 
 function listenToSharedDoc(docId) {
   if (unsubscribeShared) unsubscribeShared(); currentSharedDocId = docId; document.getElementById('sharedTitle').innerText = "⏳ 読み込み中...";
+  _sharedShowN = 50; _sharedQuery = ''; currentSharedData = null;
+  const cl = document.getElementById('sharedCardsList'); if (cl) cl.innerHTML = '';
   unsubscribeShared = firestore.collection("susuru_anki_shared").doc(docId).onSnapshot((snap) => {
     if (!snap.exists) { alert("⚠️ 共有データが見つかりません。"); exitSharedMode(); return; }
     currentSharedData = snap.data(); renderSharedPage();
@@ -355,7 +357,7 @@ function renderSharedPage() {
   const data = currentSharedData;
   document.getElementById('sharedTitle').innerText = `🌐 ${escapeHtml(data.catName)}`; 
   document.getElementById('sharedOwnerName').innerText = escapeHtml(data.ownerName); 
-  document.getElementById('sharedCardCount').innerText = data.cards.length;
+  document.getElementById('sharedCardCount').innerText = (data.cards || []).length;
   const codeRow = document.getElementById('sharedCodeRow');
   if (codeRow) {
     const owner = currentUser && currentUser.uid === data.ownerId;
@@ -408,10 +410,28 @@ function renderSharedPage() {
     }
   }
   
-  const cList = document.getElementById('sharedCardsList'); cList.innerHTML = '';
-  if (data.cards.length === 0) cList.innerHTML = '<div style="color:var(--text3); font-size:0.9rem; text-align:center;">カードがありません</div>';
-  else data.cards.forEach((card, idx) => cList.innerHTML += `<div class="q-card"><div class="q-card-text">${renderRichText(card.question, { escape: true, kanbunRows: 10 })}</div><div style="font-size:0.85rem; color:var(--text2); margin-top:4px;">A: <span style="color:var(--text);">${renderRichText(getPrimaryAnswer(card.answer), { escape: true, kanbunRows: 10 })}</span></div><div style="font-size:0.75rem; color:var(--text3); margin-top:8px;">📂 ${escapeHtml(card.category)}</div>${canEdit ? `<button class="btn btn-secondary" style="margin-top:10px; font-size:0.8rem;" onclick="deleteCardFromShared(${idx})">🗑️ 削除</button>` : ''}</div>`);
+  _sharedCanEdit = canEdit;
+  renderSharedCards();
+}
+// ★【0.03.47】カードの一覧は少しずつ表示する（以前は1枚ずつ innerHTML += していたため、千枚単位のカテゴリーで
+//  「読み込み中」のまま固まっていた。特に Android では画面全体が止まっていた）
+let _sharedShowN = 50, _sharedCanEdit = false, _sharedQuery = '';
+function renderSharedCards() {
+  const data = currentSharedData; if (!data) return;
+  const cList = document.getElementById('sharedCardsList'); if (!cList) return;
+  const all = Array.isArray(data.cards) ? data.cards : [];
+  if (!all.length) { cList.innerHTML = '<div style="color:var(--text3); font-size:0.9rem; text-align:center;">カードがありません</div>'; return; }
+  const q = _sharedQuery.trim().toLowerCase();
+  const hits = [];
+  all.forEach((card, idx) => { if (!q || [card.question, card.answer, card.category].some(s => String(s || '').toLowerCase().includes(q))) hits.push(idx); });
+  const shown = hits.slice(0, _sharedShowN);
+  cList.innerHTML = `<input type="text" class="form-control" id="sharedCardSearch" placeholder="🔍 問題・答え・フォルダーで絞り込み（${all.length}枚）" value="${escAttr(_sharedQuery)}" style="margin-bottom:10px;">` +
+    shown.map(idx => { const card = all[idx]; return `<div class="q-card"><div class="q-card-text">${renderRichText(card.question, { escape: true, kanbunRows: 10 })}</div><div style="font-size:0.85rem; color:var(--text2); margin-top:4px;">A: <span style="color:var(--text);">${renderRichText(getPrimaryAnswer(card.answer), { escape: true, kanbunRows: 10 })}</span></div><div style="font-size:0.75rem; color:var(--text3); margin-top:8px;">📂 ${escapeHtml(card.category)}</div>${_sharedCanEdit ? `<button class="btn btn-secondary" style="margin-top:10px; font-size:0.8rem;" onclick="deleteCardFromShared(${idx})">🗑️ 削除</button>` : ''}</div>`; }).join('') +
+    (hits.length > shown.length ? `<button class="btn btn-secondary" style="margin-top:8px;" onclick="_sharedShowN += 100; renderSharedCards();">さらに表示（残り ${hits.length - shown.length} 枚）</button>` : '') +
+    (q && !hits.length ? '<div class="hint-small" style="text-align:center;">見つかりません</div>' : '');
   hydrateRich(cList, { chemScale: 1.1 });
+  const s = document.getElementById('sharedCardSearch');
+  s.oninput = () => { _sharedQuery = s.value; _sharedShowN = 50; const pos = s.selectionStart; renderSharedCards(); const s2 = document.getElementById('sharedCardSearch'); s2.focus(); try { s2.setSelectionRange(pos, pos); } catch (e) {} };
 }
 
 async function addFriendToShared() {

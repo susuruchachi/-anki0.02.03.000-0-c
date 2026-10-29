@@ -153,18 +153,127 @@ function startFriendRequestWatch() {
       } catch (e) { console.warn('承認された申請の処理に失敗:', e.message); }
     }
   }, e => console.warn('送ったフレンド申請の読み込みに失敗:', e.message)));
+  // ★【0.03.47】フレンドからの紹介
+  _friendIntros = []; 
+  _friendReqUnsubs.push(firestore.collection(FRIEND_INTRO_COL).where('to', '==', currentUser.uid).onSnapshot(snap => {
+    _friendIntros = snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
+    _friendIntros.forEach(r => friendNotify('🤝 フレンドの紹介', `${r.fromName || 'フレンド'} さんが ${r.introName || '名無し'} さんを紹介しました`, 'intro:' + r.id));
+    renderFriendRequests();
+  }, e => console.warn('フレンドの紹介の読み込みに失敗:', e.message)));
   if (location.hash === '#friends') { history.replaceState(null, '', location.pathname + location.search); openPage('pgFriends'); loadAppFriends(); }
 }
 function renderFriendRequests() {
-  const n = _friendReqIn.length;
+  const n = _friendReqIn.length + _friendIntros.length;
   document.querySelectorAll('.friend-req-badge').forEach(b => { b.textContent = n; b.style.display = n ? 'inline-flex' : 'none'; });
   const box = document.getElementById('friendRequestsBox');
   if (!box) return;
   const rows = [];
   _friendReqIn.forEach(r => rows.push(`<div class="achieve-row"><div class="achieve-label">📨 ${escapeHtml(r.fromName || '名無し')}<div class="hint-small" style="font-family:'JetBrains Mono',monospace;">${escapeHtml(String(r.from).slice(0, 10))}…</div></div>
     <div style="display:flex; gap:6px;"><button class="btn btn-success" style="width:auto; padding:6px 12px; font-size:0.8rem;" onclick="acceptFriendRequest(${jsArg(r.id)})">承認</button><button class="btn btn-secondary" style="width:auto; padding:6px 10px; font-size:0.8rem;" onclick="rejectFriendRequest(${jsArg(r.id)})">断る</button></div></div>`));
+  _friendIntros.forEach(r => rows.push(`<div class="achieve-row"><div class="achieve-label">🤝 ${escapeHtml(r.fromName || 'フレンド')} さんからの紹介：<b>${escapeHtml(r.introName || '名無し')}</b> さん</div>
+    <div style="display:flex; gap:6px;"><button class="btn btn-success" style="width:auto; padding:6px 12px; font-size:0.8rem;" onclick="acceptFriendIntro(${jsArg(r.id)})">申請を送る</button><button class="btn btn-secondary" style="width:auto; padding:6px 10px; font-size:0.8rem;" onclick="dismissFriendIntro(${jsArg(r.id)})">閉じる</button></div></div>`));
   _friendReqOut.forEach(r => rows.push(`<div class="achieve-row"><div class="achieve-label">⏳ ${escapeHtml(r.toName || '名無し')} <span class="hint-small">（承認待ち）</span></div><button class="btn btn-secondary" style="width:auto; padding:6px 10px; font-size:0.8rem;" onclick="cancelFriendRequest(${jsArg(r.id)})">取り消す</button></div>`));
   box.innerHTML = rows.length ? rows.join('') : '<div class="hint-small">届いている申請・送った申請はありません。</div>';
+}
+
+// ================================================================
+// ★【0.03.47】フレンドの紹介・表示名・URL でフレンド申請
+// ================================================================
+const FRIEND_INTRO_COL = 'susuru_anki_friend_intros';
+let _friendIntros = [];
+const _friendNames = {};
+async function friendNameOf(uid) {
+  if (_friendNames[uid]) return _friendNames[uid];
+  try { const p = await firestore.collection('susuru_anki_profiles').doc(uid).get(); _friendNames[uid] = (p.exists && p.data().displayName) || '名無し'; } catch (e) { return '名無し'; }
+  return _friendNames[uid];
+}
+// 自分のフレンド（uid）を、ほかのフレンドに紹介する（相手の画面の「📨 フレンド申請」に出る。押すと申請が送られる）
+async function openFriendIntro(uid) {
+  const friends = (await myFriendList()).filter(f => f !== uid);
+  if (!friends.length) return alert('紹介できるほかのフレンドがいません。');
+  const name = await friendNameOf(uid);
+  const names = await Promise.all(friends.map(friendNameOf));
+  let ov = document.getElementById('friendIntroOverlay');
+  if (!ov) { ov = document.createElement('div'); ov.id = 'friendIntroOverlay'; ov.className = 'ctx-overlay'; ov.style.zIndex = '1060'; ov.onclick = () => { ov.style.display = 'none'; }; document.body.appendChild(ov); }
+  ov.innerHTML = `<div class="menu-card editor-card" onclick="event.stopPropagation()"><div class="cat-edit-title">🤝 ${escapeHtml(name)} さんを紹介</div>
+    <div class="hint-small" style="margin:6px 0;">紹介する相手を選んでください（お互いに紹介が届き、押すとフレンド申請が送られます）</div>
+    ${friends.map((f, i) => `<label class="bulkdel-row"><input type="checkbox" value="${escAttr(f)}"><div>${escapeHtml(names[i])}</div></label>`).join('')}
+    <div class="plan-btns" style="margin-top:10px;"><button class="btn btn-primary" id="friendIntroGo">紹介する</button><button class="btn btn-secondary" onclick="document.getElementById('friendIntroOverlay').style.display='none'">やめる</button></div></div>`;
+  ov.style.display = 'flex';
+  document.getElementById('friendIntroGo').onclick = async () => {
+    const to = [...ov.querySelectorAll('input:checked')].map(x => x.value);
+    if (!to.length) return;
+    const me = currentUser.displayName || '名無し';
+    try {
+      for (const t of to) {
+        const tName = await friendNameOf(t);
+        const at = firebase.firestore.FieldValue.serverTimestamp();
+        // t さんに uid さんを、uid さんに t さんを紹介する
+        await firestore.collection(FRIEND_INTRO_COL).doc(`${currentUser.uid}_${t}_${uid}`).set({ from: currentUser.uid, fromName: me, to: t, intro: uid, introName: name, createdAt: at });
+        await firestore.collection(FRIEND_INTRO_COL).doc(`${currentUser.uid}_${uid}_${t}`).set({ from: currentUser.uid, fromName: me, to: uid, intro: t, introName: tName, createdAt: at });
+      }
+      ov.style.display = 'none';
+      showAppToast(`🤝 ${name} さんを紹介しました`);
+    } catch (e) { console.error(e); alert('⚠️ 紹介に失敗しました。\n' + friendErrMsg(e)); }
+  };
+}
+async function acceptFriendIntro(id) {
+  const r = _friendIntros.find(x => x.id === id); if (!r) return;
+  await sendFriendRequest(r.intro, r.introName);
+  dismissFriendIntro(id, true);
+}
+async function dismissFriendIntro(id, silent) {
+  try { await firestore.collection(FRIEND_INTRO_COL).doc(id).delete(); } catch (e) { if (!silent) alert('⚠️ 消せませんでした。\n' + friendErrMsg(e)); }
+}
+// 表示名：プロフィールの customName に保存して、ログインのたびに使う（Google の名前より優先）
+async function saveMyDisplayName() {
+  if (!currentUser) return alert('ログインが必要です。');
+  const el = document.getElementById('txtMyDisplayName');
+  const name = String(el.value || '').trim().slice(0, 20);
+  if (!name) return alert('表示名を入力してください。');
+  try {
+    await firestore.collection('susuru_anki_profiles').doc(currentUser.uid).set({ displayName: name, customName: name }, { merge: true });
+    await applyMyDisplayName(name);
+    alert(`✅ 表示名を「${name}」にしました。`);
+  } catch (e) { alert('⚠️ 表示名を変えられませんでした。\n' + friendErrMsg(e)); }
+}
+async function applyMyDisplayName(name) {
+  if (!currentUser || !name) return;
+  try { if (currentUser.displayName !== name && typeof currentUser.updateProfile === 'function') await currentUser.updateProfile({ displayName: name }); } catch (e) { console.warn('表示名の反映に失敗:', e.message); }
+  try { Object.defineProperty(currentUser, 'displayName', { value: name, configurable: true, writable: true }); } catch (e) { try { currentUser.displayName = name; } catch (e2) {} }
+  const el = document.getElementById('txtMyDisplayName'); if (el) el.value = name;
+  const ls = document.getElementById('fbLoginState'); if (ls && ls.querySelector('span')) ls.querySelector('span').textContent = '✅ ' + name;
+}
+// フレンド申請の URL（開いた人に「○○さんにフレンド申請を送りますか？」と聞く）
+function friendLinkUrl() { return location.origin + location.pathname + '?friend=' + encodeURIComponent(currentUser.uid); }
+async function shareFriendLink() {
+  if (!currentUser) return alert('ログインが必要です。');
+  const url = friendLinkUrl(), text = `${currentUser.displayName || ''} さんから すするanki のフレンド申請のリンクです`;
+  try { if (navigator.share) { await navigator.share({ title: 'すするanki フレンド申請', text, url }); return; } } catch (e) { if (e && e.name === 'AbortError') return; }
+  try { await navigator.clipboard.writeText(url); alert('📋 フレンド申請のURLをコピーしました。\n' + url); } catch (e) { prompt('このURLを送ってください', url); }
+}
+(function captureFriendLink() {
+  try {
+    const u = new URL(location.href), f = u.searchParams.get('friend');
+    if (!f) return;
+    localStorage.setItem('susuru_anki_pending_friend', f);
+    u.searchParams.delete('friend'); history.replaceState(null, '', u.pathname + (u.search ? u.search : '') + u.hash);
+  } catch (e) {}
+})();
+// ログインが終わったら（auth.js から）：表示名の反映と、URL で開いたフレンド申請
+async function onFriendAuthReady() {
+  if (!currentUser) return;
+  try {
+    const p = await firestore.collection('susuru_anki_profiles').doc(currentUser.uid).get();
+    const cn = p.exists && p.data().customName;
+    if (cn) await applyMyDisplayName(cn);
+    else { const el = document.getElementById('txtMyDisplayName'); if (el) el.value = currentUser.displayName || ''; }
+  } catch (e) {}
+  let f = null; try { f = localStorage.getItem('susuru_anki_pending_friend'); localStorage.removeItem('susuru_anki_pending_friend'); } catch (e) {}
+  if (!f || f === currentUser.uid) return;
+  if ((await myFriendList()).includes(f)) return showAppToast('🤝 もうフレンドです');
+  const name = await friendNameOf(f);
+  if (confirm(`🤝 ${name} さんにフレンド申請を送りますか？`)) sendFriendRequest(f, name);
 }
 
 // ★ フレンド一覧を読み込んで表示
@@ -181,7 +290,8 @@ async function loadAppFriends() {
       const fProfSnap = await firestore.collection('susuru_anki_profiles').doc(fUid).get();
       const fName = fProfSnap.exists ? fProfSnap.data().displayName : '未登録ユーザー';
       const div = document.createElement('div'); div.className = 'achieve-row';
-      div.innerHTML = `<div class="achieve-label">👤 ${escapeHtml(fName)}</div><button class="btn" style="width:auto; padding:6px 12px; font-size:0.8rem;" onclick="openChat(${jsArg(fUid)}, ${jsArg(fName)})">💬</button>`;
+      _friendNames[fUid] = fName;
+      div.innerHTML = `<div class="achieve-label">👤 ${escapeHtml(fName)}</div><div style="display:flex; gap:6px;">${friends.length > 1 ? `<button class="btn btn-secondary" style="width:auto; padding:6px 10px; font-size:0.8rem;" onclick="openFriendIntro(${jsArg(fUid)})" title="ほかのフレンドに紹介">🤝 紹介</button>` : ''}<button class="btn" style="width:auto; padding:6px 12px; font-size:0.8rem;" onclick="openChat(${jsArg(fUid)}, ${jsArg(fName)})">💬</button></div>`;
       listDiv.appendChild(div);
     }
   } catch (e) { listDiv.innerHTML = '<p style="color:var(--danger); font-size:0.8rem; text-align:center;">エラーが発生しました。</p>'; }

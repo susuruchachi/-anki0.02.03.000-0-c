@@ -238,6 +238,14 @@ async function sendFriendNotices() {
     if (p) sent += await sendToUser(p.ref, p.data, { kind: 'friend', tag: 'friend-' + doc.id, title: '✅ フレンド申請が承認されました', body: `${d.toName || '相手'} さんとフレンドになりました`, url: APP_URL + '#friends' });
     await doc.ref.update({ notifiedFrom: true });
   }
+  // ★【0.03.47】フレンドの紹介
+  for (const doc of (await db.collection('susuru_anki_friend_intros').get()).docs) {
+    const d = doc.data();
+    if (d.notifiedTo) continue;
+    const p = await pushOf(d.to);
+    if (p) sent += await sendToUser(p.ref, p.data, { kind: 'friend', tag: 'intro-' + doc.id, title: '🤝 フレンドの紹介', body: `${d.fromName || 'フレンド'} さんが ${d.introName || '名無し'} さんを紹介しました。押すとフレンド申請を送れます`, url: APP_URL + '#friends' });
+    await doc.ref.update({ notifiedTo: true });
+  }
   console.log(`フレンド申請のお知らせ: ${sent} 件送信`);
 }
 

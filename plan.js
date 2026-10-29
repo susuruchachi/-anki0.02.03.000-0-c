@@ -51,7 +51,8 @@ function planIsChantCard(q) {
   if (planIsExampleCard(q) || q.kind || (Array.isArray(q.choices) && q.choices.length)) return false;
   return PLAN_CHANT_RE.test(q.category) || (typeof drillIsPhraseCard === 'function' && drillIsPhraseCard(q));
 }
-function planWordCards(cat) { const ok = new Set(typeof getQuizSubcategories === 'function' ? getQuizSubcategories(cat) : getAllSubcategories(cat)); return planCards(cat).filter(q => ok.has(q.category)).filter(q => !planIsExampleCard(q) && !planIsChantCard(q) && (typeof drillIsWordCard !== 'function' || drillIsWordCard(q))); }
+// 単語＝暗記テストに出るカード（熟語も含む。★【0.03.47】元の試作と同じ）
+function planWordCards(cat) { const ok = new Set(typeof getQuizSubcategories === 'function' ? getQuizSubcategories(cat) : getAllSubcategories(cat)); return planCards(cat).filter(q => ok.has(q.category)).filter(q => !planIsExampleCard(q) && (typeof drillIsWordCard !== 'function' || drillIsWordCard(q))); }
 function planExampleCards(cat) { return planCards(cat).filter(planIsExampleCard); }
 function planChantCards(cat) { return sortCardsByNumber(planCards(cat).filter(planIsChantCard)); }
 // その時刻より後に解いたカードの数

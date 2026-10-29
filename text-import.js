@@ -188,7 +188,7 @@ function vtSectionName(title) {
 function vtCode(section) { const m = String(section).match(/#\d+/); return m ? m[0] : String(section).split(/\s+/)[0]; }
 // 読み取った結果から、作るカードの一覧（フォルダーはまだ作らない）
 function vtCards(parsed, section) {
-  const code = vtCode(section), exFolder = `${code} 例文`;
+  const code = vtCode(section), exFolder = `${code} 例文`, chFolder = `${code} チャンツ`;
   const cards = [], folders = [], seenPhrase = new Set();
   const add = c => cards.push(c);
   parsed.groups.forEach((g, gi) => {
@@ -209,29 +209,33 @@ function vtCards(parsed, section) {
         const x = vtExpr(e, head); if (!x) return;
         if (x.type === 'phrase') {
           const key = x.q.toLowerCase(); if (seenPhrase.has(key)) return; seenPhrase.add(key);
-          add({ folder, q: x.q, a: x.a, no: Number.isFinite(base) ? base + (j + 1) / 10000 : null, note: `${head}：${vtPlainMeaning(mean)}` });
+          // ◆の熟語は「チャンツ」フォルダーへ（元の試作と同じく暗記テストには出さない。クイズ・週間プランのチャンツで）
+          add({ folder: chFolder, q: x.q, a: x.a, no: Number.isFinite(base) ? base + (j + 1) / 10000 : null, note: `${head}：${vtPlainMeaning(mean)}` });
         } else add({ folder: exFolder, q: x.q, a: x.a, kind: 'cloze', note: `${head}：${vtPlainMeaning(mean)}`, no: Number.isFinite(base) ? base : null });
       });
     });
     g.checks.forEach(c => vtChecks(c).forEach(x => add({ folder, q: x.q, a: x.a, kind: 'test', choices: x.choices || null })));
   });
-  return { cards, folders, exFolder, code };
+  return { cards, folders, exFolder, chFolder, code };
 }
 
 // 保存する（同じフォルダーに同じ問題・同じ形式のカードがあれば書き換える）
 function vtSave(parsed, parentCat, section) {
-  const { cards, folders, exFolder } = vtCards(parsed, section);
+  const { cards, folders, exFolder, chFolder } = vtCards(parsed, section);
   const pre = parentCat ? getCategoryPath(parentCat).join('>') + '>' : '';
   const sec = ensureCategoryPath(pre + section);
   // ほかの場所に同じ名前のフォルダーがあれば、名前を変えて作る（フォルダー名はアプリ全体で1つ）
   const nameMap = {};
-  const hasEx = cards.some(c => c.folder === exFolder);
-  [...folders, ...(hasEx ? [exFolder] : [])].forEach(f => {
+  const hasEx = cards.some(c => c.folder === exFolder), hasCh = cards.some(c => c.folder === chFolder);
+  [...folders, ...(hasCh ? [chFolder] : []), ...(hasEx ? [exFolder] : [])].forEach(f => {
     let n = f;
     if (categories.includes(n) && getCategoryParent(n) !== sec) n = `${f}（${section}）`;
     nameMap[f] = ensureCategoryPath(pre + section + '>' + n);
   });
-  if (hasEx) { catSkip = catSkip || {}; catSkip[nameMap[exFolder]] = true; } // 例文は上のフォルダーから出題しない（週間プランの例文で）
+  // 例文・チャンツは上のフォルダーから出題しない（週間プランの例文・チャンツで）
+  catSkip = catSkip || {};
+  if (hasEx) catSkip[nameMap[exFolder]] = true;
+  if (hasCh) catSkip[nameMap[chFolder]] = true;
   let added = 0, updated = 0; const touched = new Set();
   cards.forEach(c => {
     const cat = nameMap[c.folder]; touched.add(cat);
