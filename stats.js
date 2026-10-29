@@ -51,11 +51,6 @@ function renderStatsAndCharts() {
       onClick: (e, els) => { if (els && els.length) filterBoxByStatus(['grad', 'master', 'normal', 'weak', 'shikkari'][els[0].index]); } }
   });
 
-  const hc = document.getElementById('heatmapContainer'); hc.innerHTML='';
-  for(let i=0; i<30; i++) {
-    const c = document.createElement('div'); c.className='heatmap-cell';
-    const lvl = i===29 ? (todayCorrectCount>10?4:todayCorrectCount>5?3:todayCorrectCount>0?2:0) : Math.floor(Math.random()*2);
-    c.setAttribute('data-level', lvl); hc.appendChild(c);
-  }
+  renderStudyHeatmap(); // ★【0.03.62】学習した日の記録（studyDays）から。以前は過去の日がでたらめだった
 }
 

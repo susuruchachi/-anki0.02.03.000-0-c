@@ -409,6 +409,7 @@ function renderPlanViews() {
   renderPlanSettings();
   planSyncNotice();
   if (typeof raceSync === 'function') raceSync();
+  if (typeof updateAppBadge === 'function') updateAppBadge();
 }
 
 // ---------------- 通知 ----------------
@@ -442,6 +443,12 @@ function planUrgentTask(now = new Date()) {
   planList().forEach(p => { planUse(p); planTasks(now).forEach(t => { if (!t.done && !t.upcoming && !t.locked && !t.optional) all.push(t); }); });
   const rank = t => (t.overdue ? 0 : 10) + ['words', 'chants', 'examples', 'sunday'].indexOf(t.key);
   return all.sort((a, b) => rank(a) - rank(b))[0] || null;
+}
+// ★【0.03.62】今やるべき課題の数（アプリのアイコンのバッジ用）
+function planTodayRemaining(now = new Date()) {
+  let n = 0;
+  planList().forEach(p => { planUse(p); planTasks(now).forEach(t => { if (!t.done && !t.upcoming && !t.locked && !t.optional) n++; }); });
+  return n;
 }
 function planUrgentText(t) {
   const name = t.title.split('：').slice(1).join('：') || t.title;

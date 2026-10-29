@@ -40,10 +40,11 @@ function fpRowHTML(c, depth, flat) {
   const n = p.count ? p.count(c) : (p.total[c] || 0);
   const note = p.note ? p.note(c) : '';
   const label = flat ? getCategoryPath(c).map(escapeHtml).join(' <span class="fp-sep">›</span> ') : escapeHtml(c);
+  // ★【0.03.62】中にフォルダーがあるものは、名前を押すと開く（決めるのは「これにする」）。中が無いものは名前を押すと決まる
   return `<div class="fp-row${cur ? ' cur' : ''}${can ? '' : ' off'}" style="padding-left:${8 + depth * 18}px;">
     ${kids.length ? `<button type="button" class="fp-tog" data-tog="${escAttr(c)}">${isOpen ? '▾' : '▸'}</button>` : '<span class="fp-tog"></span>'}
-    <button type="button" class="fp-name" data-pick="${escAttr(c)}">${kids.length ? (isOpen ? '📂' : '📁') : '📄'} ${label}</button>
-    <span class="fp-meta">${note ? escapeHtml(note) + ' ・ ' : ''}${n}問</span>
+    <button type="button" class="fp-name" ${kids.length && !flat ? `data-tog="${escAttr(c)}"` : `data-pick="${escAttr(c)}"`}>${kids.length ? (isOpen ? '📂' : '📁') : '📄'} ${label}<span class="fp-meta-in">${note ? escapeHtml(note) + ' ・ ' : ''}${n}問</span></button>
+    ${can && kids.length && !flat ? `<button type="button" class="chip fp-pick" data-pick="${escAttr(c)}">これにする</button>` : ''}
   </div>` + (isOpen ? kids.map(k => fpRowHTML(k, depth + 1)).join('') : '');
 }
 function renderFolderPicker() {
@@ -65,7 +66,7 @@ function renderFolderPicker() {
       ${p.allLabel ? `<div class="fp-row${!p.current ? ' cur' : ''}" style="padding-left:8px;"><span class="fp-tog"></span><button type="button" class="fp-name" data-pick="">${escapeHtml(p.allLabel)}</button></div>` : ''}
       ${list}
     </div>
-    <div class="hint-small" style="margin-top:6px;">▸ で中のフォルダーを開く・名前を押すとそのフォルダーに決まります</div>
+    <div class="hint-small" style="margin-top:6px;">📁 を押すと中のフォルダーが開きます。そのフォルダー（とその中ぜんぶ）にするときは「これにする」、📄 は押すとそれに決まります</div>
     <button type="button" class="btn btn-secondary" style="margin-top:8px;" onclick="closeFolderPicker()">閉じる</button>`;
   const L = document.getElementById('fpList'); L.scrollTop = keep;
   L.querySelectorAll('[data-tog]').forEach(b => b.onclick = () => { const c = b.dataset.tog; if (p.open.has(c)) p.open.delete(c); else p.open.add(c); renderFolderPicker(); });

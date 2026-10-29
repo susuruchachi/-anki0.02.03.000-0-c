@@ -390,23 +390,32 @@ async function loadFriendsForComparison() {
       select.appendChild(opt);
     });
     
-    const catSelect = document.getElementById('selCompareCategory');
-    catSelect.innerHTML = '<option value="">🌐 全カテゴリー</option>';
-    categories.forEach(c => {
-      const opt = document.createElement('option');
-      opt.value = c;
-      opt.innerText = c;
-      catSelect.appendChild(opt);
-    });
+    renderCompareCatBtn();
   } catch(e) {}
 }
 
 // ★【0.02.59-g】成績比較: 折れ線グラフ（横軸=日付、縦軸=正答率）
 let compareChartInstance = null;
 
+// ★【0.03.62】カテゴリーはフォルダーを選ぶ画面で
+function renderCompareCatBtn() {
+  const box = document.getElementById('compareCatBtn'); if (!box) return;
+  const cur = document.getElementById('selCompareCategory').value;
+  box.innerHTML = folderPickButtonHTML(cur, '全カテゴリー', 'pickCompareCategory()');
+}
+function pickCompareCategory() {
+  openFolderPicker({ title: '📁 比べるカテゴリー', current: document.getElementById('selCompareCategory').value, allLabel: '🌐 全カテゴリー',
+    hint: '選んだフォルダーの成績だけを比べます', onPick: c => { document.getElementById('selCompareCategory').value = c || ''; renderCompareCatBtn(); renderCompareStats(); } });
+}
+function setCompareMode(m) {
+  document.getElementById('selCompareMode').value = m;
+  document.querySelectorAll('[data-cmpmode]').forEach(b => b.classList.toggle('active', b.dataset.cmpmode === m));
+  renderCompareStats();
+}
 async function renderCompareStats() {
   const friendUid = document.getElementById('selCompareFriend').value;
   const category = document.getElementById('selCompareCategory').value;
+  const catSet = category ? new Set(getAllSubcategories(category)) : null; // 上のフォルダーを選んだら、中のフォルダーの成績も含める
   const cmpMode = (document.getElementById('selCompareMode') || {}).value || 'quiz'; // ★【0.03.39】通常のクイズ／暗記テスト
   const area = document.getElementById('compareStatsArea');
 
@@ -430,7 +439,7 @@ async function renderCompareStats() {
     const accumulate = (doc, isMe) => {
       const d = doc.data();
       if (d.mode === 'race') return;
-      if (category && d.category !== category) return;
+      if (catSet && !catSet.has(d.category)) return;
       if ((d.mode === 'drill' ? 'drill' : 'quiz') !== cmpMode) return;
       if (!dateMap[d.date]) dateMap[d.date] = { myScore: 0, myTotal: 0, friendScore: 0, friendTotal: 0, friendName: '?' };
       if (isMe) {

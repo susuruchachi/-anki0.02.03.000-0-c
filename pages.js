@@ -60,6 +60,7 @@ function updateHomeSummary() {
   set('homeSumWeak', db.filter(q => !isGrad(q) && ((q.level === 0 && (q.correct + q.incorrect) > 0) || q.level === -1)).length);
   set('homeSumUnseen', db.filter(q => q.correct === 0 && q.incorrect === 0 && q.level >= 0).length);
   set('homeSumGrad', db.filter(isGrad).length);
+  if (typeof renderStreakCard === 'function') renderStreakCard();
 }
 
 async function fetchAndRenderTutorial() {
@@ -126,7 +127,7 @@ function executePageTransition(pageId, isBackAction) {
   if(pageId==='pgOnlineMatch') { const el = document.getElementById('navOnlineMatch'); if(el) el.classList.add('active'); initOnlineMatchPage(); }
   if(pageId==='pgListen' && typeof renderListenPage === 'function') renderListenPage();
   if(pageId==='pgPublicCategories') { loadPublicCategories(); loadMyPublicCategories(); }
-  if(pageId==='pgCompareStats') { loadFriendsForComparison(); }
+  if(pageId==='pgCompareStats') { if (typeof renderCompareCatBtn === 'function') renderCompareCatBtn(); loadFriendsForComparison(); }
   if(pageId==='pgBackup') { const el = document.getElementById('navBackup'); if(el) el.classList.add('active'); if (typeof renderMySharedDocsSettings === 'function') renderMySharedDocsSettings(); if (typeof renderSnapshotList === 'function') renderSnapshotList(); if (typeof renderNotifySettings === 'function') renderNotifySettings(); if (typeof renderAiSettings === 'function') renderAiSettings(); }
   if(pageId==='pgTutorial') { fetchAndRenderTutorial(); }
   if(pageId==='pgDrill' && typeof drillOnOpen === 'function') drillOnOpen(); // ★【0.03.27】暗記テストのタブ

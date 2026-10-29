@@ -247,6 +247,8 @@ b.drill-ng { font-size: 1.3rem; }
 .fp-tog { width:28px; height:30px; flex-shrink:0; border:none; background:none; color:var(--text2); font-size:0.9rem; cursor:pointer; }
 .fp-name { flex:1; min-width:0; text-align:left; border:none; background:none; color:var(--text); font-family:inherit; font-size:0.9rem; padding:8px 4px; cursor:pointer; word-break:break-word; }
 .fp-meta { flex-shrink:0; font-size:0.72rem; color:var(--text3); }
+.fp-meta-in { display:block; font-size:0.7rem; color:var(--text3); font-weight:400; margin-top:1px; }
+.fp-pick { flex-shrink:0; font-size:0.72rem; padding:5px 10px; background:var(--primary); color:#fff; border-color:var(--primary); }
 .plan-step { display:flex; align-items:center; gap:8px; margin:14px 0 6px; font-weight:700; font-size:0.9rem; }
 .plan-step-no { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:50%; background:var(--primary); color:#fff; font-size:0.75rem; flex-shrink:0; }
 .plan-weeks { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
@@ -340,7 +342,27 @@ body.light-mode .quiz-hints .hint-ai { color: #5b2bd6; }
 body.light-mode .setting-box { background: rgba(240,242,245,0.4); }
 .setting-box-title { font-size: 0.8rem; font-weight: 700; color: var(--text2); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
 
-.heatmap-grid { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px; justify-content: center; }
+.heatmap-grid { margin-top: 10px; }
+.heatmap-weeks { display: flex; gap: 3px; justify-content: center; }
+.heatmap-col { display: flex; flex-direction: column; gap: 3px; }
+.streak-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; margin-bottom: 10px; cursor: pointer; }
+.streak-card.done { border-color: #f59e0b; background: linear-gradient(135deg, rgba(245,158,11,0.16), var(--bg2)); }
+.streak-card.risk { border-color: var(--warn); }
+.streak-main { display: flex; align-items: center; gap: 10px; }
+.streak-fire { font-size: 1.9rem; line-height: 1; }
+.streak-card:not(.done) .streak-fire { filter: grayscale(1); opacity: 0.6; }
+.streak-num { font-family: 'JetBrains Mono', monospace; font-size: 1.45rem; font-weight: 900; color: var(--text); line-height: 1.1; }
+.streak-num span { font-family: inherit; font-size: 0.8rem; font-weight: 700; margin-left: 3px; color: var(--text2); }
+.streak-msg { font-size: 0.74rem; color: var(--text2); margin-top: 2px; }
+.streak-card.risk .streak-msg { color: var(--warn); font-weight: 700; }
+.streak-best { font-size: 0.7rem; color: var(--text2); text-align: center; flex-shrink: 0; }
+.streak-best b { display: block; font-size: 1.05rem; color: var(--text); font-family: 'JetBrains Mono', monospace; }
+.streak-week { display: flex; justify-content: space-between; margin-top: 8px; }
+.streak-day { flex: 1; text-align: center; }
+.streak-dot { width: 26px; height: 26px; margin: 0 auto; border-radius: 50%; background: var(--bg4); display: flex; align-items: center; justify-content: center; font-size: 0.85rem; }
+.streak-day.on .streak-dot { background: rgba(245,158,11,0.25); }
+.streak-day.today .streak-dot { outline: 2px solid #f59e0b; outline-offset: 1px; }
+.streak-wd { font-size: 0.62rem; color: var(--text2); margin-top: 2px; }
 .heatmap-cell { width: 14px; height: 14px; border-radius: 3px; background: var(--bg4); }
 .heatmap-cell[data-level="1"] { background: #9be9a8; }
 .heatmap-cell[data-level="2"] { background: #40c463; }
@@ -564,6 +586,9 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
     </div>
 
     <!-- ★【0.03.00】学習状況のひと目サマリー（タップでカード箱を絞り込み） -->
+    <!-- ★【0.03.62】🔥 連続記録 -->
+    <div id="streakCard" class="streak-card" onclick="openPage('pgStats')"></div>
+
     <div class="home-summary">
       <div class="home-summary-item" onclick="showAllCards(); openPage('pgBox');"><div class="home-summary-num" id="homeSumTotal">0</div><div class="home-summary-label">📝 カード</div></div>
       <div class="home-summary-item" onclick="filterBoxByStatus('weak')"><div class="home-summary-num" id="homeSumWeak" style="color:var(--warn);">0</div><div class="home-summary-label">⚠️ 苦手</div></div>
@@ -802,7 +827,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
     <h2>📊 習熟実績と学習状況</h2>
     
     <div class="card">
-      <div class="setting-box-title">🔥 学習ヒートマップ (過去30日)</div>
+      <div class="setting-box-title">🔥 連続記録と学習ヒートマップ（過去12週）</div>
       <div id="heatmapContainer" class="heatmap-grid"></div>
     </div>
 
@@ -1131,18 +1156,18 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
       <button class="btn btn-secondary" style="width:auto; padding:8px 14px;" onclick="openPage('pgBackup')">戻る</button>
     </div>
     
+    <!-- ★【0.03.62】①だれと ②どの成績 ③どのカテゴリー（フォルダーを選ぶ画面）の順に -->
     <div class="card">
-      <div style="font-size:0.85rem; color:var(--text2); margin-bottom:10px;">フレンドを選択してください</div>
-      <select id="selCompareMode" class="form-control" style="margin-bottom:10px;" onchange="renderCompareStats()">
-        <option value="quiz">🎯 通常のクイズの成績</option>
-        <option value="drill">🧠 暗記テストの成績</option>
-      </select>
-      <select id="selCompareCategory" class="form-control" style="margin-bottom:10px;" onchange="renderCompareStats()">
-        <option value="">🌐 全カテゴリー</option>
-      </select>
+      <div class="plan-step" style="margin-top:0;"><span class="plan-step-no">1</span>👤 比べるフレンド</div>
       <select id="selCompareFriend" class="form-control" onchange="renderCompareStats()">
         <option value="">フレンドを選択...</option>
       </select>
+      <div class="plan-step"><span class="plan-step-no">2</span>📊 比べる成績</div>
+      <div style="display:flex; gap:6px;"><button type="button" class="chip active" data-cmpmode="quiz" onclick="setCompareMode('quiz')">🎯 通常のクイズ</button><button type="button" class="chip" data-cmpmode="drill" onclick="setCompareMode('drill')">🧠 暗記テスト</button></div>
+      <input type="hidden" id="selCompareMode" value="quiz">
+      <div class="plan-step"><span class="plan-step-no">3</span>📁 カテゴリー</div>
+      <div id="compareCatBtn"></div>
+      <input type="hidden" id="selCompareCategory" value="">
     </div>
 
     <div id="compareStatsArea">
@@ -1466,6 +1491,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 <script src="notify.js"></script>
 <script src="ai.js"></script>
 <script src="picker.js"></script>
+<script src="streak.js"></script>
 <script src="drill.js"></script>
 <script src="plan.js"></script>
 <script src="race.js"></script>

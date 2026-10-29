@@ -24,6 +24,8 @@ function getQuizSubcategories(cat, result = []) {
   (categoryTree[cat] || []).forEach(c => { if (!isCatSkipped(c)) getQuizSubcategories(c, result); });
   return result;
 }
+// ★【0.03.62】連続記録：学習した日 { 'YYYY-MM-DD': その日に答えた数 }（同期では両方を残し、多い方の数）
+let studyDays = {};
 let studyPlan = null; // ★【0.03.27】週間プラン（plan.js）。設定は新しく変えた方、達成の記録は両方を残す
 // ★【0.03.33】週間プランは複数持てる：studyPlan = { v: 2, plans: { id: プラン } }（解除したプランは { deleted: true, planAt }）
 function normalizeStudyPlans(x) {
@@ -205,6 +207,7 @@ function loadData() {
       if(p.catSubjects) catSubjects=p.catSubjects;
       if(p.catSkip) catSkip=p.catSkip;
       if(p.studyPlan) studyPlan=p.studyPlan;
+      if(p.studyDays) studyDays=p.studyDays;
       if(p.deletedCardsAt) deletedCardsAt=p.deletedCardsAt;
       if(p.docStamps) docStamps=p.docStamps;
       if(p.structAt) structAt=p.structAt;
@@ -284,7 +287,7 @@ function updateStructStamp() {
 }
 
 function buildSyncPayload() {
-  return { db, categories, categoryTree, subscribedDocs, ownedDocs, deletedCards, deletedCardsAt, deletedCats, catStamps, docStamps, structAt, catSubjects, catSkip, studyPlan };
+  return { db, categories, categoryTree, subscribedDocs, ownedDocs, deletedCards, deletedCardsAt, deletedCats, catStamps, docStamps, structAt, catSubjects, catSkip, studyPlan, studyDays };
 }
 
 let _quotaWarned = false;
@@ -534,6 +537,7 @@ function mergeSyncStates(L, C) {
     catSkip: (() => { const o = Object.assign({}, older.catSkip || {}, newer.catSkip || {}); Object.keys(o).forEach(k => { if (!aliveSet.has(k)) delete o[k]; }); return o; })(),
     structAt: Math.max(L.structAt || 0, C.structAt || 0),
     studyPlan: mergeStudyPlans(L.studyPlan, C.studyPlan),
+    studyDays: (() => { const o = Object.assign({}, L.studyDays || {}); Object.entries(C.studyDays || {}).forEach(([k, v]) => { o[k] = Math.max(o[k] || 0, v || 0); }); return o; })(),
     subscribedDocs: subs, ownedDocs: owned
   };
 }
@@ -543,7 +547,7 @@ function mergeIntoLocal(r) {
   const merged = mergeSyncStates(buildSyncPayload(), r);
   db = merged.db; categories = merged.categories; categoryTree = merged.categoryTree;
   deletedCards = merged.deletedCards; deletedCardsAt = merged.deletedCardsAt; deletedCats = merged.deletedCats;
-  catStamps = merged.catStamps; docStamps = merged.docStamps; structAt = merged.structAt; catSubjects = merged.catSubjects || {}; catSkip = merged.catSkip || {}; studyPlan = merged.studyPlan || null;
+  catStamps = merged.catStamps; docStamps = merged.docStamps; structAt = merged.structAt; catSubjects = merged.catSubjects || {}; catSkip = merged.catSkip || {}; studyPlan = merged.studyPlan || null; studyDays = merged.studyDays || {};
   subscribedDocs = merged.subscribedDocs; ownedDocs = merged.ownedDocs;
   ensureSystemSanity();
   autoMerge(true);
@@ -573,7 +577,7 @@ function syncFingerprint(p) {
   return stableStringify({
     db: dbSorted, categories: [...(p.categories || [])].sort(), categoryTree: p.categoryTree || {},
     deletedCards: [...(p.deletedCards || [])].sort(), deletedCardsAt: p.deletedCardsAt || {}, deletedCats: [...(p.deletedCats || [])].sort(),
-    catStamps: p.catStamps || {}, docStamps: p.docStamps || {}, structAt: p.structAt || 0, catSubjects: p.catSubjects || {}, catSkip: p.catSkip || {}, studyPlan: p.studyPlan || null,
+    catStamps: p.catStamps || {}, docStamps: p.docStamps || {}, structAt: p.structAt || 0, catSubjects: p.catSubjects || {}, catSkip: p.catSkip || {}, studyPlan: p.studyPlan || null, studyDays: p.studyDays || {},
     subscribedDocs: [...(p.subscribedDocs || [])].sort(), ownedDocs: [...(p.ownedDocs || [])].sort()
   });
 }
@@ -727,7 +731,7 @@ function resolveAccountSwitch() {
     if (!merge) {
       takeSnapshot('アカウント変更（置き換え）');
       db = []; categories = ['未分類']; categoryTree = {}; subscribedDocs = []; ownedDocs = [];
-      deletedCards = []; deletedCardsAt = {}; deletedCats = []; catStamps = {}; docStamps = {}; structAt = 0; catSubjects = {}; catSkip = {}; studyPlan = null;
+      deletedCards = []; deletedCardsAt = {}; deletedCats = []; catStamps = {}; docStamps = {}; structAt = 0; catSubjects = {}; catSkip = {}; studyPlan = null; studyDays = {};
       sharedDocPermissions = {};
       _structHash = structFingerprint(); writeLocal();
     } else {
