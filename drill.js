@@ -554,14 +554,24 @@ function drillSynWords(src, w) {
   }
   return out;
 }
+// メモの文から、問題に使える「特徴」の部分だけを取り出す（参照・導入の印、見出し語を含む文は除く）
+function drillNuanceText(s, w) {
+  let t = String(s || '').trim();
+  t = t.replace(/[（(][^（）()]*(参照|例文|導入|→\s*p\.)[^（）()]*[)）]/g, '');
+  t = t.replace(/[（(]?導入より[)）]?[^。]*。?/g, '');
+  const lw = String(w || '').toLowerCase();
+  t = t.split(/(?<=。)/).filter(x => x.trim() && !(lw && x.toLowerCase().includes(lw))).join('');
+  return t.replace(/^★\s*/, '').replace(/[。\s]+$/, '').trim();
+}
 function drillRelQs(it) {
   const z = [], note = String(it.card.note || ''), src = it.m + '\n' + note;
   const ants = drillArrowWords(src, it.w);
   const ants2 = ants.filter(a => !drillSameWord(a, it.w));
   if (ants2.length) z.push({ k: '対義語', a: ants2[0], all: ants2.join(', ') });
   // ★【0.03.46】元の試作と同じく、補足（メモの1行目）に「比べ・より・に対し・否定的」があればニュアンスの4択
-  const n1 = note.split('\n')[0].trim();
-  if (n1 && n1.length <= 120 && /比べ|より|に対し|否定的|ニュアンス/.test(n1)) z.push({ k: 'ニュアンス・特徴', a: n1 });
+  // ★【0.03.54】「（導入より）…」「（下の例文を参照）」などの書き写しの印は除いてから判断する（「導入より」の「より」で出ていた）
+  const n1 = drillNuanceText(note.split('\n')[0], it.w);
+  if (n1 && n1.length <= 120 && /比べ|より|に対し|否定的|ニュアンス/.test(n1)) z.push({ k: 'ニュアンス・特徴', a: n1, src: n1 });
   const sy = drillSynWords(src, it.w);
   if (sy.length) z.push({ k: '類義語', a: sy[0], all: sy.join(', ') });
   return z;
@@ -572,7 +582,13 @@ async function drillNq() {
   const z = dst.z0[dst.qi], it = dcur.it;
   drillBusy();
   try {
-    const r = await drillAi(`英単語「${it.w}」（${it.m}）の「${z.k}」を問う4択問題の不正解選択肢を3つ作れ。正解:「${z.a}」${z.all ? `（${z.all}はいずれも正解なので不正解に含めない）` : ''}。紛らわしいが明確に誤りのもの（類義語と対義語の入れ替え、似た単語の特徴、逆の意味など）で、正解と同じ形式・同程度の長さにする。JSONのみ：{"wrong":["","",""]}`);
+    const nu = z.k === 'ニュアンス・特徴';
+    // ★【0.03.54】ニュアンスの問題は、正解の文も AI が書き直す（単語帳の文をそのまま使うと、長さ・言い回し・単語名で答えが分かってしまうため）
+    const r = await drillAi(nu
+      ? `英単語「${it.w}」（${it.m}）の使い方・ニュアンスを問う4択問題を作れ。単語帳の説明：「${z.src}」\n- right：この説明の要点を、20〜35字の1文で言い直した正解の選択肢。\n- wrong：同じ文体・同じくらいの長さで、紛らわしいが明確に誤りの選択肢を3つ（逆の意味、似た単語の特徴など）。\n- どの選択肢にも、英単語・見出し語・「例文」「導入」「参照」「単語帳」という言葉を書かない。4つの長さをそろえる。\nJSONのみ：{"right":"","wrong":["","",""]}`
+      : `英単語「${it.w}」（${it.m}）の「${z.k}」を問う4択問題の不正解選択肢を3つ作れ。正解:「${z.a}」${z.all ? `（${z.all}はいずれも正解なので不正解に含めない）` : ''}。紛らわしいが明確に誤りのもの（類義語と対義語の入れ替え、似た単語の特徴、逆の意味など）で、正解と同じ形式・同程度の長さにする。JSONのみ：{"wrong":["","",""]}`);
+    const lw = String(it.w).toLowerCase(), hide = s => String(s || '').replace(new RegExp(lw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), 'この語').trim();
+    if (nu) { const rt = hide(r.right); if (rt && rt.length >= 6) z.a = rt; else z.a = hide(z.a); r.wrong = (r.wrong || []).map(hide); }
     // 正解（と、正解として認めるもの）と同じ選択肢・重なった選択肢は除く
     const nz = x => String(x || '').toLowerCase().replace(/[\s　。、,，.・]/g, '');
     const ok = new Set([z.a, ...String(z.all || '').split(/[,、]/)].map(nz).filter(Boolean));
