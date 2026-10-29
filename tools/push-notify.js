@@ -87,7 +87,10 @@ function planTaskMessages(pl, nowMs, dow) {
       out.push({ key: 'words', title: d >= 1 ? `🧠 今週の単語：期限まであと${d}日` : '🔥 今夜が単語の期限です', body: `${pl.cat}：押すと暗記テストを始めます` });
     }
   }
-  if (pl.wordsDone && pl.examples && !pl.examplesDone && nowMs > pl.due - 86400000) out.push({ key: 'examples', title: '📖 今週の例文・チャンツ', body: `${pl.cat}：押すと始めます` });
+  // ★【0.03.41】単語に合格 → チャンツ → 例文 の順
+  const chantsLeft = pl.chants && !pl.chantsDone;
+  if (pl.wordsDone && chantsLeft) out.push({ key: 'chants', title: '🎵 今週のチャンツ', body: `${pl.cat}：単語は合格！次はチャンツ。押すと始めます` });
+  if (pl.wordsDone && !chantsLeft && pl.examples && !pl.examplesDone && nowMs > pl.due - 86400000) out.push({ key: 'examples', title: '📖 今週の例文', body: `${pl.cat}：押すと始めます` });
   if (pl.sunday && !pl.sundayDone && dow === pl.reviewDay) out.push({ key: 'sunday', title: '🔁 今日は先週の範囲の復習の日です', body: `${pl.prevCat || '先週の範囲'}：押すと始めます` });
   return out;
 }
