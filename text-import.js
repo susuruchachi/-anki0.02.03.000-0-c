@@ -147,6 +147,14 @@ function vtAccentChoices(a) {
   keep.splice(Math.min(i, keep.length), 0, right);
   return keep.length >= 2 ? keep : null;
 }
+// 1つの Check! から問題の配列（アクセントで「a / b」と2語あれば2問。元の試作と同じ）
+function vtChecks(raw) {
+  const s = String(raw || '').trim(), k = s.lastIndexOf('→');
+  if (k < 0) return [];
+  const q = s.slice(0, k).trim(), a = s.slice(k + 1).trim();
+  if (/アクセント/.test(q) && /[\/／]/.test(a)) return a.split(/[\/／]/).map(x => x.trim()).filter(Boolean).map(x => vtCheck(`${q} → ${x}`)).filter(Boolean);
+  const x = vtCheck(s); return x ? [x] : [];
+}
 function vtCheck(raw) {
   const s = String(raw || '').trim(), k = s.lastIndexOf('→');
   if (k < 0) return null;
@@ -205,7 +213,7 @@ function vtCards(parsed, section) {
         } else add({ folder: exFolder, q: x.q, a: x.a, kind: 'cloze', note: `${head}：${vtPlainMeaning(mean)}`, no: Number.isFinite(base) ? base : null });
       });
     });
-    g.checks.forEach(c => { const x = vtCheck(c); if (x) add({ folder, q: x.q, a: x.a, kind: 'test', choices: x.choices || null }); });
+    g.checks.forEach(c => vtChecks(c).forEach(x => add({ folder, q: x.q, a: x.a, kind: 'test', choices: x.choices || null })));
   });
   return { cards, folders, exFolder, code };
 }

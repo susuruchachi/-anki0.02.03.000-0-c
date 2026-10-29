@@ -510,7 +510,9 @@ function drillRelQs(it) {
   const ants = drillArrowWords(src, it.w);
   const ants2 = ants.filter(a => !drillSameWord(a, it.w));
   if (ants2.length) z.push({ k: '対義語', a: ants2[0], all: ants2.join(', ') });
-  if (note.length <= 60 && /比べ|に対し|否定的|ニュアンス/.test(note)) z.push({ k: 'ニュアンス・特徴', a: note });
+  // ★【0.03.46】元の試作と同じく、補足（メモの1行目）に「比べ・より・に対し・否定的」があればニュアンスの4択
+  const n1 = note.split('\n')[0].trim();
+  if (n1 && n1.length <= 120 && /比べ|より|に対し|否定的|ニュアンス/.test(n1)) z.push({ k: 'ニュアンス・特徴', a: n1 });
   const sy = drillSynWords(src, it.w);
   if (sy.length) z.push({ k: '類義語', a: sy[0], all: sy.join(', ') });
   return z;
