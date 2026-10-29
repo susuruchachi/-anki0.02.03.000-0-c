@@ -113,7 +113,7 @@ function importBackupReplace(p) {
 }
 function exportCSV() {
   let lines = [["問題", "答え", "フォルダー", "番号", "メモ", "選択肢", "形式", "星", "レベル", "正解数", "不正解数"]];
-  sortCardsByNumber([...db]).forEach(q => lines.push([q.question, q.answer, getCategoryPathString(q.category), q.no || '', q.note || '', Array.isArray(q.choices) ? q.choices.join(' / ') : '', q.kind === 'test' ? 'テスト' : q.kind === 'cloze' ? '例文' : q.kind === 'self' ? '自己申告' : q.kind === 'intro' ? '導入' : '', starsText(q.stars), q.level, q.correct, q.incorrect]));
+  sortCardsByNumber([...db]).forEach(q => lines.push([q.question, q.answer, getCategoryPathString(q.category), q.no ? cardNoText(q.no) : '', q.note || '', Array.isArray(q.choices) ? q.choices.join(' / ') : '', q.kind === 'test' ? 'テスト' : q.kind === 'cloze' ? '例文' : q.kind === 'self' ? '自己申告' : q.kind === 'intro' ? '導入' : '', starsText(q.stars), q.level, q.correct, q.incorrect]));
   const csv = lines.map(l => l.map(t => `"${String(t === undefined || t === null ? '' : t).replace(/"/g, '""')}"`).join(",")).join("\n");
   const b = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csv], { type: 'text/csv;charset=utf-8;' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = `susuru_anki_${Date.now()}.csv`; a.click();
@@ -230,7 +230,9 @@ function planCSVImport(rows) {
     const choices = iCh !== -1 ? parseChoicesCell(c[iCh]) : null;
     const kindRaw = iK !== -1 ? String(c[iK] || '').trim() : '';
     const kind = /テスト|test/i.test(kindRaw) ? 'test' : /例文|cloze/i.test(kindRaw) ? 'cloze' : /自己申告|self/i.test(kindRaw) ? 'self' : /導入|intro/i.test(kindRaw) ? 'intro' : '';
-    const noNum = iNo !== -1 ? parseInt(String(c[iNo] || '').replace(/[^0-9]/g, ''), 10) : NaN;
+    // ★【0.03.45】派生語の「1000-1」も読む（1000.01 として持つ）
+    const noM = iNo !== -1 ? String(c[iNo] || '').replace(/[０-９]/g, d => String.fromCharCode(d.charCodeAt(0) - 0xFEE0)).match(/(\d+)(?:\s*[-.]\s*(\d+))?/) : null;
+    const noNum = noM ? Number(noM[1]) + (noM[2] ? Number(noM[2]) / 100 : 0) : NaN;
     const no = Number.isFinite(noNum) && noNum > 0 ? noNum : null;
     // 同じフォルダーに同じ問題があれば、重複させずに更新する（同じ問題・同じ答え → 同じ問題が1枚だけ → 「（2つ）」などの数だけ違う）
     let ex = db.find(d => d.category === cat && String(d.question).trim() === q && String(d.answer).trim() === a && !usedIds.has(d.id));

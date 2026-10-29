@@ -667,7 +667,8 @@ function assignCardNumbers() {
   db.forEach(q => {
     if (q.no !== undefined && q.no !== null && q.no !== '') {
       const n = Number(q.no);
-      if (Number.isFinite(n) && n > 0) { q.no = Math.floor(n); maxNo[q.category] = Math.max(maxNo[q.category] || 0, q.no); }
+      // ★【0.03.45】派生語・熟語の 1000.01 / 1000.0001 のような小数の番号はそのまま（「1000-1」と表示）
+      if (Number.isFinite(n) && n > 0) { q.no = Math.round(n * 10000) / 10000; maxNo[q.category] = Math.max(maxNo[q.category] || 0, Math.floor(q.no)); }
       else delete q.no;
     }
   });

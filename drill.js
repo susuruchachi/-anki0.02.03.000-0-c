@@ -202,6 +202,7 @@ function drillHome() {
       ${d ? `<div class="drill-saved"><b>▶️ 途中経過があります</b><div class="hint-small">${d.r}周目 ・ 残り${left(d)}問</div><div class="drill-btns"><button class="btn btn-primary" onclick="drillResume(${jsArg(cat)})">続きから</button><button class="btn btn-secondary" onclick="drillDiscard(${jsArg(cat)})">途中経過を消す</button></div></div>` : ''}
       ${drillAiOk() ? '' : '<div class="hint-small drill-ng" style="margin-top:6px;">⚠️ AI が使えないため、単語帳の訳と同じ言葉だけを正解にします（言い換えの判定・意味のまとめ・4択・解説・質問は使えません）。設定 → 🤖 AI でキーを入れると使えます。</div>'}
       <button class="btn btn-start" style="margin-top:10px;" onclick="drillStart()" ${words + checks ? '' : 'disabled'}>🚀 ${d ? '最初から始める' : '開始'}</button>
+      <button class="btn btn-secondary" style="margin-top:8px;" onclick="vtOpen()">📄 テキストから問題を作る</button>
       ${others.length ? `<div class="hint-small" style="margin-top:10px;">ほかのフォルダーの途中経過：</div><div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:4px;">${others.map(k => `<button class="chip" onclick="drillSetCategory(${jsArg(k)})">📁 ${dE(k || 'すべて')}（${all[k].r}周目・残り${left(all[k])}）</button>`).join('')}</div>` : ''}
       <div class="hint-small" style="margin-top:8px;">・グループ（フォルダー）ごとに、単語の<b>全部の意味</b>を答えます（単語帳に並んでいる訳は全部。「完了、存続」「完了存続」のようにまとめて答えても OK）<br>・熟語・チャンク（communicate with A など）と、自動詞・他動詞を聞く問題は、通常のクイズで出ます<br>・間違えたら、その場でもう一度出ます。グループの最後に、そのグループで間違えた単語と Check!（Review Test）<br>・1周目で間違えた問題を2周目で…と、全部〇になるまで続けます<br>・正解・不正解の回数は、暗記テストだけで数えます（いつものレベル・成績とは別）</div>
     </div>`;
@@ -361,7 +362,7 @@ function drillSpeakA() { if (dcur && (dcur.it || dcur.ck) && typeof speakText ==
 
 // ---------------- 画面 ----------------
 function drillDraw() {
-  if (DS.hdr) { dst.h = `<div class="card drill-group"><b>📁 ${dE(DS.hdr.name)}</b><div class="hint-small">${DS.hdr.items.length}語${DS.hdr.chk.length ? ` ・ Check! ${DS.hdr.chk.length}問` : ''}</div></div>`; DS.hdr = null; }
+  if (DS.hdr) { dst.h = `<div class="card drill-group"><b>📁 ${dE(DS.hdr.name)}</b><div class="hint-small">${DS.hdr.items.length}語${DS.hdr.chk.length ? ` ・ Check! ${DS.hdr.chk.length}問` : ''}</div>${DS.hdr.intro && DS.r === 1 ? `<div class="drill-intro hint-small">📖 ${dE(DS.hdr.intro).replace(/\n/g, '<br>')}</div>` : ''}</div>`; DS.hdr = null; }
   const c = dcur; let b = '';
   const W = it => `<div class="drill-word">${dE(it.w)} <button class="chip" style="vertical-align:middle;" onclick="drillSpeakQ()" title="読み上げる">🔊</button></div>`;
   if (c.t === 'gread') {
@@ -474,7 +475,8 @@ async function drillChk(v) {
 function drillRelLeft(src, idx) {
   let s = src.slice(0, idx).split('\n').pop().replace(/\s+$/, '');
   if (/[(（]$/.test(s)) s = s.slice(0, -1);
-  return s.replace(/「[^」]*」/g, '').replace(/^.*[。、；;（(／/:：]/, '').trim();
+  const l = s.replace(/「[^」]*」/g, '').replace(/^.*[。、；;（(／/:：]/, '').trim();
+  return /[A-Za-z]/.test(l) ? l : ''; // 訳（日本語）の中の「（＝treasure）」は見出し語についてのもの
 }
 const drillSameWord = (a, w) => String(a).trim().toLowerCase() === String(w).trim().toLowerCase();
 function drillArrowWords(src, w) {
@@ -490,13 +492,16 @@ function drillArrowWords(src, w) {
 // 類義語：「= 単語」が、その見出し語そのものについてのもの（「by accident (= accidentally)」は by accident の言い換えなので使わない）。
 //  見出し語の派生語（accident と accidentally など）は類義語にしない
 function drillSynWords(src, w) {
-  const out = []; const re = /[=＝≒]\s*([A-Za-z][A-Za-z \-']*[A-Za-z])/g; let m;
+  const out = []; const re = /[=＝≒]\s*([A-Za-z][A-Za-z ,\-']*[A-Za-z])/g; let m;
   const lw = String(w).toLowerCase(), stem = lw.slice(0, Math.max(4, lw.length - 2));
   while ((m = re.exec(src))) {
-    const left = drillRelLeft(src, m.index), s = m[1].trim(), ls = s.toLowerCase();
+    const left = drillRelLeft(src, m.index);
     if (left && !drillSameWord(left, w)) continue;
-    if (ls === lw || ls.startsWith(stem) || lw.startsWith(ls.slice(0, Math.max(4, ls.length - 2)))) continue;
-    out.push(s);
+    m[1].split(',').map(x => x.trim()).filter(Boolean).forEach(s => {
+      const ls = s.toLowerCase();
+      if (ls === lw || ls.startsWith(stem) || lw.startsWith(ls.slice(0, Math.max(4, ls.length - 2)))) return;
+      if (!out.includes(s)) out.push(s);
+    });
   }
   return out;
 }

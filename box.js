@@ -206,7 +206,7 @@ function buildBoxCard(item) {
     _boxAnswerCache[item.id] = { text: item.answer, image: item.answerImage || null };
 
     const lvlStr = item.level === -1 ? 'しっかり' : 'LV '+item.level;
-    const noHTML = (item.no ? `<span class="card-no">No.${Number(item.no)}</span>` : '') + (item.stars ? `<span class="card-stars">${starsText(item.stars)}</span>` : '');
+    const noHTML = (item.no ? `<span class="card-no">No.${cardNoText(item.no)}</span>` : '') + (item.stars ? `<span class="card-stars">${starsText(item.stars)}</span>` : '');
     const badgeHTML = `<span class="badge ${isGrad ? 'badge-grad':'badge-level'}">${isGrad ? 'GRADUATE' : lvlStr}</span>`
       + (item.drillStats ? `<span class="badge badge-level" style="margin-left:4px;" title="暗記テストの正解・不正解">🧠 〇${Number(item.drillStats.c) || 0} ×${Number(item.drillStats.w) || 0}</span>` : ''); // ★【0.03.29】
     // ★【0.03.17】意味ごとのレベル
@@ -390,7 +390,7 @@ async function submitCardModal() {
     const item = db.find(x => x.id === _cardModalState.item.id) || _cardModalState.item;
     item.question = q; item.answer = a;
     if (note) item.note = note; else delete item.note;
-    if (no) item.no = no;
+    if (no && !(item.no && Math.floor(item.no) === no)) item.no = no; // 「1000-1」などはそのまま
     if (stars) item.stars = stars; else delete item.stars;
     touchCard(item);
     if (_cardModalState.qImage) item.questionImage = _cardModalState.qImage; else delete item.questionImage;

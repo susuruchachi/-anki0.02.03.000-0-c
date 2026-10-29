@@ -167,6 +167,12 @@ const KNOWN_POS_TAGS = ['名詞', '動詞', '他動詞', '自動詞', '形容詞
 function isKnownPosTag(label) {
   return KNOWN_POS_TAGS.includes(String(label || '').replace(/[①-⑳0-9０-９]/g, '').trim());
 }
+// ★【0.03.45】問題番号の表示（派生語の 1000.01 は「1000-1」、熟語の 1000.0001 は「1000」）
+function cardNoText(no) {
+  const n = Number(no); if (!Number.isFinite(n)) return '';
+  const i = Math.floor(n), k = Math.round((n - i) * 100);
+  return k > 0 ? `${i}-${k}` : String(i);
+}
 function parseStructuredAnswer(answerText) {
   if (!answerText) return null;
   const rawSegments = splitAnswerAlternatives(answerText, '/');

@@ -282,7 +282,7 @@ function renderBulkDelete() {
     <div id="bulkDelList" class="bulkdel-list">${cards.map(q => {
       const ok = bulkDelCanDelete(q);
       return `<label class="bulkdel-row${ok ? '' : ' ro'}"><input type="checkbox" data-id="${escAttr(q.id)}" ${st.sel.has(q.id) ? 'checked' : ''} ${ok ? '' : 'disabled'}>
-        <div style="min-width:0; flex:1;"><div class="bulkdel-q">${q.no ? `<span class="card-no">No.${Number(q.no)}</span>` : ''}${escapeHtml(String(q.question).slice(0, 120))}</div>
+        <div style="min-width:0; flex:1;"><div class="bulkdel-q">${q.no ? `<span class="card-no">No.${cardNoText(q.no)}</span>` : ''}${escapeHtml(String(q.question).slice(0, 120))}</div>
         <div class="hint-small">${escapeHtml(String(q.answer).slice(0, 80))}${st.sub && q.category !== st.cat ? `　📂 ${escapeHtml(q.category)}` : ''}${ok ? '' : '　🔒 閲覧専用'}</div></div></label>`;
     }).join('') || '<div class="hint-small" style="padding:12px;">問題がありません。</div>'}</div>
     <div class="plan-btns" style="margin-top:10px;">
