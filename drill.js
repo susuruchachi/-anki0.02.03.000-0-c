@@ -383,7 +383,7 @@ function drillAText(c) {
   const seg = parseStructuredAnswer(c.it.m);
   return seg ? seg.map(x => x.text).join('。') : c.it.m;
 }
-function drillSpeakQ() { if (dcur && (dcur.it || dcur.ck) && typeof speakText === 'function') speakText(drillQText(dcur)); }
+function drillSpeakQ() { if (dcur && (dcur.it || dcur.ck) && typeof speakText === 'function') speakText(typeof spoilerSafeSpeech === 'function' ? spoilerSafeSpeech(drillQText(dcur)) : drillQText(dcur)); } // ★【0.03.65】アクセント問題はネタバレしないように
 function drillSpeakA() { if (dView !== null && DH[dView]) { if (typeof speakText === 'function') speakText(DH[dView].a); return; } if (dcur && (dcur.it || dcur.ck) && typeof speakText === 'function') speakText(drillAText(dcur)); }
 
 // ---------------- 画面 ----------------

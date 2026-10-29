@@ -74,8 +74,11 @@ async function listenPlayCard(q, token) {
   const say = t => listenSpeak(t, token);
   if (listenIsCloze(q)) { _ls.phase = 'a'; listenDraw(); for (const l of listenClozeText(q)) await say(l); return; }
   _ls.phase = 'q'; listenDraw();
-  await say(String(q.question || '').replace(/\n/g, '。'));
-  if (Array.isArray(q.choices) && q.choices.length >= 2) {
+  // ★【0.03.65】アクセント・発音の問題は、英語の部分を読まない（読むと答えが分かる）。選択肢も読まない
+  const sound = typeof isSoundQuestion === 'function' && isSoundQuestion(q.question);
+  const qs = String(q.question || '').replace(/\n/g, '。');
+  if (sound) { const t = spoilerSafeSpeech(qs); if (t) await say(t); } else await say(qs);
+  if (!sound && Array.isArray(q.choices) && q.choices.length >= 2) {
     for (let k = 0; k < q.choices.length && _ls && _ls.token === token; k++) await say(`${k + 1}、${q.choices[k]}`);
   }
   await listenWait(gap, token);

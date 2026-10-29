@@ -52,6 +52,16 @@ function splitSpeechSegments(text) {
   return merged.filter(sg => sg.t.trim() !== '' && /[^\s.,。、・()（）\-]/.test(sg.t));
 }
 
+// ★【0.03.65】アクセント・発音の問題は、問題文を読み上げると答え（読み方）が分かってしまうので、英語の部分を「この語」と読む
+// （英語だけの問題文なら読み上げない）。答えは答え合わせのあとに読むのでそのまま
+const SOUND_QUESTION_RE = /アクセント|発音|強勢|音節|accent|stress|pronunciation|syllable/i;
+function isSoundQuestion(q) { return SOUND_QUESTION_RE.test(String(q || '')); }
+function spoilerSafeSpeech(text) {
+  const t = String(text || '');
+  if (!isSoundQuestion(t)) return t;
+  if (!/[\u3040-\u30ff\u4e00-\u9fff]/.test(t)) return '';
+  return t.replace(/[（(][^）)]*[A-Za-z][^）)]*[）)]/g, '').replace(/[A-Za-z\u00c0-\u024f][A-Za-z\u00c0-\u024f\u0300-\u036f'’\-]*(?:[ \t]+[A-Za-z\u00c0-\u024f][A-Za-z\u00c0-\u024f\u0300-\u036f'’\-]*)*/g, 'この語');
+}
 function speakText(text, options = {}) {
   if (!('speechSynthesis' in window) || localStorage.getItem('muteTTS') === 'true') return;
   window.speechSynthesis.cancel();
@@ -598,7 +608,7 @@ function loadQuizQuestion() {
   const noteHint = document.getElementById('lblNoteTyping'); if (noteHint) noteHint.style.display = 'none';
 
   if(document.getElementById('chkTTS').checked) {
-    speakText(qSpeech);
+    speakText(spoilerSafeSpeech(qSpeech));
   }
   // ★【0.03.02】テスト形式で選択肢があるカードは、記述式でも選択肢を問題文の下に表示する
   if (Array.isArray(cur.choices) && cur.choices.length && !cur._attrQ) {
