@@ -55,7 +55,7 @@ function listenSpeak(text, token) {
 const listenWait = (ms, token) => new Promise(r => { const t0 = Date.now(); const tick = () => { if (!_ls || _ls.token !== token || Date.now() - t0 >= ms) r(); else setTimeout(tick, 100); }; tick(); });
 
 // カードの読み上げ方
-function listenIsCloze(q) { return q.kind === 'cloze' || /（\s*　*\s*）|\(\s*\)|_{2,}|＿{2,}/.test(String(q.question || '')); }
+function listenIsCloze(q) { return q.kind === 'cloze' || (q.kind !== 'test' && Array.isArray(q.choices) === false) && /（\s*　*\s*）|\(\s*\)|_{2,}|＿{2,}/.test(String(q.question || '')); }
 function listenAnswerSpeech(ans) {
   const st = parseStructuredAnswer(ans);
   if (!st) return String(ans).replace(/\//g, '、');

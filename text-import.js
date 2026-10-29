@@ -101,8 +101,15 @@ function vtMeaning(s, head) {
     // 英単語の意味の行の先頭は必ず品詞（AI が「自起こる」のように空白を抜かすことがある）
     const m = ch.match(VT_POS_RE) || (ci === 0 && /^[\x00-\x7F’]+$/.test(String(head || '')) ? ch.match(/^(名|他|自|形|副|前|接|句|動|代|助)(?=[～〜(（\u3040-\u30ff\u4e00-\u9fff])/) : null);
     const pos = m ? VT_POS[m[1]] : '';
-    const body = m ? ch.slice(1).trim() : ch;
-    let senses = /[①②③④⑤⑥⑦⑧⑨]/.test(body) ? body.split(/[①②③④⑤⑥⑦⑧⑨]/).map(x => x.trim()).filter(Boolean) : vtSplitTop(body, '；;');
+    let body = m ? ch.slice(1).trim() : ch;
+    // ★【0.03.69】「未然形に下接、四段型。推量；意志」のように、「；」で並べた意味の前に「。」で終わる説明があれば、それも1つの項目にする
+    let lead = [];
+    if (!/[①②③④⑤⑥⑦⑧⑨]/.test(body) && vtSplitTop(body, '；;').length > 1) {
+      const sents = vtSplitTop(body.replace(/。/g, '。\u0001'), '\u0001');
+      const k = sents.findIndex(x => /[；;]/.test(x));
+      if (k > 0) { lead = sents.slice(0, k).map(x => x.replace(/\u0001/g, '').replace(/。$/, '').trim()).filter(Boolean); body = sents.slice(k).join('').replace(/\u0001/g, ''); }
+    }
+    let senses = lead.concat(/[①②③④⑤⑥⑦⑧⑨]/.test(body) ? body.split(/[①②③④⑤⑥⑦⑧⑨]/).map(x => x.trim()).filter(Boolean) : vtSplitTop(body, '；;'));
     if (!senses.length) senses = [body];
     const fix = t => vtSplitTop(t, '，,').join('　'); // 並べた訳は全角スペースで（それぞれ別の意味として答える）
     senses.forEach((t, i) => segs.push({ label: pos ? pos + (senses.length > 1 ? VT_CIRC[i] || '' : '') : '', text: fix(t) }));
@@ -186,7 +193,8 @@ function vtSectionName(title) {
   const t = String(title || '').trim();
   const m = t.match(/SECTION\s*(#?\s*\d+)\s*[「『]?([^」』]*)[」』]?/i);
   if (m) return `#${m[1].replace(/[#\s]/g, '')}${m[2] ? ' ' + m[2].trim() : ''}`;
-  return t.replace(/[「」『』]/g, ' ').replace(/\s+/g, ' ').trim();
+  // ★【0.03.69】番号の無い「SECTION 助動詞の識別」は「助動詞の識別」に
+  return t.replace(/^SECTION\s*/i, '').replace(/[「」『』]/g, ' ').replace(/\s+/g, ' ').trim() || t;
 }
 function vtCode(section) { const m = String(section).match(/#\d+/); return m ? m[0] : String(section).split(/\s+/)[0]; }
 // 読み取った結果から、作るカードの一覧（フォルダーはまだ作らない）

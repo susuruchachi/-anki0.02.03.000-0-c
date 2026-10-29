@@ -40,7 +40,7 @@ function speechLetters(text) {
 function cleanTextForSpeech(text) {
   return speechLetters(String(text || ''))
     .replace(/[\[\]［］]/g, ' ')
-    .replace(/\(\s*\)|（\s*）|\(　+\)|（　+）|_{2,}|＿{2,}/g, ' blank ')
+    .replace(/\(\s*\)|（\s*）|\(　+\)|（　+）|_{2,}|＿{2,}/g, (m, off, all) => /[\u3040-\u30ff\u4e00-\u9fff]/.test(all.slice(Math.max(0, off - 2), off) + all.slice(off + m.length, off + m.length + 2)) ? '、空欄、' : ' blank ') // ★【0.03.69】日本語の文の空欄は「空欄」と読む
     .replace(/[～〜~]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -373,22 +373,28 @@ function swapQuizEntry(q) {
 const ANSWER_SYMBOL_RE = /[\[\]［］【】～〜~…]|\.\.\./g;
 // ［ ］で囲んだ部分（言い換え）を省いた形
 function dropBracketParts(str) { return String(str || '').replace(/[\[［][^\]］]*[\]］]/g, ' '); }
-function normalizeAnswer(str) {
+// ★【0.03.69】「・」も区切り（「過去・詠嘆」は「詠嘆、過去」でも正解）。◯（活用の無い形）を含む答え（活用表）は並び順も見る
+function normalizeAnswer(str, keepOrder) {
   if(!str) return '';
   let s = foldKana(String(str).replace(/[Ａ-Ｚａ-ｚ０-９]/g, c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0)).toLowerCase().trim());
   s = s.replace(/擦/g, 'こす');
   // ★【0.03.06】［ ］・～・… などの記号は入力しなくてよい（中身だけ合っていれば正解）
   s = s.replace(ANSWER_SYMBOL_RE, ' ');
-  s = s.replace(/[、，＼＼ \u3000]+/g, ',');
-  return s.split(',').map(x=>x.trim()).filter(x=>x!=='').sort().join(',');
+  s = s.replace(/[◯○〇⚪]/g, '○');
+  s = s.replace(/[、，＼＼ \u3000・]+/g, ',');
+  const parts = s.split(',').map(x=>x.trim()).filter(x=>x!=='');
+  return (keepOrder ? parts : parts.sort()).join(',');
 }
 function isAnswerCorrect(input, correctAnswer) {
   // ★【0.03.00】構造式(SMILESの「/」)や漢文ブロックを区切り文字として誤分割しないようにマスクしてから分割する
   // ［ ］の中身まで書いた答え・［ ］の部分を省いた答えのどちらでも正解
   // ★【0.03.58】先頭の品詞タグ「(名詞)」などを外した形も正解（4択の選択肢はタグを外して出すので、正しいものを選んでも×になっていた）
   const untag = a => String(a).replace(/^\s*(?:\([^()]*\)\s*)+/, '');
-  const norms = splitAnswerAlternatives(correctAnswer).flatMap(a => [normalizeAnswer(a), normalizeAnswer(dropBracketParts(a)), normalizeAnswer(untag(a)), normalizeAnswer(dropBracketParts(untag(a)))]).filter(x => x !== '');
-  const inNorm = normalizeAnswer(input);
+  const ord = normalizeAnswer(correctAnswer, true).split(',').includes('○'); // 「（せ）・◯・き・し…」のように ◯ が1つの項目になっている活用表
+  const noParen = a => String(a).replace(/[（）]/g, ''); // ★【0.03.69】（せ）の（ ）は書かなくてもよい
+  const norms = splitAnswerAlternatives(correctAnswer).flatMap(a => [normalizeAnswer(a, ord), normalizeAnswer(dropBracketParts(a), ord), normalizeAnswer(untag(a), ord), normalizeAnswer(dropBracketParts(untag(a)), ord), normalizeAnswer(noParen(a), ord)]).filter(x => x !== '');
+  const inNorm = normalizeAnswer(input, ord);
+  if (ord && norms.includes(normalizeAnswer(noParen(input), true))) return true;
   return norms.includes(inNorm);
 }
 

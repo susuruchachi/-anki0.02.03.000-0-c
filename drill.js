@@ -83,11 +83,17 @@ function drillSenses(it) {
   drillSegs(it).forEach((seg, c) => {
     const p = drillPos(seg.label);
     const ch = String(seg.text).replace(/\s*[（(]\s*[=＝↔][^)）]*[)）]/g, '').trim();
-    const parts = /[①②③④⑤⑥]/.test(ch) ? ch.split(/[①②③④⑤⑥]/) : ch.split(/[；;]/);
+    const parts = /[①②③④⑤⑥]/.test(ch) ? ch.split(/[①②③④⑤⑥]/) : drillSplitTop(ch, '；;'); // ★【0.03.69】カッコの中の「；」では分けない
     // ★【0.03.47】元の試作と同じく、①②・；で分けた1つの意味の中に並べた訳は「，」でつないでおき、AI がまとめる（drillGroupSenses）
-    parts.forEach(x => { x = x.trim(); if (!x) return; const ws = splitAnswerMeanings(x); out.push({ p, t: (ws.length ? ws : [x]).join('，'), c }); });
+    // ★【0.03.69】「、」で区切った部分が長い（説明の文。「…が続き、かつ…」など）ときは、区切らずに1つの意味にする
+    parts.forEach(x => { x = x.trim(); if (!x) return; let ws = splitAnswerMeanings(x); if (ws.some(w => normalizeStructuredToken(w).length > 15)) ws = splitAnswerMeanings(x.replace(/、/g, '\u0002')).map(w => w.replace(/\u0002/g, '、')); out.push({ p, t: (ws.length ? ws : [x]).join('，'), c }); });
   });
   return out;
+}
+function drillSplitTop(s, seps) {
+  const out = []; let cur = '', d = 0;
+  for (const ch of String(s)) { if ('（(「［['.includes(ch)) d++; else if ('）)」］]'.includes(ch)) d = Math.max(0, d - 1); if (d === 0 && seps.includes(ch)) { out.push(cur); cur = ''; continue; } cur += ch; }
+  out.push(cur); return out;
 }
 function drillGetSn(it) { return DP[it.id] || (DP[it.id] = drillGroupSenses(it)); }
 // 「，」でつないだ訳を、ニュアンスの違う意味ごとに AI に分けてもらう（元の試作と同じ指示。結果は端末に保存して使い回す）。
@@ -140,15 +146,19 @@ function drillPartHits(v, sn) {
   const whole = normalizeStructuredToken(v);
   const parts = String(v).split(/[、,，\s　・／/]+/).filter(p => normalizeStructuredToken(p) !== '');
   if (!parts.length) return null;
-  const forms = sn.map(x => new Set(String(x.t).split(/[，,]/).flatMap(w => structuredTokenForms(w))));
+  const forms = sn.map(x => new Set([...String(x.t).split(/[，,]/).flatMap(w => structuredTokenForms(w)), ...structuredTokenForms(String(x.t).replace(/[，,]/g, '、'))]));
   const wi = forms.findIndex(f => f.has(whole)); // 区切りを含む訳（「現在の伝聞、婉曲」など）をそのまま書いたとき
   if (wi >= 0) return { hits: [wi], unknown: [] };
   const hits = [], unknown = [];
-  for (const p of parts) {
-    const n = normalizeStructuredToken(p);
-    const i = forms.findIndex(f => f.has(n));
-    const is = i >= 0 ? [i] : drillSplitJoined(n, forms);
-    if (!is) { unknown.push(p); continue; }
+  const find = p => { const n = normalizeStructuredToken(p); const i = forms.findIndex(f => f.has(n)); return i >= 0 ? [i] : drillSplitJoined(n, forms); };
+  // ★【0.03.69】まず「、」・空白で区切ったまとまりで探し（「体言・連体形に下接し」のように「・」「／」を含む訳があるため）、無ければ「・」「／」でも分ける
+  for (const big of String(v).split(/[、,，\s　]+/).filter(p => normalizeStructuredToken(p) !== '')) {
+    let is = find(big);
+    if (!is) {
+      const small = big.split(/[・／/]+/).filter(p => normalizeStructuredToken(p) !== '');
+      if (small.length > 1) { const rs = small.map(find); if (rs.every(Boolean)) is = rs.flat(); else { small.forEach((p, k) => { if (rs[k]) rs[k].forEach(x => { if (!hits.includes(x)) hits.push(x); }); else unknown.push(p); }); continue; } }
+    }
+    if (!is) { unknown.push(big); continue; }
     is.forEach(k => { if (!hits.includes(k)) hits.push(k); });
   }
   return { hits, unknown };
