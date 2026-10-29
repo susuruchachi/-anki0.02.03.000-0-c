@@ -14,7 +14,7 @@ const CORE_FILES = [
   './version-info.js', './release-notes.js', './config.js', './utils.js', './storage.js', './tree.js', './pages.js', './box.js',
   './quiz.js', './context-menu.js', './import-export.js', './batch-add.js', './scan-import.js', './shared.js', './stats.js',
   './social.js', './match.js', './safety.js', './updates.js', './auth.js', './main.js', './rich-content.js', './rich-editors.js',
-  './chem-search.js', './notify.js', './ai.js', './picker.js', './drill.js', './plan.js', './race.js', './text-import.js',
+  './chem-search.js', './notify.js', './ai.js', './picker.js', './drill.js', './plan.js', './race.js', './text-import.js', './listen.js',
   './icons/icon-192.png', './icons/icon-512.png', './icons/badge-96.png', './icons/apple-touch-icon.png', './icons/favicon-48.png'
 ];
 const CDN_HOSTS = ['cdn.jsdelivr.net', 'cdnjs.cloudflare.com', 'unpkg.com', 'www.gstatic.com', 'fonts.googleapis.com', 'fonts.gstatic.com'];

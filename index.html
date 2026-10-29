@@ -275,6 +275,14 @@ b.drill-ng { font-size: 1.3rem; }
 .guide-sec { border:1px solid var(--border); border-radius:10px; padding:4px 12px; margin-bottom:8px; background:var(--bg3); }
 .guide-sec > summary { cursor:pointer; font-weight:700; font-size:1rem; padding:8px 0; color:var(--primary); }
 .guide-sec[open] > summary { border-bottom:1px solid var(--border); margin-bottom:8px; }
+.listen-card { text-align:center; }
+.listen-q { font-size:1.6rem; font-weight:800; margin:14px 0 8px; word-break:break-word; }
+.listen-a { font-size:1.1rem; font-weight:700; color:var(--primary); margin:10px 0; min-height:1.5em; line-height:1.6; }
+.listen-a.hidden { visibility:hidden; }
+.listen-n { text-align:left; margin-top:6px; }
+.listen-ctrl { display:flex; justify-content:center; align-items:center; gap:12px; margin-top:14px; }
+.listen-ctrl .chip { font-size:1.2rem; padding:8px 14px; }
+.listen-play { width:auto; min-width:150px; }
 .plan-alert { display:flex; align-items:center; gap:8px; justify-content:space-between; margin:-4px -4px 10px; padding:10px 12px; border-radius:10px; background:rgba(245,158,11,.15); border:1px solid var(--warn); color:var(--text); font-weight:700; font-size:0.88rem; cursor:pointer; }
 .plan-alert.over { background:rgba(239,68,68,.15); border-color:var(--danger); }
 .plan-alert-go { flex-shrink:0; font-size:0.8rem; color:var(--primary); }
@@ -568,6 +576,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
         <button class="btn btn-accent home-sub-btn" style="flex:1;" onclick="startQuiz('tokkun')">🔥 集中特訓<span style="font-size:0.65rem; font-weight:500;">苦手・しっかりのみ</span></button>
         <button class="btn btn-success home-sub-btn" style="flex:1;" onclick="startQuiz('review')">♻️ ランダム復習<span style="font-size:0.65rem; font-weight:500;">卒業済みから出題</span></button>
       </div>
+      <button class="btn btn-secondary home-sub-btn" style="width:100%; margin-top:10px;" onclick="openListen()">🎧 聞き流し<span style="font-size:0.65rem; font-weight:500;">問題と答えを読み上げ続ける（この出題範囲で）</span></button>
     </div>
 
     <details class="card" id="homeDetailSettings">
@@ -758,6 +767,11 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
       </div>
       <div class="card race-card"><div class="setting-box-title">⚔️ フレンドとバトル <button class="chip" style="float:right;" onclick="renderRace()">🔄</button></div><div class="race-box"></div></div>
     </div>
+  </div>
+
+  <div id="pgListen" class="screen">
+    <div class="page-head"><h2>🎧 聞き流し</h2><div class="page-head-btns"><button class="chip" onclick="openPage('pgHome')">戻る</button></div></div>
+    <div id="listenApp"></div>
   </div>
 
   <div id="pgQuizResult" class="screen">
@@ -1437,6 +1451,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 <script src="plan.js"></script>
 <script src="race.js"></script>
 <script src="text-import.js"></script>
+<script src="listen.js"></script>
 <script src="shared.js"></script>
 <script src="main.js"></script>
 

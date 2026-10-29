@@ -102,12 +102,13 @@ function executePageTransition(pageId, isBackAction) {
   if (currentId !== pageId) {
     if (currentId === 'pgPublicCategories' && typeof stopPublicCategoriesWatch === 'function') stopPublicCategoriesWatch();
     if (currentId === 'pgShared' && pageId !== 'pgShared' && typeof stopSharedDocWatch === 'function') stopSharedDocWatch();
+    if (currentId === 'pgListen' && typeof listenPause === 'function') listenPause(); // 聞き流しは画面を出たら一時停止
   }
 
   document.querySelectorAll('.screen').forEach(s => { s.classList.remove('active'); s.style.display='none'; });
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   // ★【0.03.00】下部ナビの選択状態と、クイズ中の表示切り替え
-  const navOwner = { pgUpdates: 'pgHome', pgTutorial: 'pgHome', pgPublicCategories: 'pgBox', pgShared: 'pgBox', pgMatchHistory: 'pgOnlineMatch', pgFriends: 'pgBackup', pgCompareStats: 'pgBackup', pgQuizResult: 'pgHome' };
+  const navOwner = { pgUpdates: 'pgHome', pgTutorial: 'pgHome', pgPublicCategories: 'pgBox', pgShared: 'pgBox', pgMatchHistory: 'pgOnlineMatch', pgFriends: 'pgBackup', pgCompareStats: 'pgBackup', pgQuizResult: 'pgHome', pgListen: 'pgHome' };
   const navPage = navOwner[pageId] || pageId;
   document.querySelectorAll('.bnav-item').forEach(b => b.classList.toggle('active', b.dataset.page === navPage));
   const wasInQuiz = document.body.classList.contains('in-quiz');
@@ -123,6 +124,7 @@ function executePageTransition(pageId, isBackAction) {
   if(pageId==='pgBox') { const el = document.getElementById('navBox'); if(el) el.classList.add('active'); renderBox(); }
   if(pageId==='pgStats') { const el = document.getElementById('navStats'); if(el) el.classList.add('active'); renderStatsAndCharts(); }
   if(pageId==='pgOnlineMatch') { const el = document.getElementById('navOnlineMatch'); if(el) el.classList.add('active'); initOnlineMatchPage(); }
+  if(pageId==='pgListen' && typeof renderListenPage === 'function') renderListenPage();
   if(pageId==='pgPublicCategories') { loadPublicCategories(); loadMyPublicCategories(); }
   if(pageId==='pgCompareStats') { loadFriendsForComparison(); }
   if(pageId==='pgBackup') { const el = document.getElementById('navBackup'); if(el) el.classList.add('active'); if (typeof renderMySharedDocsSettings === 'function') renderMySharedDocsSettings(); if (typeof renderSnapshotList === 'function') renderSnapshotList(); if (typeof renderNotifySettings === 'function') renderNotifySettings(); if (typeof renderAiSettings === 'function') renderAiSettings(); }
