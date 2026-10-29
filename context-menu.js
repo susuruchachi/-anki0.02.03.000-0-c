@@ -324,7 +324,6 @@ async function runBulkDelete() {
 // クイズ・暗記テストの問題には出さない。暗記テストの2周目で、グループの切れ目ごとに読む（AI があればその文から4択も）
 // ================================================================
 function getCategoryIntroCard(cat) { return db.find(q => q.category === cat && q.kind === 'intro') || null; }
-function getCategoryIntro(cat) { const c = getCategoryIntroCard(cat); return c ? String(c.answer || '').trim() : ''; }
 function openCategoryIntroEditor(catName, info) {
   const cur = getCategoryIntroCard(catName);
   const panel = showCategoryPanel(`<div class="cat-edit-sec" style="margin-top:0;">📖 導入の文</div>

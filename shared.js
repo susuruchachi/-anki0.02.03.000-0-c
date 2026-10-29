@@ -333,22 +333,13 @@ async function loadFriendsForSharedPanel() {
   try {
     const snap = await firestore.collection('susuru_anki_profiles').doc(currentUser.uid).get();
     const friends = snap.exists ? (snap.data().friends || []) : [];
-    for (const fUid of friends) {
-      let fName = fUid;
-      if (friendNameCache[fUid]) {
-        fName = friendNameCache[fUid];
-      } else {
-        const fSnap = await firestore.collection('susuru_anki_profiles').doc(fUid).get();
-        if (fSnap.exists) {
-          fName = fSnap.data().displayName || fUid;
-          friendNameCache[fUid] = fName; // キャッシュに保存
-        }
-      }
+    const names = await Promise.all(friends.map(u => friendNameCache[u] ? friendNameCache[u] : friendNameOf(u).then(n => (friendNameCache[u] = n))));
+    friends.forEach((fUid, i) => {
       const opt = document.createElement('option');
       opt.value = fUid;
-      opt.innerText = fName;
+      opt.innerText = names[i];
       select.appendChild(opt);
-    }
+    });
   } catch(e) { console.warn("フレンドリストの読み込みに失敗", e); }
 }
 
@@ -606,6 +597,8 @@ async function leaveSharedCategory(docId, catName) {
 }
 
 let publicCategoriesCache = []; let unsubscribePublicCategories = null;
+function stopPublicCategoriesWatch() { if (unsubscribePublicCategories) { unsubscribePublicCategories(); unsubscribePublicCategories = null; } }
+function stopSharedDocWatch() { if (unsubscribeShared) { unsubscribeShared(); unsubscribeShared = null; } currentSharedDocId = null; currentSharedData = null; sharedFriendsLoaded = false; }
 
 async function loadPublicCategories() {
   const listDiv = document.getElementById('publicCategoriesList');
@@ -743,13 +736,6 @@ function findEditableSharedDocForCat(catName) {
   return info.shared && info.canEdit ? info.docId : null;
 }
 
-// フォルダー構造の変更を共有ドキュメントへ反映する（旧API名。中身は pushSharedDocFromLocal）
-async function syncSharedDocStructure(docId) { await pushSharedDocFromLocal(docId); }
-async function syncNewCategoryToShared(parentCatName, newCatName) {
-  if (!parentCatName) return;
-  const docId = findEditableSharedDocForCat(parentCatName);
-  if (docId) await pushSharedDocFromLocal(docId);
-}
 
 
 // ================================================================

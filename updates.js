@@ -47,19 +47,20 @@ async function loadUpdates() {
       : '<p style="text-align:center; color:var(--text3); font-size:0.9rem;">まだお知らせはありません。</p>';
     return;
   }
-  area.innerHTML = '';
+  const html = [];
   items.forEach(it => {
     const dateStr = it.date ? it.date.toLocaleDateString('ja-JP') : '';
     const delBtn = (isAdmin && it.fromCloud) ? `<button class="btn btn-danger" style="padding:4px 10px; font-size:0.75rem; margin-top:10px; width:auto;" onclick="deleteUpdate(${jsArg(it.id)})">🗑️ このお知らせを削除</button>` : '';
-    area.innerHTML += `<div class="card" style="margin-bottom:10px;">
+    html.push(`<div class="card" style="margin-bottom:10px;">
       <div class="update-banner-title" style="margin-bottom:8px;">🎉 ${escapeHtml(it.title)} (v${escapeHtml(it.version)}) 
         <span style="font-size:0.7rem; color:var(--text3); margin-left:auto;">${dateStr}</span>
       </div>
       <div style="font-size:0.85rem; line-height:1.5; color:var(--text); white-space:pre-wrap;">${escapeHtml(it.content)}</div>
       ${delBtn}
-    </div>`;
+    </div>`);
   });
-  if (fetchFailed) area.innerHTML += '<p style="text-align:center; color:var(--text3); font-size:0.75rem;">※ オンラインのお知らせは取得できませんでした</p>';
+  if (fetchFailed) html.push('<p style="text-align:center; color:var(--text3); font-size:0.75rem;">※ オンラインのお知らせは取得できませんでした</p>');
+  area.innerHTML = html.join(''); // まとめて1回で書く（1件ずつ += すると件数の2乗で重くなる）
   markLatestReleaseNoteSeen();
 }
 
@@ -185,13 +186,13 @@ async function loadUserReports() {
   list.innerHTML = '<p style="text-align:center; color:var(--text3); font-size:0.8rem;">読み込み中...</p>';
   try {
     const snap = await firestore.collection('susuru_anki_reports').orderBy('date','desc').limit(50).get();
-    list.innerHTML = ''; _adminReports = [];
+    _adminReports = []; const rows = [];
     if(snap.empty) { list.innerHTML = '<p style="text-align:center; color:var(--text3); font-size:0.8rem;">まだ報告はありません。</p>'; return; }
     snap.forEach(doc => {
       const d = doc.data();
       const dateStr = d.date && d.date.toDate ? d.date.toDate().toLocaleString('ja-JP') : '';
       const idx = _adminReports.push(Object.assign({ id: doc.id, dateStr }, d)) - 1;
-      list.innerHTML += `<div style="background:var(--bg3); padding:10px; border-radius:8px; border:1px solid var(--border);">
+      rows.push(`<div style="background:var(--bg3); padding:10px; border-radius:8px; border:1px solid var(--border);">
         <div style="font-size:0.75rem; color:var(--text2); display:flex; justify-content:space-between;">
           <span>👤 ${escapeHtml(d.name)} (v${escapeHtml(d.version)})</span>
           <span>${dateStr}</span>
@@ -201,8 +202,9 @@ async function loadUserReports() {
           <button class="btn btn-secondary" style="padding:4px 10px; font-size:0.75rem; width:auto;" onclick="copyUserReport(${idx})">📋 コピー</button>
           <button class="btn btn-danger" style="padding:4px 10px; font-size:0.75rem; width:auto;" onclick="deleteUserReport(${jsArg(doc.id)})">✅ 対応完了 (削除)</button>
         </div>
-      </div>`;
+      </div>`);
     });
+    list.innerHTML = rows.join('');
   } catch(e) { list.innerHTML = '<p style="color:var(--danger); font-size:0.8rem;">読み込みエラー</p>'; }
 }
 

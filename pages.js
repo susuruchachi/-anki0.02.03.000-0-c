@@ -57,6 +57,12 @@ function executePageTransition(pageId, isBackAction) {
     try { localStorage.setItem('susuru_anki_last_page', pageId); } catch(e) {}
   }
   if (pageId !== 'pgFriends') closeChat();
+  // ★【0.03.48】画面を出たら、その画面のリアルタイムの読み込みを止める（公開カテゴリーは全部のカードを含むので、
+  //  見ていないあいだも更新のたびに読み直して重くなっていた）
+  if (currentId !== pageId) {
+    if (currentId === 'pgPublicCategories' && typeof stopPublicCategoriesWatch === 'function') stopPublicCategoriesWatch();
+    if (currentId === 'pgShared' && pageId !== 'pgShared' && typeof stopSharedDocWatch === 'function') stopSharedDocWatch();
+  }
 
   document.querySelectorAll('.screen').forEach(s => { s.classList.remove('active'); s.style.display='none'; });
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));

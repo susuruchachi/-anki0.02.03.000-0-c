@@ -306,35 +306,6 @@ function cleanOcrBlock(text) {
   return String(text || '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
 }
 
-// 「行頭の数字（見出し語番号）+ 英単語」を新しい単語エントリーの開始とみなし、
-// OCRテキストを単語ごとのブロックに分割する。派生語（completion等）は行頭に番号が
-// 無いのでエントリーとして分離されず、直前の見出し語のブロックに含まれる。
-// 戻り値: [{question: 見出し語, answer: 残りのブロック(未整形)}, ...]
-function splitOcrIntoEntries(rawText) {
-  const text = String(rawText || '');
-  const lines = text.split(/\r?\n/);
-  // 数字の直後に多少OCRノイズ（記号など）が挟まっても英単語を拾えるように寛容にする
-  const boundaryRe = /^\s*(\d{1,4})[^A-Za-z]{0,15}([A-Za-z][A-Za-z'\-]*(?:\s[A-Za-z][A-Za-z'\-]*){0,3})/;
-  const marks = [];
-  lines.forEach((line, i) => {
-    const m = line.match(boundaryRe);
-    if (m) marks.push({ lineIdx: i, headword: m[2].trim() });
-  });
-  if (marks.length === 0) return [];
-  const entries = [];
-  for (let i = 0; i < marks.length; i++) {
-    const startLine = marks[i].lineIdx;
-    const endLine = i + 1 < marks.length ? marks[i + 1].lineIdx : lines.length;
-    const blockLines = lines.slice(startLine, endLine);
-    const headword = marks[i].headword;
-    const firstLine = blockLines[0];
-    const afterIdx = firstLine.indexOf(headword);
-    const restOfFirstLine = afterIdx !== -1 ? firstLine.slice(afterIdx + headword.length) : '';
-    const restBlock = [restOfFirstLine, ...blockLines.slice(1)].join('\n');
-    entries.push({ question: headword, answer: cleanOcrBlock(restBlock) });
-  }
-  return entries.filter(e => e.question && e.answer);
-}
 
 // ================================================================
 // ★【0.03.01】📚 単語帳取込：テキスト → カード候補への変換

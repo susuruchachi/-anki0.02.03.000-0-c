@@ -186,10 +186,6 @@ function planHandleTaskParam(url) {
   return ok;
 }
 if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', e => { if (e.data && e.data.type === 'open-url') planHandleTaskParam(e.data.url); });
-function planStartWords(cat) {
-  try { localStorage.setItem('susuru_anki_drill_cat', cat); } catch (e) {} // 暗記タブの出題範囲をその週の範囲に
-  openPage('pgDrill');
-}
 function planStartQuizFor(key, id) {
   if (id && !planUse(planById(id))) return;
   const t = planTasks().find(x => x.key === key);

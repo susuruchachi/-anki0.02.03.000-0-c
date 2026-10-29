@@ -286,14 +286,13 @@ async function loadAppFriends() {
     const friends = myProfileSnap.exists ? (myProfileSnap.data().friends || []) : [];
     if (friends.length === 0) { listDiv.innerHTML = '<p style="color:var(--text3); font-size:0.85rem; text-align:center;">フレンドはいません。</p>'; return; }
     listDiv.innerHTML = '';
-    for (const fUid of friends) {
-      const fProfSnap = await firestore.collection('susuru_anki_profiles').doc(fUid).get();
-      const fName = fProfSnap.exists ? fProfSnap.data().displayName : '未登録ユーザー';
+    const names = await Promise.all(friends.map(friendNameOf)); // ★【0.03.48】1人ずつ待たずに、まとめて読む
+    friends.forEach((fUid, i) => {
+      const fName = names[i];
       const div = document.createElement('div'); div.className = 'achieve-row';
-      _friendNames[fUid] = fName;
       div.innerHTML = `<div class="achieve-label">👤 ${escapeHtml(fName)}</div><div style="display:flex; gap:6px;">${friends.length > 1 ? `<button class="btn btn-secondary" style="width:auto; padding:6px 10px; font-size:0.8rem;" onclick="openFriendIntro(${jsArg(fUid)})" title="ほかのフレンドに紹介">🤝 紹介</button>` : ''}<button class="btn" style="width:auto; padding:6px 12px; font-size:0.8rem;" onclick="openChat(${jsArg(fUid)}, ${jsArg(fName)})">💬</button></div>`;
       listDiv.appendChild(div);
-    }
+    });
   } catch (e) { listDiv.innerHTML = '<p style="color:var(--danger); font-size:0.8rem; text-align:center;">エラーが発生しました。</p>'; }
   if (typeof renderRace === 'function') renderRace();
 }
@@ -342,33 +341,6 @@ async function sendChatMessage() {
   } catch (e) { alert("⚠️ エラーが発生しました。"); }
 }
 
-// ★ カテゴリー別ランキング
-async function loadCategoryRanking(catName) {
-  const listDiv = document.getElementById('categoryRankingList');
-  if (!currentUser) { listDiv.innerHTML = 'ログインしてください'; return; }
-  const d = getTodayStr();
-  try {
-    listDiv.innerHTML = '(読み込み中...)';
-    const snap = await firestore.collection('susuru_anki_category_scores').where('date', '==', d).where('category', '==', catName).get();
-    
-    if(snap.empty) { listDiv.innerHTML = `このカテゴリーはまだスコアがありません。`; return; }
-    
-    let scores = [];
-    snap.forEach(doc => { const x = doc.data(); if (x.mode !== 'drill') scores.push(x); });
-    scores.sort((a, b) => (b.score || 0) - (a.score || 0));
-    scores = scores.slice(0, 10);
-    
-    listDiv.innerHTML = '';
-    let rank = 1;
-    scores.forEach(data => {
-      listDiv.innerHTML += `<div class="card" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; padding:10px;"><span style="color:var(--warn); font-weight:bold; font-size:1.1rem;">#${rank}</span><span>${escapeHtml(data.name || 'Unknown')}</span><span style="color:var(--success); font-weight:bold;">${data.score || 0}問</span></div>`;
-      rank++;
-    });
-  } catch(e) {
-    console.error(e);
-    listDiv.innerHTML = '<span style="color:var(--danger)">ランキング取得エラー</span>';
-  }
-}
 
 // ★ 成績保存
 // ★【0.03.39】mode：'drill' なら暗記テストの成績として別に記録する（通常のクイズとは混ぜない）
@@ -410,16 +382,13 @@ async function loadFriendsForComparison() {
     const select = document.getElementById('selCompareFriend');
     select.innerHTML = '<option value="">フレンドを選択...</option>';
     
-    for (const friendUid of friends) {
-      try {
-        const friendSnap = await firestore.collection('susuru_anki_profiles').doc(friendUid).get();
-        const friendName = friendSnap.exists ? (friendSnap.data().displayName || friendUid) : friendUid;
-        const opt = document.createElement('option');
-        opt.value = friendUid;
-        opt.innerText = friendName;
-        select.appendChild(opt);
-      } catch(e) {}
-    }
+    const names = await Promise.all(friends.map(friendNameOf));
+    friends.forEach((friendUid, i) => {
+      const opt = document.createElement('option');
+      opt.value = friendUid;
+      opt.innerText = names[i];
+      select.appendChild(opt);
+    });
     
     const catSelect = document.getElementById('selCompareCategory');
     catSelect.innerHTML = '<option value="">🌐 全カテゴリー</option>';
