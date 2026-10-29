@@ -488,9 +488,12 @@ function drillDk() {
 // ---------------- Check!（Review Test） ----------------
 function drillPick(i) { if (dlock) return; drillFin(isAnswerCorrect(dst.op[i], dcur.ck.ans), dcur.ck.ans, ''); }
 async function drillChk(v) {
-  const k = dcur.ck, n = x => x.toLowerCase().replace(/[\s.．。、,，\/／・]/g, ''), sp = x => x.split(/[\/／,、]/).map(n).filter(Boolean).sort().join('|');
-  if (/^\d\.?(\s*[\/,]\s*\d\.?)*$/.test(k.ans)) return drillFin(v.replace(/\D/g, '') === k.ans.replace(/\D/g, ''), k.ans, '');
-  if (/^[A-Za-z0-9.\s\/'’-]+$/.test(k.ans)) return drillFin(sp(v) === sp(k.ans), k.ans, '');
+  // ★【0.03.51】空白・「、」「,」「／」などで区切って並べた答えは、順番を問わない（日本語は空白も区切り。英語は語句の中の空白は区切りにしない）
+  const k = dcur.ck, n = x => x.toLowerCase().replace(/[\s.．。、,，\/／・]/g, '');
+  const sp = (x, jp) => String(x).normalize('NFKC').toLowerCase().split(jp ? /[\s、,，\/・]+/ : /\s*[、,，\/]\s*/).map(s => s.replace(/[.．。]+$/, '').trim()).filter(Boolean).sort().join('|');
+  if (/^\d\.?(\s*[\/,、\s]\s*\d\.?)*$/.test(k.ans)) return drillFin((v.match(/\d/g) || []).sort().join('') === (k.ans.match(/\d/g) || []).sort().join(''), k.ans, '');
+  if (/^[A-Za-z0-9.,、\s\/'’-]+$/.test(k.ans)) return drillFin(sp(v) === sp(k.ans) || sp(v, true) === sp(k.ans, true) && !/\s/.test(k.ans.trim()), k.ans, '');
+  if (sp(v, true) === sp(k.ans, true)) return drillFin(true, k.ans, '');
   if (n(v) === n(k.ans) || sp(v) === sp(k.ans) || isAnswerCorrect(v, k.ans)) return drillFin(true, k.ans, '');
   if (!drillAiOk()) return drillFin(false, k.ans, '');
   drillBusy();
