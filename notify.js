@@ -326,8 +326,21 @@ function dismissUpdateBar() { if (_updateFound) _updateDismissed = _updateFound.
 async function applyAppUpdate() {
   try { if (typeof drillSave === 'function' && typeof _drillActive !== 'undefined' && _drillActive) drillSave(); } catch (e) {}
   try { if (typeof flushPendingSaves === 'function') flushPendingSaves(); } catch (e) {}
-  try { if (_swReg) await _swReg.update(); } catch (e) {}
-  setTimeout(() => location.reload(), 300);
+  const bar = document.getElementById('updateBar'); if (bar) bar.innerHTML = '<div style="flex:1;"><b>🔄 新しいバージョンを読み込んでいます…</b></div>';
+  // ★【0.03.60】新しいサービスワーカーに切り替わるのを待ってから読み込み直す（途中で読み込み直すと、古いファイルと新しいファイルが混ざることがあった）
+  let reloaded = false;
+  // アップデートで読み込み直したときは、週間プランの課題を自動で開かない（いた画面に戻る）
+  try { localStorage.setItem('susuru_anki_plan_autoopen', String(Date.now())); } catch (e) {}
+  const go = () => { if (reloaded) return; reloaded = true; if (document.body) document.body.classList.remove('in-quiz'); location.reload(); };
+  try {
+    if (navigator.serviceWorker) navigator.serviceWorker.addEventListener('controllerchange', go, { once: true });
+    if (_swReg) {
+      await _swReg.update();
+      const w = _swReg.installing || _swReg.waiting;
+      if (w) { w.addEventListener('statechange', () => { if (w.state === 'activated') setTimeout(go, 200); }); setTimeout(go, 5000); return; }
+    }
+  } catch (e) {}
+  setTimeout(go, 300);
 }
 function startUpdateWatch() {
   clearInterval(_updateTimer);
