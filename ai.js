@@ -451,7 +451,7 @@ async function aiRetryHint(cur, kind, given) {
 }
 
 // PDF・画像をカード候補の文字（見出し語<TAB>答え）に変換する
-async function aiReadVocabFile(file, onStatus) {
+async function aiReadVocabFile(file, onStatus, prompt) {
   const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
   if (file.size > 18 * 1024 * 1024) throw new Error(`「${file.name}」が大きすぎます（18MBまで）。ページを分けてください`);
   let mime = file.type || (isPdf ? 'application/pdf' : 'image/jpeg');
@@ -461,8 +461,11 @@ async function aiReadVocabFile(file, onStatus) {
   if (isPdf && !allAiKeys().gemini.length) throw new Error('PDF の読み取りには Google AI Studio（Gemini）のキーが必要です（写真なら OpenRouter でも読めます）');
   if (onStatus) onStatus(`🤖 「${file.name}」をAIで読み取り中...（ページが多いと1分ほどかかります）`);
   const text = await aiRequest('あなたは単語帳・問題集を暗記カードに変換する係です。指示に正確に従い、余計な説明は書きません。',
-    [{ text: VOCAB_AI_PROMPT }, { mime, data }], { needPdf: isPdf, maxTokens: 8192, timeout: 120000, totalTimeout: 180000 });
+    [{ text: prompt || VOCAB_TEXT_PROMPT }, { mime, data }], { needPdf: isPdf, maxTokens: 16000, timeout: 150000, totalTimeout: 240000 });
   return text.replace(/```[a-z]*\n?/g, '').trim();
+}
+// ★【0.03.50】テキスト版で読み取ったか（■グループ・[No.…] の書式）
+function isVocabTextFormat(t) { return /^\s*(■\s*グループ|\[No\.)/m.test(String(t || '')) && /^\s*意味\s*[：:]/m.test(String(t || ''));
 }
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {

@@ -1343,7 +1343,8 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
         <div class="hint-small" style="line-height:1.7;">
           ① 下のボタンでプロンプトをコピー<br>
           ② Claude などのAIに、単語帳の写真やPDFと一緒にプロンプトを送る<br>
-          ③ 返ってきた結果を下の「テキスト」欄に貼り付けて「📑 カード候補を作る」
+          ③ 返ってきた結果を下の「テキスト」欄に貼り付けて「📑 カード候補を作る」<br>
+          （AIにはページをそのまま書き写してもらい、カードへの組み替えはアプリがします。グループ・例文・Check! も取り込めます）
         </div>
         <button class="btn btn-secondary" style="margin-top:8px; font-size:0.85rem; padding:9px;" onclick="copyVocabAiPrompt()">📋 変換用プロンプトをコピー</button>
       </details>
@@ -1367,6 +1368,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
         <select id="selScanFormat" class="form-control" style="padding:8px; font-size:0.85rem;">
           <option value="auto">自動判定</option>
           <option value="delimited">1行1語（見出し語 タブ/カンマ 答え）</option>
+          <option value="text">テキスト版（■グループ・[No.]・意味：…。AIの読み取り結果）</option>
           <option value="teppeki">単語帳形式（番号＋見出し語・□派生語・品詞マーク）</option>
         </select>
       </div>

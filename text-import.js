@@ -50,6 +50,8 @@ function vtParse(text) {
       w = null; mode = ''; continue;
     }
     if (l.startsWith('■')) { if (!out.groups.length && !out.title) out.title = l.replace(/^■\s*/, ''); g = null; continue; }
+    // グループの見出しが無い単語帳：最初の [No.] で「単語」グループを作る
+    if (!g && /^\[No\./.test(l)) { g = out.groups.find(x => x.name === '単語') || null; if (!g) { g = { name: '単語', intro: '', items: [], checks: [] }; out.groups.push(g); } }
     if (!g) continue;
     if (/^（導入[：:]/.test(l)) { intro = l.replace(/^（導入[：:]\s*/, ''); if (introClosed(intro)) finishIntro(); continue; }
     if ((m = l.match(/^Check!?\s*[：:]\s*(.*)$/i))) { mode = 'check'; w = null; if (m[1]) pushCheck(m[1]); continue; }
@@ -67,7 +69,7 @@ function vtParse(text) {
       mode = m[1]; const v = m[2].trim();
       if (mode === '意味') w.mean = v;
       else if (mode === '品詞属性') w.attr = v;
-      else if (mode === '補足') { if (v) w.notes.push(v); }
+      else if (mode === '補足') { if (v) w.notes.push(v.replace(/^★\s*/, '')); }
       else if (mode === '表現') w.exprs.push(...vtSplitTop(v, '／'));
       else if (mode === '関連語注記') { if (v) w.related.push(v); }
       continue;
@@ -89,14 +91,15 @@ function vtParse(text) {
 }
 
 // 「名 ①価値 ②価値観　他 ～を重んじる」→「(名詞①)価値/(名詞②)価値観/(他動詞)～を重んじる」
-function vtMeaning(s) {
+function vtMeaning(s, head) {
   s = String(s || '').trim();
   if (!s) return '';
   const chunks = s.split(/[\s　]+(?=(?:名|他|自|形|副|前|接|句|動|代|助)(?:[\s　（(①②③④⑤⑥⑦⑧⑨]))/);
   const segs = [];
-  chunks.forEach(ch => {
+  chunks.forEach((ch, ci) => {
     ch = ch.trim(); if (!ch) return;
-    const m = ch.match(VT_POS_RE);
+    // 英単語の意味の行の先頭は必ず品詞（AI が「自起こる」のように空白を抜かすことがある）
+    const m = ch.match(VT_POS_RE) || (ci === 0 && /^[\x00-\x7F’]+$/.test(String(head || '')) ? ch.match(/^(名|他|自|形|副|前|接|句|動|代|助)(?=[～〜(（\u3040-\u30ff\u4e00-\u9fff])/) : null);
     const pos = m ? VT_POS[m[1]] : '';
     const body = m ? ch.slice(1).trim() : ch;
     let senses = /[①②③④⑤⑥⑦⑧⑨]/.test(body) ? body.split(/[①②③④⑤⑥⑦⑧⑨]/).map(x => x.trim()).filter(Boolean) : vtSplitTop(body, '；;');
@@ -116,7 +119,7 @@ function vtExpr(e, head) {
   if (e.startsWith('◆')) {
     const m = e.slice(1).trim().match(/^(.+?)「([^」]+)」(.*)$/);
     if (!m) return null;
-    return { type: 'phrase', q: m[1].trim().replace(/\*\*/g, ''), a: `(熟語)${m[2].trim()}${m[3].trim()}` };
+    return { type: 'phrase', q: m[1].trim().replace(/\*\*/g, ''), a: `(熟語)${vtSplitTop(m[2].trim(), '，,').join('　')}${m[3].trim()}` };
   }
   const m = e.replace(/^▶\s*/, '').match(/^(.+?)「([^」]+)」\s*$/);
   if (!m || !/[A-Za-z]/.test(m[1])) return null;
@@ -197,11 +200,11 @@ function vtCards(parsed, section) {
     if (g.intro) add({ folder, q: '📖 導入の文', a: g.intro, kind: 'intro' });
     g.items.forEach(w => {
       const base = parseInt(w.no, 10);
-      const ans = vtMeaning(w.mean);
+      const ans = vtMeaning(w.mean, w.w);
       if (ans) add({ folder, q: w.w, a: ans, note: [...w.notes, ...w.related.map(r => '関連：' + r)].join('\n'), stars: w.stars, no: Number.isFinite(base) ? base : null, head: w.w, mean: w.mean });
       const exprs = w.exprs.map(e => ({ e, head: w.w, mean: w.mean }));
       w.derived.forEach(d => {
-        const a = vtMeaning(d.mean);
+        const a = vtMeaning(d.mean, d.w);
         if (a) add({ folder, q: d.w, a, note: d.notes.join('\n'), stars: d.stars, no: Number.isFinite(base) ? base + d.k / 100 : null, head: d.w, mean: d.mean });
         d.exprs.forEach(e => exprs.push({ e, head: d.w, mean: d.mean }));
       });
@@ -272,6 +275,8 @@ function vtOpen() {
   const A = document.getElementById('drillApp');
   A.innerHTML = `<div class="card"><div class="setting-box-title">📄 テキストから問題を作る</div>
     <div class="hint-small">単語帳を書き起こしたテキストを貼るか、.txt ファイルを選んでください。読み取った問題は、暗記テストにもクイズにも使えるカードとして保存します。<br>読み取れる行：# SECTION … ／ ■グループ：… ／（導入：…）／ [No.1000] value ★★ ／ 意味：名 ①価値 ②価値観　他 ～を重んじる ／ 補足： ／ 表現：◆熟語「訳」／▶ 例文「訳」 ／ 関連語注記： ／ 派生語：（1000-1 valuable｜形 貴重な／★メモ）／ Check!：（● 問題 → 答え）</div>
+    <div class="drill-sub"><label class="chip" style="cursor:pointer;">🤖 PDF・写真をAIで読み取る<input type="file" id="vtAiFile" accept="image/*,application/pdf" multiple style="display:none;"></label><button class="chip" onclick="vtCopyPrompt()">📋 ほかのAIに頼むプロンプトをコピー</button></div>
+    <div id="vtAiStatus" class="hint-small" style="margin-top:4px;"></div>
     <textarea id="vtText" class="form-control" rows="9" style="margin-top:8px;" placeholder="ここに貼り付け">${dE((_vt && _vt.text) || '')}</textarea>
     <input type="file" id="vtFile" accept=".txt,.md,text/plain" class="form-control" style="margin-top:6px;">
     <label class="section-label" style="font-weight:500; margin-top:8px;">📁 保存先（親フォルダー）</label>
@@ -283,7 +288,27 @@ function vtOpen() {
   const sel = document.getElementById('vtParent');
   const def = (_vt && _vt.parent !== undefined) ? _vt.parent : (categories.includes('鉄壁') ? '鉄壁' : '');
   sel.value = def;
+  document.getElementById('vtAiFile').onchange = e => vtAiRead([...e.target.files]);
   document.getElementById('vtFile').onchange = e => { const f = e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = () => { document.getElementById('vtText').value = r.result; vtPreview(); }; r.readAsText(f); };
+}
+// ★【0.03.50】PDF・写真を AI でテキスト版に書き写して、そのまま読み取る
+async function vtAiRead(files) {
+  const st = document.getElementById('vtAiStatus');
+  if (!files.length) return;
+  if (typeof aiAvailable !== 'function' || !aiAvailable()) { st.innerHTML = '<span class="drill-ng">AI のキーが設定されていません（⚙️ 設定 →「🤖 AI」。PDF は Gemini のキー）</span>'; return; }
+  const ta = document.getElementById('vtText');
+  try {
+    for (let i = 0; i < files.length; i++) {
+      const t = await aiReadVocabFile(files[i], msg => { st.textContent = `(${i + 1}/${files.length}) ${msg}`; });
+      ta.value = (ta.value.trim() ? ta.value.trim() + '\n\n' : '') + t;
+    }
+    st.textContent = '✅ 読み取りました。下の結果を確かめてから保存してください（テキストは直せます。直したら「🔍 読み取る」）';
+    vtPreview();
+  } catch (e) { st.innerHTML = `<span class="drill-ng">⚠️ ${dE(e.message || '読み取りに失敗しました')}</span>`; }
+}
+async function vtCopyPrompt() {
+  try { await navigator.clipboard.writeText(VOCAB_TEXT_PROMPT); showAppToast('📋 プロンプトをコピーしました。AI にページと一緒に送って、返ってきたテキストを貼ってください'); }
+  catch (e) { const ta = document.getElementById('vtText'); ta.value = VOCAB_TEXT_PROMPT; ta.select(); alert('コピーできなかったので、テキスト欄に入れました。全部選んでコピーしてください（貼るときは消してから）。'); }
 }
 function vtPreview() {
   const text = document.getElementById('vtText').value;
