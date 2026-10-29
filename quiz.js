@@ -279,7 +279,7 @@ function recordQuizOrderProgress(cur) {
 }
 
 const QUIZ_PREF_KEY = 'susuru_anki_quiz_prefs';
-const QUIZ_PREF_IDS = ['selQuizMode', 'selQuizSpeed', 'selHintMode', 'chkFocusMode', 'selQuizOrder', 'numQCount', 'numTimeLimit', 'numAutoNext', 'numGradThreshold', 'chkTTS', 'chkTimeAttack', 'chkIncludeGrad', 'chkSwapQA'];
+const QUIZ_PREF_IDS = ['selQuizMode', 'selQuizSpeed', 'selHintMode', 'chkFocusMode', 'selQuizOrder', 'numQCount', 'numTimeLimit', 'numAutoNext', 'numGradThreshold', 'chkTTS', 'chkTimeAttack', 'chkIncludeGrad', 'chkSwapQA', 'chkVerbAttr'];
 function saveQuizPrefs() {
   const o = {};
   QUIZ_PREF_IDS.forEach(id => { const el = document.getElementById(id); if (el) o[id] = el.type === 'checkbox' ? el.checked : el.value; });
@@ -462,7 +462,52 @@ async function startQuiz(modeType = 'normal') {
 
   // 問題と答えの入れ替え（意味ごとに分けたあとなので「意味 → 見出し語」になる）
   if (document.getElementById('chkSwapQA').checked) quizPool = quizPool.map(swapQuizEntry);
+  quizPool = arrangeVerbFlow(quizPool);
   openPage('pgQuizPlayer'); loadQuizQuestion();
+}
+
+// ★【0.03.40】動詞（自動詞・他動詞のタグがあるカード）は、自動詞の意味 → 他動詞の意味 → 「自動詞？他動詞？自他両用？」→
+//  （両方あるとき）意味ごとに「自動詞？他動詞？」→ その動詞の熟語・チャンク（communicate with A など。登録順）の順に続けて出す。
+//  自動詞・他動詞を聞く問題は、どの形式でも選択式。レベルは動かさない（正解数・学習記録には入る）
+function verbAttrSegs(card) {
+  const st = parseStructuredAnswer(card && card.answer);
+  if (!st || st.some(s => /句動詞|熟語|成句/.test(s.label))) return null;
+  const segs = st.filter(s => /自動詞|他動詞/.test(s.label));
+  return segs.length ? segs : null;
+}
+function verbAttrEntries(card) {
+  const segs = verbAttrSegs(card); if (!segs) return [];
+  const ji = segs.some(s => /自動詞/.test(s.label)), ta = segs.some(s => /他動詞/.test(s.label));
+  const base = { category: card.category, note: card.note, _sourceId: card.id, _attrQ: true, level: 0, correct: 0, incorrect: 0 };
+  const out = [{ ...base, id: card.id + '#attr', question: `${card.question}\nこの動詞は？`, answer: ji && ta ? '自他両用' : ji ? '自動詞' : '他動詞', choices: ['自動詞', '他動詞', '自他両用'], _senseKey: '#attr' }];
+  if (ji && ta) segs.forEach((s, i) => out.push({ ...base, id: card.id + '#attr' + i, question: `${card.question}\n「${stripParens(s.text).replace(/\s+/g, ' ').trim()}」の意味のときは？`, answer: /自動詞/.test(s.label) ? '自動詞' : '他動詞', choices: ['自動詞', '他動詞'], _senseKey: '#attr' + i }));
+  return out;
+}
+function arrangeVerbFlow(pool) {
+  if (window.currentOnlineMatch || !pool.length) return pool;
+  const el = document.getElementById('chkVerbAttr'); if (el && !el.checked) return pool;
+  const byId = new Map(db.map(q => [q.id, q]));
+  const src = e => byId.get(e._sourceId || e.id);
+  const verbs = new Map(); // 動詞の見出し語（小文字）→ カード
+  pool.forEach(e => { const c = src(e); if (c && !e._attrQ && verbAttrSegs(c) && /^[A-Za-z][A-Za-z'-]*$/.test(String(c.question).trim())) verbs.set(String(c.question).trim().toLowerCase(), c); });
+  if (!verbs.size) return pool;
+  const verbOfPhrase = e => { const c = src(e); if (!c || verbs.has(String(c.question).trim().toLowerCase())) return null; const w = String(c.question).trim().toLowerCase().split(/\s+/); return w.length > 1 && verbs.has(w[0]) ? verbs.get(w[0]) : null; };
+  const groups = new Map(); const out = [];
+  pool.forEach(e => {
+    const c = src(e); const v = c && verbs.get(String(c.question).trim().toLowerCase()) === c ? c : verbOfPhrase(e);
+    if (!v) { out.push(e); return; }
+    let g = groups.get(v.id);
+    if (!g) { g = { v, senses: [], phrases: [] }; groups.set(v.id, g); out.push(g); }
+    (v === c ? g.senses : g.phrases).push(e);
+  });
+  const ord = sortCardsByNumber(db.slice()); const pos = new Map(ord.map((q, i) => [q.id, i]));
+  const jiFirst = e => /自動詞/.test(e._senseLabel || '') ? 0 : /他動詞/.test(e._senseLabel || '') ? 1 : 2;
+  return out.flatMap(x => {
+    if (!x.v) return [x];
+    const senses = x.senses.slice().sort((a, b) => jiFirst(a) - jiFirst(b));
+    const phrases = x.phrases.slice().sort((a, b) => (pos.get(a._sourceId || a.id) || 0) - (pos.get(b._sourceId || b.id) || 0));
+    return [...senses, ...(senses.length ? verbAttrEntries(x.v) : []), ...phrases];
+  });
 }
 
 function loadQuizQuestion() {
@@ -513,7 +558,7 @@ function loadQuizQuestion() {
     speakText(qSpeech);
   }
   // ★【0.03.02】テスト形式で選択肢があるカードは、記述式でも選択肢を問題文の下に表示する
-  if (Array.isArray(cur.choices) && cur.choices.length) {
+  if (Array.isArray(cur.choices) && cur.choices.length && !cur._attrQ) {
     const chDiv = document.createElement('div');
     chDiv.className = 'quiz-card-choices';
     chDiv.innerText = cur.choices.join(' ／ ');
@@ -527,6 +572,7 @@ function loadQuizQuestion() {
   if (richAnswer && ['desc', 'minhaya', 'tap'].includes(mode)) mode = 'self';
   // ★【0.03.05】「自己申告」形式のカード（答えが列挙などで文字入力に向かない）は、入力モードでは自己申告で出題する
   if (cur.kind === 'self' && ['desc', 'minhaya', 'tap'].includes(mode)) mode = 'self';
+  if (cur._attrQ) mode = 'choice'; // ★【0.03.40】自動詞・他動詞を聞く問題は、どの形式でも選択式
   currentRoundMode = mode;
   ['boxChoiceArea','boxDescArea','boxMinhayaArea','boxSelfArea', 'boxTapArea'].forEach(id=>document.getElementById(id).style.display='none');
   document.getElementById('btnQuizAction').style.display='inline-flex'; document.getElementById('btnQuizPass').style.display='inline-flex';
@@ -569,7 +615,7 @@ function loadQuizQuestion() {
   hb.style.display = 'none'; hb.innerHTML = '';
   const speed = document.getElementById('selQuizSpeed').value;
   // ★【0.03.08】ヒントのオン・オフ（自動＝「すごい」以外はオン）
-  const hintsOn = hintsEnabled(speed);
+  const hintsOn = hintsEnabled(speed) && !cur._attrQ;
   quizHintState = hintsOn ? buildHintStages(cur, mode, aStructured, richAnswer) : { stages: [], shown: 0 };
   const hintBtn = document.getElementById('btnQuizHint');
   if (hintBtn) hintBtn.style.display = (quizHintState.stages.length && !window.currentOnlineMatch) ? 'inline-flex' : 'none';
@@ -846,7 +892,7 @@ function buildFourChoices(cur) {
     options = [correctPrimary, ...buildChoiceCandidates(cur, correctPrimary).slice(0, 3)];
     while (options.length < 4) options.push(`選択肢_${Math.floor(Math.random()*1000)}`);
   }
-  options.sort(() => Math.random() - 0.5);
+  if (!cur._attrQ) options.sort(() => Math.random() - 0.5); // 自動詞・他動詞は決まった順
 
   options.forEach((text, i) => {
     const btn = document.createElement('button'); btn.className = 'choice-btn';

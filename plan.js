@@ -176,6 +176,7 @@ function planStartQuiz(cards) {
   currentCombo = 0; todayCorrectCount = 0; currentQuizOrderScope = null;
   quizPool = subset; quizIndex = 0;
   if (document.getElementById('chkSwapQA').checked) quizPool = quizPool.map(swapQuizEntry);
+  quizPool = arrangeVerbFlow(quizPool);
   openPage('pgQuizPlayer'); loadQuizQuestion();
 }
 // 暗記テストで全部〇になったとき（drill.js から）
