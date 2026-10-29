@@ -593,6 +593,10 @@ function loadQuizQuestion() {
   currentStructuredAnswer = aStructured;
 
   document.getElementById('lblQuizProgress').innerText = `Q ${quizIndex+1}/${quizPool.length}`;
+  { // ★【0.03.68】解いているときも問題番号を出す
+    const nEl = document.getElementById('lblQuizCardNo'), src = cur && (db.find(q => q.id === (cur._sourceId || cur.id)) || cur);
+    if (nEl) { const on = src && showsCardNo(src); nEl.style.display = on ? '' : 'none'; nEl.textContent = on ? `No.${cardNoText(src.no)}` : ''; }
+  }
   const qEl = document.getElementById('lblQuizQuestion');
     let qDisplay = cur.question, qSpeech = cur.question;
     if (qStructuredSelf) { qDisplay = formatStructuredAnswerHTML(qStructuredSelf); qSpeech = qStructuredSelf.map(s => s.text).join('。'); }

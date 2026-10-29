@@ -281,7 +281,7 @@ function drillStartNow() {
   const all = drillLoadAll();
   if (all[cat] && !confirm('このフォルダーの途中経過を消して、最初から始めますか？')) return;
   DS = { cat, r: 1, gi: 0, miss: new Map(), gm: [], rv: false, hdr: null, ct: {}, sp: {}, rec: {} };
-  DQ = []; DH = []; dView = null; drillSetActive(true); drillPop();
+  DQ = []; DH = []; dView = null; drillHistStore(); drillSetActive(true); drillPop();
 }
 function drillSer(s) { return s.t === 'q' ? { t: 'q', id: s.it.id, retry: s.retry } : s.t === 'c' ? { t: 'c', key: s.ck.key, retry: s.retry } : s.t === 'msg' ? { t: 'msg', h: s.h } : { t: s.t, g: DG.indexOf(s.g) }; }
 function drillDe(o) {
@@ -304,7 +304,7 @@ function drillResumeNow(cat) {
     drillBuild(d.cat && categories.includes(d.cat) ? d.cat : '');
     DS = { cat: d.cat || '', r: d.r, gi: d.gi, rv: d.rv, miss: new Map(), gm: (d.gm || []).map(i => DI[i]).filter(Boolean), hdr: d.hg >= 0 ? DG[d.hg] : null, ct: d.ct || {}, sp: {}, rec: d.rec || {} };
     (d.miss || []).map(drillDe).filter(Boolean).forEach(x => DS.miss.set(dKey(x), x));
-    DQ = (d.Q || []).map(drillDe).filter(Boolean); DH = []; dView = null;
+    DQ = (d.Q || []).map(drillDe).filter(Boolean); DH = drillHistLoad(DS.cat); dView = null;
     drillSetActive(true); drillPop();
   } catch (e) { alert('保存データを読み込めませんでした'); drillHome(); }
 }
@@ -338,6 +338,7 @@ function drillEndRound() {
   if (!L.length) {
     { const all = drillLoadAll(); delete all[DS.cat || '']; drillStoreAll(all); }
     drillSetActive(false);
+    DH = []; drillHistStore();
     if (typeof planOnDrillPassed === 'function') planOnDrillPassed(DS.cat); // ★【0.03.27】週間プランの「単語」達成
     A.innerHTML = `<div class="card"><b>🎉 ${DS.r}周目で全問〇になりました</b><p>【合格】おめでとうございます。</p><button class="btn btn-secondary" onclick="drillHome()">戻る</button></div>`;
     return;
@@ -408,6 +409,14 @@ function drillLeftText() {
   const g = DG[n.gi];
   return `${DS.r}周目 ・ 📁 ${g ? `${dE(g.name)}（${n.gi + 1}/${DG.length}）` : 'グループ'} 残り<b>${n.group}</b>問 ・ 🔁 全体 残り<b>${n.all}</b>問`;
 }
+// ★【0.03.68】解説の履歴はフォルダーごとにこの端末に保存（一時離脱・再読み込みのあとも戻れる）
+const DRILL_HIST_KEY = 'susuru_anki_drill_hist', DRILL_HIST_MAX = 60;
+function drillHistLoad(cat) { try { const o = JSON.parse(localStorage.getItem(DRILL_HIST_KEY) || '{}') || {}; return Array.isArray(o[cat || '']) ? o[cat || ''] : []; } catch (e) { return []; } }
+function drillHistStore() {
+  if (!DS || DS.cat === undefined) return;
+  try { const o = JSON.parse(localStorage.getItem(DRILL_HIST_KEY) || '{}') || {}; if (DH.length) o[DS.cat || ''] = DH; else delete o[DS.cat || '']; localStorage.setItem(DRILL_HIST_KEY, JSON.stringify(o)); } catch (e) {}
+}
+function drillHistGo(i) { if (i >= 0 && i <= drillHistLimit()) { dView = i; drillDraw(); const a = document.getElementById('drillApp'); if (a) a.scrollIntoView({ block: 'start' }); } }
 // ★【0.03.64】前の問題の解説を見返す。進めるのは、もう解いた問題の解説まで（その先は今の問題に戻る）
 function drillHistLimit() { return DH.length - 1 - (dst.ph === 9 ? 1 : 0); }
 function drillHistBack() {
@@ -424,13 +433,16 @@ function drillHistHTML() {
   return `<div class="drill-hist-badge">📜 前の解説を見ています（${dView + 1} / ${lim + 1}問目）</div>${h.html}
     <div class="drill-hist-nav"><button class="btn btn-secondary" style="flex:1;" onclick="drillHistBack()" ${dView > 0 ? '' : 'disabled'}>◀ 前の解説</button>
     ${dView < lim ? '<button class="btn btn-secondary" style="flex:1;" onclick="drillHistFwd()">次の解説 ▶</button>' : ''}
-    <button class="btn btn-primary" style="flex:1;" onclick="drillHistClose()">↩ 今の問題に戻る</button></div>`;
+    <button class="btn btn-primary" style="flex:1;" onclick="drillHistClose()">↩ 今の問題に戻る</button></div>
+    <details class="drill-hist-list"${dst.histOpen ? ' open' : ''} ontoggle="dst.histOpen = this.open"><summary>📋 解いた問題の一覧から選ぶ（${lim + 1}問）</summary>
+      ${DH.slice(0, lim + 1).map((x, i) => ({ x, i })).reverse().map(({ x, i }) => `<button type="button" class="drill-hist-item${i === dView ? ' cur' : ''}" onclick="drillHistGo(${i})"><span class="${x.ok ? 'drill-ok' : 'drill-ng'}">${x.ok ? '〇' : '×'}</span>${x.no ? `<span class="card-no">No.${dE(x.no)}</span>` : ''}<span class="drill-hist-w">${dE(String(x.w || '').slice(0, 60))}</span></button>`).join('')}
+    </details>`;
 }
 function drillDraw() {
   if (dView !== null && !DH[dView]) dView = null;
   if (DS.hdr) { dst.h = `<div class="card drill-group"><b>📁 ${dE(DS.hdr.name)}</b><div class="hint-small">${DS.hdr.items.length}語${DS.hdr.chk.length ? ` ・ Check! ${DS.hdr.chk.length}問` : ''}</div>${DS.hdr.intro && DS.r === 1 ? `<div class="drill-intro hint-small">📖 ${dE(DS.hdr.intro).replace(/\n/g, '<br>')}</div>` : ''}</div>`; DS.hdr = null; }
   const c = dcur; let b = '';
-  const W = it => `<div class="drill-word">${dE(it.w)} <button class="chip" style="vertical-align:middle;" onclick="drillSpeakQ()" title="読み上げる">🔊</button></div>`;
+  const W = it => `${showsCardNo(it.card) ? `<div class="card-no drill-no">No.${dE(cardNoText(it.card.no))}</div>` : ''}<div class="drill-word">${dE(it.w)} <button class="chip" style="vertical-align:middle;" onclick="drillSpeakQ()" title="読み上げる">🔊</button></div>`;
   if (dView !== null) b = drillHistHTML();
   else if (c.t === 'gread') {
     const q = dst.giq, intro = `<div class="drill-intro">${dE(c.g.intro).replace(/\n/g, '<br>')}</div>`;
@@ -689,7 +701,9 @@ async function drillFin(ok, ans, tip) {
     <div>【公式の答え】 <button class="chip" onclick="drillSpeakA()" title="答えを読み上げる">🔊</button> ${official}</div>
     ${ns.length ? `<p>【解説・注意点】<br>${ns.map(dE).join('<br>')}</p>` : ''}`;
   // ★【0.03.64】解説の履歴（「◀ 前の解説」で見返す。最大100問）
-  DH.push({ html: `<div class="card ${ok ? 'drill-ok-card' : 'drill-ng-card'}">${core}</div>`, a: drillAText(c) }); if (DH.length > 100) DH.shift();
+  DH.push({ html: `<div class="card ${ok ? 'drill-ok-card' : 'drill-ng-card'}">${core}</div>`, a: drillAText(c), w: drillQText(c), ok: !!ok, no: c.it && showsCardNo(c.it.card) ? cardNoText(c.it.card.no) : '' });
+  if (DH.length > DRILL_HIST_MAX) DH.splice(0, DH.length - DRILL_HIST_MAX);
+  drillHistStore();
   dView = null;
   dst.res = `<div class="card ${ok ? 'drill-ok-card' : 'drill-ng-card'}">${core}
     <div class="drill-btns"><button class="btn btn-primary" onclick="drillPop()">次</button>${drillAiOk() ? `<button class="btn btn-secondary" onclick="drillQo()">💬 質問する${drillQaList(c).length ? `（前の質問 ${drillQaList(c).length}）` : ''}</button>` : (drillQaList(c).length ? `<button class="btn btn-secondary" onclick="drillQo()">💬 前の質問（${drillQaList(c).length}）</button>` : '')}</div></div>`;
