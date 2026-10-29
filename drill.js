@@ -111,18 +111,27 @@ function drillIsRepeat(v, sn, cv) {
 }
 // AI を使わずに分かる答え（単語帳の訳と同じ言葉だけ）。答えた言葉が全部どれかの意味に当たれば、その意味の番号
 function drillLocalHits(v, sn) {
+  const r = drillPartHits(v, sn);
+  return r && !r.unknown.length ? r.hits : null;
+}
+// ★【0.03.43】答えを区切った語句ごとに、単語帳の訳と同じものはその意味の番号に（hits）、それ以外は unknown に分ける。
+//  単語帳の訳と同じ言葉は AI に回さず、必ず〇にする（AI が取り違えて「単語帳に無い」「意味が違う」にすることがあったため）
+function drillPartHits(v, sn) {
+  const whole = normalizeStructuredToken(v);
   const parts = String(v).split(/[、,，\s　・／/]+/).filter(p => normalizeStructuredToken(p) !== '');
   if (!parts.length) return null;
   const forms = sn.map(x => new Set(String(x.t).split(/[，,]/).flatMap(w => structuredTokenForms(w))));
-  const hits = [];
+  const wi = forms.findIndex(f => f.has(whole)); // 区切りを含む訳（「現在の伝聞、婉曲」など）をそのまま書いたとき
+  if (wi >= 0) return { hits: [wi], unknown: [] };
+  const hits = [], unknown = [];
   for (const p of parts) {
     const n = normalizeStructuredToken(p);
     const i = forms.findIndex(f => f.has(n));
     const is = i >= 0 ? [i] : drillSplitJoined(n, forms);
-    if (!is) return null;
+    if (!is) { unknown.push(p); continue; }
     is.forEach(k => { if (!hits.includes(k)) hits.push(k); });
   }
-  return hits;
+  return { hits, unknown };
 }
 // ★【0.03.40】区切らずに続けて書いた答え（「完了存続」）を、単語帳の訳の並びに分ける。分けられなければ null
 function drillSplitJoined(n, forms) {
@@ -326,18 +335,23 @@ async function drillJudge(v) {
       dlock = false; dst.ans.pop(); dst.msg = 'その意味はもう答えました。他の意味を答えてください。'; dst.ph = 0; drillDraw(); return;
     }
     let r;
+    const ph = local ? null : drillPartHits(v, dst.sn); // 一部だけ単語帳の訳と同じとき
+    const known = ph ? ph.hits.filter(i => !dst.cv.includes(i)) : [];
+    const ask = ph && ph.unknown.length ? ph.unknown.join('、') : v;
     if (local) r = { hit: local.map(i => ({ i, exact: true })), extra: [], wrong: false, form: false, mention: 'none' };
     else if (!drillAiOk()) r = { hit: [], extra: [], wrong: true, form: false, mention: 'none' };
     else {
-      const rem = dst.sn.map((x, i) => dst.cv.includes(i) ? '' : `${i}: ${x.p} ${x.t}`).filter(Boolean).join('\n');
-      const done = dst.sn.filter((x, i) => dst.cv.includes(i)).map(x => x.t).join('、') || 'なし';
-      r = await drillAi(`${/^[\x00-\x7F’]+$/.test(it.w) ? '英単語' : '語句'}「${it.w}」の${/^[\x00-\x7F’]+$/.test(it.w) ? '和訳' : '意味'}テストの採点。\n【未回答の正解の意味（番号: 品詞 訳）】\n${rem}\n【回答済みの意味】${done}\n【生徒の最新の回答】「${v}」\n規則:\n- hit: 未回答リストの意味に当たる語句。{i:番号, exact:真偽}。exact=true は、単語帳の訳と同じ語（送り仮名・括弧・「〜」の違いは可）、またはほぼ同義で日本語のニュアンスが変わらない言い換え。exact=false は、意味は合うが単語帳の訳とニュアンスの違う別の言葉（例：単語帳が「社会の」で生徒が「社交的な」）。\n- 品詞形：名=名詞の形（社会、同情 など）、自/他/動=動詞形（〜する、〜を…する、〜に耐える）、形=「〜な」「〜い」「〜の」「〜的な」、副=「〜に」「〜く」「〜と」。意味が合っていても形がズレていれば form=true（hitに入れない）。\n- extra: 回答のうち、リストにも回答済みにも無いが、その英単語の辞書的に正しい意味（品詞は問わない。例：他動詞の「社会化する」）の語句の配列。\n- 厳しく判定する：hit は、未回答リストのその番号の意味そのものを答えているときだけ。回答済みの意味の言い換え・語形を変えたもの（例：回答済み「意思疎通」に対して「意思疎通すること」「意思を通じ合うこと」）を、未回答の別の意味（例：「通信」）に当てはめてはいけない。そういう回答は hit にも extra にも入れず repeat=true にする。迷ったら hit にしない。\n- repeat: 回答が、回答済みの意味をくり返しただけ（言い換え・語形の違いを含む）か。\n- wrong: 上のどれにも当たらない誤った語句が含まれるか。\n- mention: 生徒が自動詞・他動詞に言及したか（none / ji / ta）。\nJSONのみ：{"hit":[{"i":0,"exact":true}],"extra":[],"repeat":false,"wrong":false,"form":false,"mention":"none"}`);
+      const en = /^[\x00-\x7F’]+$/.test(it.w);
+      const rem = dst.sn.map((x, i) => dst.cv.includes(i) || known.includes(i) ? '' : `${i}: ${x.p} ${x.t}`).filter(Boolean).join('\n');
+      const done = dst.sn.filter((x, i) => dst.cv.includes(i) || known.includes(i)).map(x => x.t).join('、') || 'なし';
+      r = await drillAi(`${en ? '英単語' : '語句（古文・漢文などを含む）'}「${it.w}」の${en ? '和訳' : '意味'}テストの採点。\n【未回答の正解の意味（番号: 品詞 訳）】\n${rem || 'なし'}\n【回答済みの意味】${done}\n【生徒の最新の回答】「${ask}」${en ? '' : '\n※英単語ではないので、品詞形の判定はしない（form は常に false）。単語帳の訳と同じ言葉は必ず hit（exact=true）にする。'}\n規則:\n- hit: 未回答リストの意味に当たる語句。{i:番号, exact:真偽}。exact=true は、単語帳の訳と同じ語（送り仮名・括弧・「〜」の違いは可）、またはほぼ同義で日本語のニュアンスが変わらない言い換え。exact=false は、意味は合うが単語帳の訳とニュアンスの違う別の言葉（例：単語帳が「社会の」で生徒が「社交的な」）。\n- 品詞形：名=名詞の形（社会、同情 など）、自/他/動=動詞形（〜する、〜を…する、〜に耐える）、形=「〜な」「〜い」「〜の」「〜的な」、副=「〜に」「〜く」「〜と」。意味が合っていても形がズレていれば form=true（hitに入れない）。\n- extra: 回答のうち、リストにも回答済みにも無いが、その英単語の辞書的に正しい意味（品詞は問わない。例：他動詞の「社会化する」）の語句の配列。\n- 厳しく判定する：hit は、未回答リストのその番号の意味そのものを答えているときだけ。回答済みの意味の言い換え・語形を変えたもの（例：回答済み「意思疎通」に対して「意思疎通すること」「意思を通じ合うこと」）を、未回答の別の意味（例：「通信」）に当てはめてはいけない。そういう回答は hit にも extra にも入れず repeat=true にする。迷ったら hit にしない。\n- repeat: 回答が、回答済みの意味をくり返しただけ（言い換え・語形の違いを含む）か。\n- wrong: 上のどれにも当たらない誤った語句が含まれるか。\n- mention: 生徒が自動詞・他動詞に言及したか（none / ji / ta）。\nJSONのみ：{"hit":[{"i":0,"exact":true}],"extra":[],"repeat":false,"wrong":false,"form":false,"mention":"none"}`);
     }
     dlock = false;
+    if (known.length) { r.hit = [...known.map(i => ({ i, exact: true })), ...(Array.isArray(r.hit) ? r.hit : []).filter(h => !known.includes(+h.i))]; r.repeat = false; }
     if (r.repeat && !(Array.isArray(r.hit) && r.hit.length)) { dst.ans.pop(); dst.msg = 'その意味はもう答えました。他の意味を答えてください。'; dst.ph = 0; drillDraw(); return; }
     if (r.mention === 'ji' || r.mention === 'ta') { const a = drillAttr(it), j = /自動詞/.test(a), t = /他動詞/.test(a), ex = j && t ? 3 : j ? 1 : 2; dst.mn = (r.mention === 'ji' ? 1 : 2) === ex ? 'ok' : 'bad'; }
     const hs = (Array.isArray(r.hit) ? r.hit : []).filter(h => dst.sn[+h.i] && !dst.cv.includes(+h.i));
-    hs.forEach(h => { const i = +h.i; if (h.exact) { if (!dst.cv.includes(i)) dst.cv.push(i); } else { dst.at[i] = (dst.at[i] || 0) + 1; (dst.alt = dst.alt || []).push({ i, said: v }); } });
+    hs.forEach(h => { const i = +h.i; if (h.exact) { if (!dst.cv.includes(i)) dst.cv.push(i); } else { dst.at[i] = (dst.at[i] || 0) + 1; (dst.alt = dst.alt || []).push({ i, said: ask }); } });
     // 「単語帳に載っていない意味」から、実は単語帳の訳と同じ言葉を除く（AI が取り違えることがあるため）
     if (Array.isArray(r.extra)) r.extra = r.extra.filter(x => String(x || '').trim() && !drillLocalHits(x, dst.sn));
     if (r.extra && r.extra.length) dst.extra = [...new Set((dst.extra || []).concat(r.extra))];
