@@ -238,19 +238,51 @@ function vtCards(parsed, section) {
   return { cards, folders, exFolder, chFolder, code };
 }
 
-// 保存する（同じフォルダーに同じ問題・同じ形式のカードがあれば書き換える）
+// ★【0.03.71】前に取り込んだフォルダーを探す（フォルダー名が変わっていても、中のカードの問題が同じなら同じフォルダーとみなす）
+const vtKey = (q, kind) => String(q).trim() + '\u0001' + (kind || '');
+function vtMatchCount(cat, keys, deep) {
+  const cs = new Set(deep ? getAllSubcategories(cat) : [cat]);
+  let n = 0; db.forEach(d => { if (cs.has(d.category) && d.kind !== 'intro' && keys.has(vtKey(d.question, d.kind))) n++; });
+  return n;
+}
+// 保存先のフォルダーを決める：{ sec, map: { 作るフォルダー名: 実際のフォルダー }, reused: [前からあるフォルダー] }
+function vtResolveTargets(cards, folders, parentCat, section, create) {
+  const pre = parentCat ? getCategoryPath(parentCat).join('>') + '>' : '';
+  const keysOf = list => new Set(list.filter(c => c.kind !== 'intro').map(c => vtKey(c.q, c.kind)));
+  const reused = [];
+  // セクション：同じ名前が無ければ、同じ親の下で中身（問題）が半分以上同じフォルダーを使う
+  let sec = categories.includes(section) && (getCategoryParent(section) || '') === (parentCat || '') ? section : null;
+  if (!sec) {
+    const all = keysOf(cards), cands = parentCat ? getChildCategories(parentCat) : getTopLevelCategories();
+    let best = null, bn = 0;
+    cands.forEach(c => { const n = vtMatchCount(c, all, true); if (n > bn) { bn = n; best = c; } });
+    if (best && bn >= Math.max(1, all.size * 0.5)) { sec = best; if (best !== section) reused.push(best); }
+  }
+  if (!sec) sec = create ? ensureCategoryPath(pre + section) : null;
+  const map = {}, used = new Set();
+  folders.forEach(f => {
+    const own = cards.filter(c => c.folder === f), keys = keysOf(own);
+    let t = sec && categories.includes(f) && getCategoryParent(f) === sec ? f : null;
+    if (!t && sec && keys.size) {
+      let best = null, bn = 0;
+      getAllSubcategories(sec).filter(c => c !== sec && !used.has(c)).forEach(c => { const n = vtMatchCount(c, keys, false); if (n > bn) { bn = n; best = c; } });
+      if (best && bn >= Math.max(1, keys.size * 0.3)) { t = best; if (best !== f) reused.push(best); }
+    }
+    if (!t && create) {
+      // ほかの場所に同じ名前のフォルダーがあれば、名前を変えて作る（フォルダー名はアプリ全体で1つ）
+      let n = f;
+      if (categories.includes(n) && getCategoryParent(n) !== sec) n = `${f}（${section}）`;
+      t = ensureCategoryPath(getCategoryPath(sec).join('>') + '>' + n);
+    }
+    if (t) { map[f] = t; used.add(t); }
+  });
+  return { sec, map, reused };
+}
+// 保存する（同じフォルダーに同じ問題・同じ形式のカードがあれば書き換える。成績はそのまま）
 function vtSave(parsed, parentCat, section) {
   const { cards, folders, exFolder, chFolder } = vtCards(parsed, section);
-  const pre = parentCat ? getCategoryPath(parentCat).join('>') + '>' : '';
-  const sec = ensureCategoryPath(pre + section);
-  // ほかの場所に同じ名前のフォルダーがあれば、名前を変えて作る（フォルダー名はアプリ全体で1つ）
-  const nameMap = {};
   const hasEx = cards.some(c => c.folder === exFolder), hasCh = cards.some(c => c.folder === chFolder);
-  [...folders, ...(hasCh ? [chFolder] : []), ...(hasEx ? [exFolder] : [])].forEach(f => {
-    let n = f;
-    if (categories.includes(n) && getCategoryParent(n) !== sec) n = `${f}（${section}）`;
-    nameMap[f] = ensureCategoryPath(pre + section + '>' + n);
-  });
+  const { sec, map: nameMap } = vtResolveTargets(cards, [...folders, ...(hasCh ? [chFolder] : []), ...(hasEx ? [exFolder] : [])], parentCat, section, true);
   // 例文・チャンツは上のフォルダーから出題しない（週間プランの例文・チャンツで）
   catSkip = catSkip || {};
   if (hasEx) catSkip[nameMap[exFolder]] = true;
@@ -264,12 +296,23 @@ function vtSave(parsed, parentCat, section) {
       if (ex.sharedDocId && getSharedAccess(ex.sharedDocId).readOnly) return;
       let ch = false;
       const set = (f, v) => { if (v === undefined || v === null || v === '') return; if (JSON.stringify(ex[f]) !== JSON.stringify(v)) { ex[f] = v; ch = true; } };
-      set('answer', c.a); set('note', c.note); set('choices', c.choices); set('stars', c.stars || null); set('no', c.no);
+      set('answer', c.a); set('choices', c.choices); set('stars', c.stars || null);
+      if (c.no !== null && c.no !== undefined && !(typeof ex.no === 'number' && Math.abs(ex.no - c.no) < 1e-6)) set('no', c.no); // 小数の誤差では書き換えない
+      // ★【0.03.71】メモは、自分で書き足した分を消さない：前に取り込んだメモ（vtNote）の部分だけを新しいものに置き換える
+      if (c.note) {
+        const cur = ex.note || '', prev = ex.vtNote;
+        let next = cur;
+        if (!cur.trim()) next = c.note;
+        else if (cur.includes(c.note)) next = cur;
+        else if (prev && cur.includes(prev)) next = cur.replace(prev, c.note);
+        if (next !== cur) { ex.note = next; ch = true; }
+        if (ex.vtNote !== c.note) { ex.vtNote = c.note; }
+      }
       if (ch) { touchCard(ex); updated++; }
       return;
     }
     const card = { id: newCardId(), question: c.q, answer: c.a, category: cat, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 };
-    if (c.note) card.note = c.note;
+    if (c.note) { card.note = c.note; card.vtNote = c.note; }
     if (kind) card.kind = kind;
     if (c.choices) card.choices = c.choices;
     if (c.stars) card.stars = c.stars;
@@ -334,7 +377,11 @@ function vtPreview() {
   _vt = { text, parsed, name: nameEl.value.trim(), parent: document.getElementById('vtParent').value };
   const R = document.getElementById('vtResult');
   if (!parsed.groups.length) { R.innerHTML = '<p class="drill-ng">グループ（■グループ：…）が読み取れませんでした。</p>'; return; }
-  const { cards } = vtCards(parsed, _vt.name || 'セクション');
+  const { cards, folders, exFolder, chFolder } = vtCards(parsed, _vt.name || 'セクション');
+  const allF = [...folders, exFolder, chFolder].filter(f => cards.some(c => c.folder === f));
+  const tg = vtResolveTargets(cards, allF, _vt.parent, _vt.name || 'セクション', false);
+  const mapped = Object.keys(tg.map).length;
+  const upd = tg.sec ? `<div class="hint-small" style="margin-top:6px; color:var(--success);">🔄 前に取り込んだ「${dE(tg.sec)}」を更新します。フォルダー名はそのままで、同じ問題のカードは成績・メモを引き継いで書き換えます（${mapped}/${allF.length}フォルダー${mapped < allF.length ? '。無いフォルダーは新しく作ります' : ''}）</div>` : '';
   const n = k => cards.filter(c => (c.kind || 'word') === k).length;
   const words = cards.filter(c => !c.kind && !/^\(熟語\)/.test(c.a)).length, phrases = cards.filter(c => !c.kind && /^\(熟語\)/.test(c.a)).length;
   const sample = cards.filter(c => !c.kind).slice(0, 4).map(c => `<div class="hint-small">・${dE(c.q)} → ${dE(c.a)}</div>`).join('');
@@ -344,7 +391,7 @@ function vtPreview() {
     <div style="margin-top:6px;">${sample}</div>
     ${parsed.skipped.length ? `<details style="margin-top:6px;"><summary class="hint-small">読み取らなかった行 ${parsed.skipped.length}</summary>${parsed.skipped.slice(0, 30).map(l => `<div class="hint-small">${dE(l)}</div>`).join('')}</details>` : ''}
     <div class="drill-btns" style="margin-top:8px;"><button class="btn btn-primary" onclick="vtCommit(true)">💾 保存して暗記テストを始める</button><button class="btn btn-secondary" onclick="vtCommit(false)">💾 保存だけ</button></div>
-    <div class="hint-small" style="margin-top:4px;">保存すると「${dE(_vt.parent ? _vt.parent + ' › ' : '')}${dE(_vt.name)}」の下にグループごとのフォルダーができます。クイズ（ホームの出題範囲）でもそのまま使えます。</div></div>`;
+    ${upd || `<div class="hint-small" style="margin-top:4px;">保存すると「${dE(_vt.parent ? _vt.parent + ' › ' : '')}${dE(_vt.name)}」の下にグループごとのフォルダーができます。クイズ（ホームの出題範囲）でもそのまま使えます。</div>`}</div>`;
 }
 function vtCommit(start) {
   if (!_vt || !_vt.parsed) return;
