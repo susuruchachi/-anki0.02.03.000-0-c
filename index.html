@@ -495,13 +495,20 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 })();
 </script>
 <script>
-// ★【0.03.60】画面の高さを実際の表示領域に合わせる（iPad のホーム画面アプリで、再読み込みのあとに高さがずれて下のメニューが画面の外に出ることがあった）
+// ★【0.03.60】画面の高さを実際の表示領域に合わせる（Android のアプリ・iPad のホーム画面アプリで、アップデートの再読み込みのあとに
+//  表示領域の高さを大きく取り違えて、下のメニューが画面の外に出ることがあった）
+// ★【0.03.61】見えている部分の高さ（visualViewport）も見て小さい方に合わせる。読み込み直後の数秒は何度か測り直す
 (function () {
-  function fit() { document.documentElement.style.setProperty('--app-h', window.innerHeight + 'px'); }
+  function fit() {
+    var h = window.innerHeight, vv = window.visualViewport;
+    if (vv && vv.height > 100 && vv.scale <= 1.01) h = Math.min(h, Math.round(vv.height + vv.offsetTop));
+    if (h > 100) document.documentElement.style.setProperty('--app-h', h + 'px');
+  }
   fit();
   window.addEventListener('resize', fit); window.addEventListener('orientationchange', function () { setTimeout(fit, 300); });
-  window.addEventListener('pageshow', fit); document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') setTimeout(fit, 100); });
-  window.addEventListener('load', function () { setTimeout(fit, 50); setTimeout(fit, 600); });
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', fit);
+  window.addEventListener('pageshow', fit); document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') { setTimeout(fit, 100); setTimeout(fit, 800); } });
+  window.addEventListener('load', function () { [50, 300, 800, 1500, 3000].forEach(function (ms) { setTimeout(fit, ms); }); });
 })();
 </script>
 </head>
