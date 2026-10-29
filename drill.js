@@ -387,6 +387,27 @@ function drillSpeakQ() { if (dcur && (dcur.it || dcur.ck) && typeof speakText ==
 function drillSpeakA() { if (dView !== null && DH[dView]) { if (typeof speakText === 'function') speakText(DH[dView].a); return; } if (dcur && (dcur.it || dcur.ck) && typeof speakText === 'function') speakText(drillAText(dcur)); }
 
 // ---------------- 画面 ----------------
+// ★【0.03.67】残りの問題数：今のグループと、周回しているフォルダー全体（1周目は、まだ始めていないグループの単語・Check! も足す）
+function drillLeftCounts() {
+  const isQ = x => x && (x.t === 'q' || x.t === 'c');
+  const cur = isQ(dcur) && dst.ph !== 9 ? 1 : 0;
+  let group = DQ.filter(isQ).length + cur;
+  let rest = 0, gi = -1;
+  if (DS.r === 1) {
+    const inGroup = DQ.some(x => x.t === 'gend'); // グループの単語の途中（まだ gend の前）なら今のグループは DS.gi
+    gi = inGroup ? DS.gi : DS.gi - 1;
+    // グループの最後に出る、間違えた単語の復習と Check! も今のグループの残りに数える
+    if (inGroup && DG[gi]) group += DG[gi].chk.length + DS.gm.length;
+    for (let k = Math.max(gi + 1, 0); k < DG.length; k++) rest += DG[k].items.length + DG[k].chk.length;
+  }
+  return { group, all: group + rest, gi };
+}
+function drillLeftText() {
+  const n = drillLeftCounts();
+  if (DS.r > 1 || DG.length <= 1) return `${DS.r}周目 ・ 残り<b>${n.all}</b>問`;
+  const g = DG[n.gi];
+  return `${DS.r}周目 ・ 📁 ${g ? `${dE(g.name)}（${n.gi + 1}/${DG.length}）` : 'グループ'} 残り<b>${n.group}</b>問 ・ 🔁 全体 残り<b>${n.all}</b>問`;
+}
 // ★【0.03.64】前の問題の解説を見返す。進めるのは、もう解いた問題の解説まで（その先は今の問題に戻る）
 function drillHistLimit() { return DH.length - 1 - (dst.ph === 9 ? 1 : 0); }
 function drillHistBack() {
@@ -431,7 +452,7 @@ function drillDraw() {
   else if (dst.ph === 1) b = `<div class="card">${W(c.it)}<p>この動詞は次のどれですか？${dst.extra && dst.extra.length ? '<br><b>単語帳に載っている意味についての質問です。</b>' : ''}</p><button class="btn btn-secondary drill-opt" onclick="drillAt(1)">① 自動詞</button><button class="btn btn-secondary drill-opt" onclick="drillAt(2)">② 他動詞</button><button class="btn btn-secondary drill-opt" onclick="drillAt(3)">③ 自動詞・他動詞の両方</button></div>`;
   else if (dst.ph === 2) b = `<div class="card">${W(c.it)}<p>【${dE(dst.z.k)}】この単語の${dE(dst.z.k)}として正しいものを選んでください。</p>${dst.op.map((o, i) => `<button class="btn btn-secondary drill-opt" onclick="drillCh(${i})">${'①②③④'[i]} ${dE(o)}</button>`).join('')}</div>`;
   const A = document.getElementById('drillApp');
-  A.innerHTML = `<div class="drill-top"><span class="hint-small">${DS.r}周目 ・ 残り${DQ.length}問</span><span style="display:flex; gap:6px;">${dView === null && drillHistLimit() >= 0 ? '<button class="chip" onclick="drillHistBack()" title="前の問題の解説に戻る">◀ 前の解説</button>' : ''}<button class="chip" onclick="drillToggleTts()" title="読み上げのオン・オフ">${drillTtsOn() ? '🔊' : '🔇'}</button><button class="chip" onclick="drillPause()">⏸ 一時離脱</button><button class="chip" onclick="drillQuit()">🏁 やめる</button></span></div>${dst.h || ''}${b}`;
+  A.innerHTML = `<div class="drill-top"><span class="hint-small">${drillLeftText()}</span><span style="display:flex; gap:6px;">${dView === null && drillHistLimit() >= 0 ? '<button class="chip" onclick="drillHistBack()" title="前の問題の解説に戻る">◀ 前の解説</button>' : ''}<button class="chip" onclick="drillToggleTts()" title="読み上げのオン・オフ">${drillTtsOn() ? '🔊' : '🔇'}</button><button class="chip" onclick="drillPause()">⏸ 一時離脱</button><button class="chip" onclick="drillQuit()">🏁 やめる</button></span></div>${dst.h || ''}${b}`;
   const i = document.getElementById('drillInput') || document.getElementById('drillQaInput');
   if (i && i.id === 'drillInput' && dst.draft) { i.value = dst.draft; dst.draft = ''; }
   if (i) i.focus();
