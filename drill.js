@@ -11,6 +11,7 @@
 // ================================================================
 const DRILL_KEY = 'susuru_anki_drill';
 let DG = [], DS = {}, DQ = [], dcur = null, dst = {}, dlock = false, DI = {}, DCK = {}, DP = {};
+let DH = [], dView = null; // ★【0.03.64】解いた問題の解説の履歴と、見返している位置（null は今の問題）
 const dE = s => escapeHtml(String(s == null ? '' : s));
 const dShuffle = a => a.map(x => [Math.random(), x]).sort((p, q) => p[0] - q[0]).map(x => x[1]);
 const dOrd = s => s.it ? s.it.o : s.ck.o;
@@ -280,7 +281,7 @@ function drillStartNow() {
   const all = drillLoadAll();
   if (all[cat] && !confirm('このフォルダーの途中経過を消して、最初から始めますか？')) return;
   DS = { cat, r: 1, gi: 0, miss: new Map(), gm: [], rv: false, hdr: null, ct: {}, sp: {}, rec: {} };
-  DQ = []; drillSetActive(true); drillPop();
+  DQ = []; DH = []; dView = null; drillSetActive(true); drillPop();
 }
 function drillSer(s) { return s.t === 'q' ? { t: 'q', id: s.it.id, retry: s.retry } : s.t === 'c' ? { t: 'c', key: s.ck.key, retry: s.retry } : s.t === 'msg' ? { t: 'msg', h: s.h } : { t: s.t, g: DG.indexOf(s.g) }; }
 function drillDe(o) {
@@ -303,7 +304,7 @@ function drillResumeNow(cat) {
     drillBuild(d.cat && categories.includes(d.cat) ? d.cat : '');
     DS = { cat: d.cat || '', r: d.r, gi: d.gi, rv: d.rv, miss: new Map(), gm: (d.gm || []).map(i => DI[i]).filter(Boolean), hdr: d.hg >= 0 ? DG[d.hg] : null, ct: d.ct || {}, sp: {}, rec: d.rec || {} };
     (d.miss || []).map(drillDe).filter(Boolean).forEach(x => DS.miss.set(dKey(x), x));
-    DQ = (d.Q || []).map(drillDe).filter(Boolean);
+    DQ = (d.Q || []).map(drillDe).filter(Boolean); DH = []; dView = null;
     drillSetActive(true); drillPop();
   } catch (e) { alert('保存データを読み込めませんでした'); drillHome(); }
 }
@@ -383,14 +384,34 @@ function drillAText(c) {
   return seg ? seg.map(x => x.text).join('。') : c.it.m;
 }
 function drillSpeakQ() { if (dcur && (dcur.it || dcur.ck) && typeof speakText === 'function') speakText(drillQText(dcur)); }
-function drillSpeakA() { if (dcur && (dcur.it || dcur.ck) && typeof speakText === 'function') speakText(drillAText(dcur)); }
+function drillSpeakA() { if (dView !== null && DH[dView]) { if (typeof speakText === 'function') speakText(DH[dView].a); return; } if (dcur && (dcur.it || dcur.ck) && typeof speakText === 'function') speakText(drillAText(dcur)); }
 
 // ---------------- 画面 ----------------
+// ★【0.03.64】前の問題の解説を見返す。進めるのは、もう解いた問題の解説まで（その先は今の問題に戻る）
+function drillHistLimit() { return DH.length - 1 - (dst.ph === 9 ? 1 : 0); }
+function drillHistBack() {
+  if (dlock) return;
+  const lim = drillHistLimit();
+  if (dView === null) { if (lim < 0) return; const i = document.getElementById('drillInput'); dst.draft = i ? i.value : ''; dView = lim; }
+  else if (dView > 0) dView--;
+  drillDraw();
+}
+function drillHistFwd() { if (dView === null) return; if (dView < drillHistLimit()) dView++; else dView = null; drillDraw(); }
+function drillHistClose() { dView = null; drillDraw(); }
+function drillHistHTML() {
+  const lim = drillHistLimit(), h = DH[dView];
+  return `<div class="drill-hist-badge">📜 前の解説を見ています（${dView + 1} / ${lim + 1}問目）</div>${h.html}
+    <div class="drill-hist-nav"><button class="btn btn-secondary" style="flex:1;" onclick="drillHistBack()" ${dView > 0 ? '' : 'disabled'}>◀ 前の解説</button>
+    ${dView < lim ? '<button class="btn btn-secondary" style="flex:1;" onclick="drillHistFwd()">次の解説 ▶</button>' : ''}
+    <button class="btn btn-primary" style="flex:1;" onclick="drillHistClose()">↩ 今の問題に戻る</button></div>`;
+}
 function drillDraw() {
+  if (dView !== null && !DH[dView]) dView = null;
   if (DS.hdr) { dst.h = `<div class="card drill-group"><b>📁 ${dE(DS.hdr.name)}</b><div class="hint-small">${DS.hdr.items.length}語${DS.hdr.chk.length ? ` ・ Check! ${DS.hdr.chk.length}問` : ''}</div>${DS.hdr.intro && DS.r === 1 ? `<div class="drill-intro hint-small">📖 ${dE(DS.hdr.intro).replace(/\n/g, '<br>')}</div>` : ''}</div>`; DS.hdr = null; }
   const c = dcur; let b = '';
   const W = it => `<div class="drill-word">${dE(it.w)} <button class="chip" style="vertical-align:middle;" onclick="drillSpeakQ()" title="読み上げる">🔊</button></div>`;
-  if (c.t === 'gread') {
+  if (dView !== null) b = drillHistHTML();
+  else if (c.t === 'gread') {
     const q = dst.giq, intro = `<div class="drill-intro">${dE(c.g.intro).replace(/\n/g, '<br>')}</div>`;
     if (dst.ph === 'gq' && !q) b = `<div class="card"><b>📖 ${dE(c.g.name)}：導入の文</b><p class="hint-small">🤖 導入の文から問題を作っています…</p></div>`;
     else if (dst.ph === 'gq') b = `<div class="card"><div class="hint-small">📖 ${dE(c.g.name)}：導入の文から</div><p class="drill-q">${dE(q.q)}</p>${q.options.map((o, i) => `<button class="btn btn-secondary drill-opt" onclick="drillGiPick(${i})">${'①②③④⑤'[i] || ''} ${dE(o)}</button>`).join('')}</div>`;
@@ -410,8 +431,10 @@ function drillDraw() {
   else if (dst.ph === 1) b = `<div class="card">${W(c.it)}<p>この動詞は次のどれですか？${dst.extra && dst.extra.length ? '<br><b>単語帳に載っている意味についての質問です。</b>' : ''}</p><button class="btn btn-secondary drill-opt" onclick="drillAt(1)">① 自動詞</button><button class="btn btn-secondary drill-opt" onclick="drillAt(2)">② 他動詞</button><button class="btn btn-secondary drill-opt" onclick="drillAt(3)">③ 自動詞・他動詞の両方</button></div>`;
   else if (dst.ph === 2) b = `<div class="card">${W(c.it)}<p>【${dE(dst.z.k)}】この単語の${dE(dst.z.k)}として正しいものを選んでください。</p>${dst.op.map((o, i) => `<button class="btn btn-secondary drill-opt" onclick="drillCh(${i})">${'①②③④'[i]} ${dE(o)}</button>`).join('')}</div>`;
   const A = document.getElementById('drillApp');
-  A.innerHTML = `<div class="drill-top"><span class="hint-small">${DS.r}周目 ・ 残り${DQ.length}問</span><span style="display:flex; gap:6px;"><button class="chip" onclick="drillToggleTts()" title="読み上げのオン・オフ">${drillTtsOn() ? '🔊' : '🔇'}</button><button class="chip" onclick="drillPause()">⏸ 一時離脱</button><button class="chip" onclick="drillQuit()">🏁 やめる</button></span></div>${dst.h || ''}${b}`;
-  const i = document.getElementById('drillInput') || document.getElementById('drillQaInput'); if (i) i.focus();
+  A.innerHTML = `<div class="drill-top"><span class="hint-small">${DS.r}周目 ・ 残り${DQ.length}問</span><span style="display:flex; gap:6px;">${dView === null && drillHistLimit() >= 0 ? '<button class="chip" onclick="drillHistBack()" title="前の問題の解説に戻る">◀ 前の解説</button>' : ''}<button class="chip" onclick="drillToggleTts()" title="読み上げのオン・オフ">${drillTtsOn() ? '🔊' : '🔇'}</button><button class="chip" onclick="drillPause()">⏸ 一時離脱</button><button class="chip" onclick="drillQuit()">🏁 やめる</button></span></div>${dst.h || ''}${b}`;
+  const i = document.getElementById('drillInput') || document.getElementById('drillQaInput');
+  if (i && i.id === 'drillInput' && dst.draft) { i.value = dst.draft; dst.draft = ''; }
+  if (i) i.focus();
 }
 function drillQuit() { drillSave(); drillHome(); }
 
@@ -640,10 +663,14 @@ async function drillFin(ok, ans, tip) {
   ((c.it && DS.ct[c.it.id]) || []).forEach(t => ns.push(t));
   dst.ph = 9;
   if (drillTtsOn()) drillSpeakA();
-  dst.res = `<div class="card ${ok ? 'drill-ok-card' : 'drill-ng-card'}">${c.it ? `<div class="drill-word">${dE(c.it.w)}</div>` : `<p class="drill-q">${dE(c.ck.q)}</p>`}
+  const core = `${c.it ? `<div class="drill-word">${dE(c.it.w)}</div>` : `<p class="drill-q">${dE(c.ck.q)}</p>`}
     <p>【判定】 <b class="${ok ? 'drill-ok' : 'drill-ng'}">${ok ? '〇' : '×'}</b>${!ok ? '<span class="hint-small">（あとでもう一度出ます）</span>' : ''}${drillStatsText(c)}</p>
     <div>【公式の答え】 <button class="chip" onclick="drillSpeakA()" title="答えを読み上げる">🔊</button> ${official}</div>
-    ${ns.length ? `<p>【解説・注意点】<br>${ns.map(dE).join('<br>')}</p>` : ''}
+    ${ns.length ? `<p>【解説・注意点】<br>${ns.map(dE).join('<br>')}</p>` : ''}`;
+  // ★【0.03.64】解説の履歴（「◀ 前の解説」で見返す。最大100問）
+  DH.push({ html: `<div class="card ${ok ? 'drill-ok-card' : 'drill-ng-card'}">${core}</div>`, a: drillAText(c) }); if (DH.length > 100) DH.shift();
+  dView = null;
+  dst.res = `<div class="card ${ok ? 'drill-ok-card' : 'drill-ng-card'}">${core}
     <div class="drill-btns"><button class="btn btn-primary" onclick="drillPop()">次</button>${drillAiOk() ? `<button class="btn btn-secondary" onclick="drillQo()">💬 質問する${drillQaList(c).length ? `（前の質問 ${drillQaList(c).length}）` : ''}</button>` : (drillQaList(c).length ? `<button class="btn btn-secondary" onclick="drillQo()">💬 前の質問（${drillQaList(c).length}）</button>` : '')}</div></div>`;
   drillSave(); drillDraw();
 }

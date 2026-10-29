@@ -228,6 +228,7 @@ function planStartQuiz(cards, inOrder, mode) {
   }
   currentCombo = 0; todayCorrectCount = 0; currentQuizOrderScope = null;
   _quizModeOverride = mode || null; // ★【0.03.44】ネットが無いときの4択の復習など
+  _quizOrigin = { k: 'plan' }; // ★【0.03.64】結果の画面の「次の課題」
   quizPool = subset; quizIndex = 0;
   if (document.getElementById('chkSwapQA').checked) quizPool = quizPool.map(swapQuizEntry);
   quizPool = arrangeVerbFlow(quizPool);
