@@ -275,7 +275,7 @@ function renderNotifySettings() {
     </div>
     <label class="toggle-pill" style="margin-top:8px; display:flex; align-items:center; gap:8px;"><input type="checkbox" id="chkNotifyUpdates" ${p.updates ? 'checked' : ''} onchange="onNotifyPrefChange()">🆕 アップデートのお知らせ</label>
     <label class="toggle-pill" style="margin-top:8px; display:flex; align-items:center; gap:8px;"><input type="checkbox" id="chkNotifyFriends" ${p.friends ? 'checked' : ''} onchange="onNotifyPrefChange()">🤝 フレンド申請・承認のお知らせ</label>
-    <label class="toggle-pill" style="margin-top:8px; display:flex; align-items:center; gap:8px;"><input type="checkbox" id="chkNotifyTaunt" ${p.taunt ? 'checked' : ''} onchange="onNotifyPrefChange()">🔥 フレンドの頑張りのお知らせ（フレンドのほうが進んでいたら、1日1回あおります）</label>
+    <label class="toggle-pill" style="margin-top:8px; display:flex; align-items:center; gap:8px;"><input type="checkbox" id="chkNotifyTaunt" ${p.taunt ? 'checked' : ''} onchange="onNotifyPrefChange()">🔥 フレンドの頑張りのお知らせ（フレンドのほうが進んでいたら、通知の時刻から4時間ごとに夜まであおります）</label>
     <div class="hint-small" style="margin-top:8px; line-height:1.6;">${[how, bg].filter(Boolean).join('<br>')}</div>
     ${perm === 'granted' ? '<button class="btn btn-secondary" style="margin-top:8px;" onclick="sendTestNotification()">🔔 テスト通知を送る</button>' : ''}
   `;

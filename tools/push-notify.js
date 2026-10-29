@@ -170,7 +170,7 @@ async function sendUpdate() {
 }
 
 // ★【0.03.25】フレンド申請が届いた・承認された、を知らせる（それぞれ1回だけ）
-// ★【0.03.42】フレンドの頑張りで煽る（1日1回、通知の時刻を過ぎてから）。
+// ★【0.03.42】フレンドの頑張りで煽る（★0.03.53：通知の時刻から4時間ごと、その日の 23:59 まで）。
 //  プランバトル（同じ単語帳のプラン）で負けていればその差を、そうでなければ今日の正解数で負けていれば知らせる
 function weekKeyOf(dateStr) { const [y, m, d] = dateStr.split('-').map(Number); const x = new Date(Date.UTC(y, m - 1, d)); x.setUTCDate(x.getUTCDate() - (x.getUTCDay() + 6) % 7); return x.toISOString().slice(0, 10); }
 function racePoints(r) { return (r.words ? 30 : 0) + (r.words && r.onTime ? 10 : 0) + (r.chants ? 20 : 0) + (r.examples ? 20 : 0) + (r.sunday ? 15 : 0) + (r.monthly ? 15 : 0) + (Number(r.dc) || 0); }
@@ -202,7 +202,11 @@ async function sendTaunts() {
     if (d.taunt === false || !Object.keys(d.tokens || {}).length) continue;
     const now = localNow(d.tzOffset);
     const [h, m] = String(d.time || '20:00').split(':').map(Number);
-    if (now.minutes < h * 60 + m || d.lastTauntDate === now.date) continue;
+    // ★【0.03.53】通知の時刻から4時間ごと（その日の 23:59 まで）。例：8:00 なら 8時・12時・16時・20時、20:00 なら 20時だけ
+    const start = h * 60 + m;
+    if (now.minutes < start) continue;
+    const slot = `${now.date}#${Math.floor((now.minutes - start) / 240)}`;
+    if (d.lastTauntSlot === slot) continue;
     const prof = await db.collection('susuru_anki_profiles').doc(doc.id).get();
     const fl = prof.exists ? (prof.data().friends || []) : [];
     if (!fl.length) continue;
@@ -214,7 +218,7 @@ async function sendTaunts() {
       friends.push({ name: (fp.exists && fp.data().displayName) || 'フレンド', today: await todayOf(f, now.date), races: await racesOf(f, wk) });
     }
     const msg = tauntMessage(prof.data().displayName, me, friends);
-    await doc.ref.update({ lastTauntDate: now.date });
+    await doc.ref.update({ lastTauntSlot: slot, lastTauntDate: now.date });
     if (msg) sent += await sendToUser(doc.ref, d, { kind: 'taunt', tag: 'taunt', title: msg.title, body: msg.body, url: APP_URL + '?page=pgDrill' });
   }
   console.log(`フレンドの頑張りのお知らせ: ${sent} 件送信`);
