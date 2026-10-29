@@ -7,12 +7,14 @@ on:
   schedule:
     - cron: '*/15 * * * *'   # 15分ごと（GitHub の混み具合で数分〜十数分遅れることがあります）
   push:
-    branches: [main]
+    # ★【0.03.34】サイトは作業ブランチから公開しているので、そのブランチでバージョンが上がったときも送る
+    #   （push のときは、押されたブランチにあるこのファイルが使われる。定期実行だけは main にある必要がある）
+    branches: [main, claude/v0.03.00-chem-kanbun-ui]
     paths: [version-info.js]  # バージョンが上がったらすぐにアップデートのお知らせを送る
   workflow_dispatch:
     inputs:
       mode:
-        description: 'all / reminders / update'
+        description: 'all / reminders / update / plan / taunt / friends / index'
         required: false
         default: 'all'
 

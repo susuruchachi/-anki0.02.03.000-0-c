@@ -39,11 +39,16 @@ auth.onAuthStateChanged(user => {
     const txtUid = document.getElementById('txtMyUid');
     if(txtUid) txtUid.value = user.uid;
     
-    firestore.collection('susuru_anki_profiles').doc(user.uid).set({ 
-      displayName: user.displayName||'名無し', 
-      uid: user.uid,
-      lastLogin: firebase.firestore.FieldValue.serverTimestamp()
-    }, { merge: true }).catch(e => console.error("プロフィール保存エラー:", e));
+    // ★【0.03.47】自分で決めた表示名（customName）があれば、Google の名前で上書きしない
+    firestore.collection('susuru_anki_profiles').doc(user.uid).get().then(p => {
+      const cn = p.exists && p.data().customName;
+      return firestore.collection('susuru_anki_profiles').doc(user.uid).set({
+        displayName: cn || user.displayName || '名無し',
+        uid: user.uid,
+        lastLogin: firebase.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+    }).catch(e => console.error("プロフィール保存エラー:", e));
+    if (typeof onFriendAuthReady === 'function') onFriendAuthReady(); // 表示名・URL のフレンド申請
     
     syncToCloud(true);
     
@@ -57,8 +62,11 @@ auth.onAuthStateChanged(user => {
     // ★【0.03.10】招待リンク（オンライン対戦）・対戦途中からの復帰のチェック（ログインが終わってから）
     if (typeof onMatchAuthReady === 'function') onMatchAuthReady();
     if (typeof onNotifyAuthReady === 'function') onNotifyAuthReady(); // ★【0.03.14】プッシュ通知の登録
+    if (typeof loadAiKeysFromCloud === 'function') loadAiKeysFromCloud(); // ★【0.03.15】AI のキー（自分の・家族の）
+    if (typeof startFriendRequestWatch === 'function') startFriendRequestWatch(); // ★【0.03.25】フレンド申請
   } else {
     if (typeof stopCloudListener === 'function') stopCloudListener();
+    if (typeof startFriendRequestWatch === 'function') startFriendRequestWatch(); // ログアウトしたら見張りをやめる
     ls.innerHTML = `<span style="color:var(--warn);">未ログイン</span>`;
     const btnLogin = document.getElementById('btnFbLogin');
     const btnLogout = document.getElementById('btnFbLogout');

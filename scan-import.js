@@ -30,12 +30,12 @@ function showScanImportFromBox() {
 
 async function copyVocabAiPrompt() {
   try {
-    await navigator.clipboard.writeText(VOCAB_AI_PROMPT);
-    alert('📋 プロンプトをコピーしました！\nAIに単語帳の写真やPDFと一緒に送ってください。');
+    await navigator.clipboard.writeText(VOCAB_TEXT_PROMPT);
+    alert('📋 プロンプト（テキスト版）をコピーしました！\nAIに単語帳の写真やPDFと一緒に送って、返ってきたテキストをここに貼ってください。');
   } catch (e) {
     // クリップボードが使えない環境では、テキスト欄に入れて手動コピーしてもらう
     const ta = document.getElementById('txtScanRaw');
-    ta.value = VOCAB_AI_PROMPT; ta.focus(); ta.select();
+    ta.value = VOCAB_TEXT_PROMPT; ta.focus(); ta.select();
     alert('コピーできなかったので、テキスト欄にプロンプトを入れました。全選択してコピーしてください。\n（AIの結果を貼るときは、この内容を消してから貼り付けてください）');
   }
 }
@@ -135,13 +135,62 @@ async function runScanOcr() {
   }
 }
 
+// ★【0.03.15】AI で読み取る（PDF・写真を、単語帳の形「見出し語<TAB>答え」にしてもらう）
+async function runScanAi() {
+  const files = document.getElementById('scanImportFileInput').files;
+  if (!files || files.length === 0) { alert('画像またはPDFを選択してください。'); return; }
+  if (typeof aiAvailable !== 'function' || !aiAvailable()) { alert('AI のキーが設定されていません。\n⚙️ 設定 →「🤖 AI」でキーを入れるか、家族にキーを共有してもらってください。'); return; }
+  const progressEl = document.getElementById('scanImportProgress');
+  const btn = document.getElementById('btnRunScanAi');
+  progressEl.style.display = 'block';
+  btn.disabled = true;
+  try {
+    let combined = document.getElementById('txtScanRaw').value;
+    for (let i = 0; i < files.length; i++) {
+      const text = await aiReadVocabFile(files[i], msg => { progressEl.innerText = `(${i + 1}/${files.length}) ` + msg; });
+      combined += (combined.trim() ? '\n' : '') + text;
+    }
+    document.getElementById('txtScanRaw').value = combined.trim();
+    const sel = document.getElementById('selScanFormat'); if (sel) sel.value = isVocabTextFormat(combined) ? 'text' : 'delimited';
+    progressEl.innerText = '✅ AIで読み取りました。内容を確認して「📑 カード候補を作る」を押してください。';
+  } catch (e) {
+    console.error('AI read error', e);
+    progressEl.innerText = '⚠️ ' + e.message;
+  } finally { btn.disabled = false; }
+}
+
 function scanSplitEntries() {
   const raw = document.getElementById('txtScanRaw').value;
   if (!raw.trim()) { alert('テキストがありません。'); return; }
   const format = (document.getElementById('selScanFormat') || {}).value || 'auto';
+  // ★【0.03.50】テキスト版（■グループ・[No.]・意味：）なら、アプリが組み替える
+  if (format === 'text' || (format === 'auto' && isVocabTextFormat(raw))) return scanFromVocabText(raw);
   const parsed = parseVocabText(raw, format);
   if (parsed.length === 0) { alert('カード候補が見つかりませんでした。\n・1行1語なら「見出し語（タブかカンマ）答え」の形にしてください\n・単語帳形式なら「247 complete …」のように行頭に見出し語番号が必要です'); return; }
-  scanImportEntries = parsed.map((p, i) => ({ id: 'tmp_' + i + '_' + Date.now(), question: p.question, answer: p.answer }));
+  scanImportEntries = parsed.map((p, i) => ({ id: 'tmp_' + i + '_' + Date.now(), question: p.question, answer: p.answer, note: p.note || '', stars: p.stars || 0 }));
+  renderScanReviewList();
+  document.getElementById('scanRawArea').style.display = 'none';
+  document.getElementById('scanReviewArea').style.display = 'block';
+}
+
+function scanFromVocabText(raw) {
+  const vp = vtParse(raw);
+  if (!vp.groups.length) { alert('テキスト版の書式（[No.…] と 意味：）が読み取れませんでした。'); return; }
+  const n = vp.groups.length, hasExtra = vp.groups.some(g => g.intro || g.checks.length || g.items.some(w => w.exprs.length));
+  // グループ・導入・例文・Check! があれば、「テキストから問題を作る」でフォルダーを分けて取り込むのがおすすめ
+  if (n > 1 || hasExtra) {
+    if (typeof _drillActive !== 'undefined' && _drillActive) { alert('暗記テストを解いている途中です。暗記タブで「🏁 やめる」を押してから、もう一度「📑 カード候補を作る」を押してください。'); return; }
+    if (confirm(`グループ ${n} 個${hasExtra ? '・導入の文・熟語・例文・Check!' : ''} が読み取れました。\n\nOK：「📄 テキストから問題を作る」で、グループごとのフォルダー・例文・Check!・導入の文もまとめて取り込む（おすすめ）\nキャンセル：単語（派生語・熟語を含む）だけを「${scanImportTargetCategory}」に取り込む`)) {
+      closeScanImport();
+      _vt = { text: raw, name: vtSectionName(vp.title) || '', parent: scanImportTargetCategory };
+      openPage('pgDrill'); vtOpen();
+      setTimeout(() => { try { document.getElementById('vtParent').value = scanImportTargetCategory; vtPreview(); } catch (e) {} }, 50);
+      return;
+    }
+  }
+  const { cards } = vtCards(vp, vtSectionName(vp.title) || 'X');
+  scanImportEntries = cards.filter(c => !c.kind).map((c, i) => ({ id: 'tmp_' + i + '_' + Date.now(), question: c.q, answer: c.a, note: c.note || '', stars: c.stars || 0 }));
+  if (!scanImportEntries.length) { alert('カード候補が見つかりませんでした。'); return; }
   renderScanReviewList();
   document.getElementById('scanRawArea').style.display = 'none';
   document.getElementById('scanReviewArea').style.display = 'block';
@@ -182,6 +231,12 @@ function renderScanReviewList() {
 
     card.appendChild(qInput);
     card.appendChild(aTextarea);
+    // ★【0.03.29】メモと星（AI の読み取り・タブ区切りの3・4列目）
+    if (entry.note || entry.stars) {
+      const extra = document.createElement('div'); extra.className = 'hint-small'; extra.style.margin = '4px 0';
+      extra.textContent = (entry.stars ? '★'.repeat(entry.stars) + '　' : '') + (entry.note ? '📝 ' + entry.note : '');
+      card.appendChild(extra);
+    }
     card.appendChild(tagRow);
     card.appendChild(delBtn);
     container.appendChild(card);
@@ -206,6 +261,7 @@ async function submitScanImport() {
     if (!q || !a) return;
     const newCard = { id: newCardId(), question: q, answer: a, category: scanImportTargetCategory, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 };
     if (entry.note) newCard.note = entry.note;
+    if (entry.stars) newCard.stars = entry.stars;
     touchCard(newCard);
     if (targetSharedDocId) newCard.sharedDocId = targetSharedDocId;
     db.push(newCard); addedCards.push(newCard); count++;

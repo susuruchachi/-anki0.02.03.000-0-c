@@ -186,6 +186,8 @@ async function syncSubscriptions() {
       }
       setSharedMeta(docId, data.catName, data.categories || [], [...cloudCardIds]);
       if (localWins) needPush.push(docId);
+      // ★【0.03.15】作成者：以前からの共有コードを、コードで探せる対応表に登録しておく
+      if (isOwner && data.shareCode && !registeredShareCodeDocs().includes(docId)) ensureShareCode(docId).catch(e => console.warn('共有コードの登録に失敗:', e));
     } catch (e) { console.warn("Sync error for doc:", docId, e); }
   }
   
@@ -226,6 +228,7 @@ async function pushSharedDocFromLocal(docId) {
       if (rootCat !== data.catName) update.catName = rootCat;
     }
     await ref.update(JSON.parse(JSON.stringify(update)));
+    if (data.isPublic) syncPublicIndex(docId, Object.assign({}, data, update));
     setSharedMeta(docId, rootCat, allRelated || data.categories || [], newCards.map(c => c.id));
   } catch (e) { console.warn('共有ドキュメントへの書き戻しに失敗:', e); }
 }
@@ -260,6 +263,17 @@ async function updateCardInSharedDoc(docId, card, action) {
     await firestore.collection("susuru_anki_shared").doc(docId).update({ cards: JSON.parse(JSON.stringify(newCards)) });
   } catch(e) { console.error("Cloud update failed", e); }
 }
+// ★【0.03.38】まとめて削除（1回の書き込みで）
+async function removeCardsFromSharedDoc(docId, ids) {
+  if (!currentUser || !docId || !ids || !ids.length) return;
+  try {
+    const ref = firestore.collection("susuru_anki_shared").doc(docId);
+    const snap = await ref.get();
+    if (!snap.exists) return;
+    const set = new Set(ids);
+    await ref.update({ cards: JSON.parse(JSON.stringify((snap.data().cards || []).filter(c => !set.has(c.id)))) });
+  } catch (e) { console.error('Cloud update failed', e); }
+}
 // ★【0.03.02】まとめて追加（1枚ずつ同時に書き込むと、互いに上書きしてカードが消えることがあったため）
 async function addCardsToSharedDoc(docId, cards) {
   if (!currentUser || !docId || !cards || cards.length === 0) return;
@@ -283,6 +297,7 @@ async function shareCategory(catName) {
   try {
     const docRef = await firestore.collection("susuru_anki_shared").add(JSON.parse(JSON.stringify({ catName: catName, cards: subset.map(toSharedCard), categories: allTargets, categoryTree: partialTree, ownerId: currentUser.uid, ownerName: currentUser.displayName || currentUser.email || '不明', friends: [] })));
     await docRef.update({ createdAt: firebase.firestore.FieldValue.serverTimestamp() }).catch(() => {});
+    syncPublicIndex(docRef.id, { catName, cards: subset, ownerId: currentUser.uid, ownerName: currentUser.displayName || currentUser.email || '不明', isPublic: true, subscriberUids: [currentUser.uid] });
     
     // 自分が作ったものも同期対象にする
     if (!subscribedDocs.includes(docRef.id)) subscribedDocs.push(docRef.id);
@@ -294,8 +309,7 @@ async function shareCategory(catName) {
     db.forEach(q => { if (ids.has(q.id)) { q.sharedDocId = docRef.id; touchCard(q); } });
     saveData(); syncSubscriptions();
     
-    const code = generateShareCode();
-    await docRef.update({ shareCode: code }).catch(() => {});
+    const code = await assignNewShareCode(docRef.id).catch(() => null) || '（発行できませんでした）';
     const shareUrl = window.location.origin + window.location.pathname + "?share_id=" + docRef.id;
     try { await navigator.clipboard.writeText(shareUrl); } catch (e) {}
     alert(`✅ 共有URLを発行・コピーしました！\nURL: ${shareUrl}\n🔑 共有コード: ${code}\n（相手は「🌐 公開カテゴリー」画面の「共有コードで参加」にコードを入力しても開けます）\n\n（※今後、あなたがこのカテゴリー内の問題を編集・追加すると、全員に自動同期されます）`);
@@ -304,9 +318,12 @@ async function shareCategory(catName) {
 
 function listenToSharedDoc(docId) {
   if (unsubscribeShared) unsubscribeShared(); currentSharedDocId = docId; document.getElementById('sharedTitle').innerText = "⏳ 読み込み中...";
+  _sharedShowN = 50; _sharedQuery = ''; currentSharedData = null;
+  const cl = document.getElementById('sharedCardsList'); if (cl) cl.innerHTML = '';
   unsubscribeShared = firestore.collection("susuru_anki_shared").doc(docId).onSnapshot((snap) => {
     if (!snap.exists) { alert("⚠️ 共有データが見つかりません。"); exitSharedMode(); return; }
     currentSharedData = snap.data(); renderSharedPage();
+    if (currentSharedData.isPublic) syncPublicIndex(docId, currentSharedData); // 開いた人が目次も新しくしておく
   }, err => alert("⚠️ 共有データの取得に失敗しました。"));
 }
 
@@ -319,22 +336,13 @@ async function loadFriendsForSharedPanel() {
   try {
     const snap = await firestore.collection('susuru_anki_profiles').doc(currentUser.uid).get();
     const friends = snap.exists ? (snap.data().friends || []) : [];
-    for (const fUid of friends) {
-      let fName = fUid;
-      if (friendNameCache[fUid]) {
-        fName = friendNameCache[fUid];
-      } else {
-        const fSnap = await firestore.collection('susuru_anki_profiles').doc(fUid).get();
-        if (fSnap.exists) {
-          fName = fSnap.data().displayName || fUid;
-          friendNameCache[fUid] = fName; // キャッシュに保存
-        }
-      }
+    const names = await Promise.all(friends.map(u => friendNameCache[u] ? friendNameCache[u] : friendNameOf(u).then(n => (friendNameCache[u] = n))));
+    friends.forEach((fUid, i) => {
       const opt = document.createElement('option');
       opt.value = fUid;
-      opt.innerText = fName;
+      opt.innerText = names[i];
       select.appendChild(opt);
-    }
+    });
   } catch(e) { console.warn("フレンドリストの読み込みに失敗", e); }
 }
 
@@ -343,13 +351,14 @@ function renderSharedPage() {
   const data = currentSharedData;
   document.getElementById('sharedTitle').innerText = `🌐 ${escapeHtml(data.catName)}`; 
   document.getElementById('sharedOwnerName').innerText = escapeHtml(data.ownerName); 
-  document.getElementById('sharedCardCount').innerText = data.cards.length;
+  document.getElementById('sharedCardCount').innerText = (data.cards || []).length;
   const codeRow = document.getElementById('sharedCodeRow');
   if (codeRow) {
     const owner = currentUser && currentUser.uid === data.ownerId;
     if (data.shareCode) { codeRow.style.display = 'block'; document.getElementById('sharedCodeText').innerText = data.shareCode; }
-    else if (owner) { codeRow.style.display = 'none'; ensureShareCode(currentSharedDocId).catch(() => {}); } // 発行すると onSnapshot で再描画される
     else codeRow.style.display = 'none';
+    // 作成者なら、コードが無ければ発行し、あれば「コードで探せる」ように登録しておく（発行すると onSnapshot で再描画される）
+    if (owner) ensureShareCode(currentSharedDocId).catch(() => {});
   }
   
   const isOwner = currentUser && currentUser.uid === data.ownerId; 
@@ -395,10 +404,28 @@ function renderSharedPage() {
     }
   }
   
-  const cList = document.getElementById('sharedCardsList'); cList.innerHTML = '';
-  if (data.cards.length === 0) cList.innerHTML = '<div style="color:var(--text3); font-size:0.9rem; text-align:center;">カードがありません</div>';
-  else data.cards.forEach((card, idx) => cList.innerHTML += `<div class="q-card"><div class="q-card-text">${renderRichText(card.question, { escape: true, kanbunRows: 10 })}</div><div style="font-size:0.85rem; color:var(--text2); margin-top:4px;">A: <span style="color:var(--text);">${renderRichText(getPrimaryAnswer(card.answer), { escape: true, kanbunRows: 10 })}</span></div><div style="font-size:0.75rem; color:var(--text3); margin-top:8px;">📂 ${escapeHtml(card.category)}</div>${canEdit ? `<button class="btn btn-secondary" style="margin-top:10px; font-size:0.8rem;" onclick="deleteCardFromShared(${idx})">🗑️ 削除</button>` : ''}</div>`);
+  _sharedCanEdit = canEdit;
+  renderSharedCards();
+}
+// ★【0.03.47】カードの一覧は少しずつ表示する（以前は1枚ずつ innerHTML += していたため、千枚単位のカテゴリーで
+//  「読み込み中」のまま固まっていた。特に Android では画面全体が止まっていた）
+let _sharedShowN = 50, _sharedCanEdit = false, _sharedQuery = '';
+function renderSharedCards() {
+  const data = currentSharedData; if (!data) return;
+  const cList = document.getElementById('sharedCardsList'); if (!cList) return;
+  const all = Array.isArray(data.cards) ? data.cards : [];
+  if (!all.length) { cList.innerHTML = '<div style="color:var(--text3); font-size:0.9rem; text-align:center;">カードがありません</div>'; return; }
+  const q = _sharedQuery.trim().toLowerCase();
+  const hits = [];
+  all.forEach((card, idx) => { if (!q || [card.question, card.answer, card.category].some(s => String(s || '').toLowerCase().includes(q))) hits.push(idx); });
+  const shown = hits.slice(0, _sharedShowN);
+  cList.innerHTML = `<input type="text" class="form-control" id="sharedCardSearch" placeholder="🔍 問題・答え・フォルダーで絞り込み（${all.length}枚）" value="${escAttr(_sharedQuery)}" style="margin-bottom:10px;">` +
+    shown.map(idx => { const card = all[idx]; return `<div class="q-card"><div class="q-card-text">${renderRichText(card.question, { escape: true, kanbunRows: 10 })}</div><div style="font-size:0.85rem; color:var(--text2); margin-top:4px;">A: <span style="color:var(--text);">${renderRichText(getPrimaryAnswer(card.answer), { escape: true, kanbunRows: 10 })}</span></div><div style="font-size:0.75rem; color:var(--text3); margin-top:8px;">📂 ${escapeHtml(card.category)}</div>${_sharedCanEdit ? `<button class="btn btn-secondary" style="margin-top:10px; font-size:0.8rem;" onclick="deleteCardFromShared(${idx})">🗑️ 削除</button>` : ''}</div>`; }).join('') +
+    (hits.length > shown.length ? `<button class="btn btn-secondary" style="margin-top:8px;" onclick="_sharedShowN += 100; renderSharedCards();">さらに表示（残り ${hits.length - shown.length} 枚）</button>` : '') +
+    (q && !hits.length ? '<div class="hint-small" style="text-align:center;">見つかりません</div>' : '');
   hydrateRich(cList, { chemScale: 1.1 });
+  const s = document.getElementById('sharedCardSearch');
+  s.oninput = () => { _sharedQuery = s.value; _sharedShowN = 50; const pos = s.selectionStart; renderSharedCards(); const s2 = document.getElementById('sharedCardSearch'); s2.focus(); try { s2.setSelectionRange(pos, pos); } catch (e) {} };
 }
 
 async function addFriendToShared() {
@@ -517,7 +544,7 @@ async function deletePublicCategory(docId, catName) {
     const docSnap = await firestore.collection("susuru_anki_shared").doc(docId).get();
     if (!docSnap.exists) return alert("カテゴリーが見つかりません");
     const data = docSnap.data(); if (data.ownerId !== currentUser.uid) return alert("削除権限がありません");
-    await firestore.collection("susuru_anki_shared").doc(docId).delete();
+    await deleteSharedDocAndCode(docId, data.shareCode);
     // ★【0.03.02】カードに残った共有の印も外す（残っていると「公開カテゴリーだから編集できない」状態のままになっていた）
     detachSharedDoc(docId);
     saveData(true);
@@ -573,34 +600,63 @@ async function leaveSharedCategory(docId, catName) {
 }
 
 let publicCategoriesCache = []; let unsubscribePublicCategories = null;
+// ★【0.03.52】📇 公開カテゴリーの目次（名前・作成者・枚数だけ）。一覧はこれだけを読む（以前は全部の公開カテゴリーを
+//  カードの中身ごと読んでいたため、なかなか表示されなかった）。中身を持っている人なら誰でも書き直せる（ルールで元と照合）
+const PUB_INDEX_COL = 'susuru_anki_public_index';
+const _pubIndexSynced = {};
+function publicIndexEntry(d) {
+  return { isPublic: true, catName: d.catName || '', ownerId: d.ownerId || '', ownerName: d.ownerName || '', cardCount: (d.cards || []).length,
+    subscriberCount: (d.subscriberUids || []).length, shareCode: d.shareCode || null, updatedAt: Date.now() };
+}
+function syncPublicIndex(docId, d, force) {
+  if (typeof currentUser === 'undefined' || !currentUser || !d || d.isPublic !== true || !docId) return Promise.resolve();
+  const e = publicIndexEntry(d), key = JSON.stringify([e.catName, e.ownerName, e.cardCount, e.subscriberCount, e.shareCode]);
+  if (!force && _pubIndexSynced[docId] === key) return Promise.resolve();
+  _pubIndexSynced[docId] = key;
+  return firestore.collection(PUB_INDEX_COL).doc(docId).set(e).catch(err => { delete _pubIndexSynced[docId]; console.warn('公開カテゴリーの目次の更新に失敗:', err.message); });
+}
+function removePublicIndex(docId) { if (!docId) return Promise.resolve(); return firestore.collection(PUB_INDEX_COL).doc(docId).delete().catch(() => {}); }
+function stopPublicCategoriesWatch() { if (unsubscribePublicCategories) { unsubscribePublicCategories(); unsubscribePublicCategories = null; } }
+function stopSharedDocWatch() { if (unsubscribeShared) { unsubscribeShared(); unsubscribeShared = null; } currentSharedDocId = null; currentSharedData = null; sharedFriendsLoaded = false; }
 
 async function loadPublicCategories() {
   const listDiv = document.getElementById('publicCategoriesList');
   if (!listDiv) return;
+  stopPublicCategoriesWatch();
   listDiv.innerHTML = '<div style="text-align:center; color:var(--text2);">読み込み中...</div>';
   try {
-    if (unsubscribePublicCategories) { unsubscribePublicCategories(); unsubscribePublicCategories = null; }
-    unsubscribePublicCategories = firestore.collection("susuru_anki_shared").where('isPublic', '==', true).onSnapshot(
-      snap => {
-        publicCategoriesCache = [];
-        snap.forEach(doc => { publicCategoriesCache.push({ id: doc.id, ...doc.data() }); });
-        renderPublicCategories();
-      },
-      err => {
-        console.error("公開カテゴリー読み込みエラー:", err);
-        listDiv.innerHTML = `<div style="color:var(--danger); padding:20px; text-align:center;">公開カテゴリーの読み込みに失敗しました<br><span style="font-size:0.75rem; color:var(--text3);">${err.code || err.message}</span></div>`;
-      }
-    );
-  } catch(e) {
-    console.error("loadPublicCategories catch:", e);
-    listDiv.innerHTML = `<div style="color:var(--danger); padding:20px; text-align:center;">公開カテゴリーの読み込みに失敗しました<br><span style="font-size:0.75rem; color:var(--text3);">${e.message}</span></div>`;
+    const snap = await firestore.collection(PUB_INDEX_COL).where('isPublic', '==', true).get();
+    publicCategoriesCache = snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
+    _publicFull = false;
+    if (!publicCategoriesCache.length) return loadPublicCategoriesFull(); // 目次がまだ無いとき（はじめて）
+    renderPublicCategories();
+  } catch (e) {
+    console.warn('公開カテゴリーの目次を読めませんでした（ルールが古いかも）:', e.code || e.message);
+    loadPublicCategoriesFull();
+  }
+}
+// 目次に無いものも探す（全部の公開カテゴリーを中身ごと読む。時間がかかる）。読んだものは目次に書いておく
+let _publicFull = false;
+async function loadPublicCategoriesFull() {
+  const listDiv = document.getElementById('publicCategoriesList');
+  if (!listDiv) return;
+  listDiv.innerHTML = '<div style="text-align:center; color:var(--text2);">⏳ すべての公開カテゴリーを読み込み中…（はじめは時間がかかります。次からは速くなります）</div>';
+  try {
+    const snap = await firestore.collection('susuru_anki_shared').where('isPublic', '==', true).get();
+    publicCategoriesCache = snap.docs.map(d => { const x = d.data(); syncPublicIndex(d.id, x); return Object.assign({ id: d.id }, publicIndexEntry(x)); });
+    _publicFull = true;
+    renderPublicCategories();
+  } catch (err) {
+    console.error("公開カテゴリー読み込みエラー:", err);
+    listDiv.innerHTML = `<div style="color:var(--danger); padding:20px; text-align:center;">公開カテゴリーの読み込みに失敗しました<br><span style="font-size:0.75rem; color:var(--text3);">${escapeHtml(err.code || err.message)}</span></div>`;
   }
 }
 
 function renderPublicCategories() {
   const listDiv = document.getElementById('publicCategoriesList'); const searchText = document.getElementById('searchPublicCategories').value.toLowerCase();
   const filtered = publicCategoriesCache.filter(cat => cat.catName.toLowerCase().includes(searchText) || (cat.ownerName || '').toLowerCase().includes(searchText));
-  if (filtered.length === 0) { listDiv.innerHTML = '<div style="text-align:center; color:var(--text3); margin-top:40px;">公開カテゴリーがありません</div>'; return; }
+  const more = _publicFull ? '' : '<button class="btn btn-secondary" style="margin-top:6px;" onclick="loadPublicCategoriesFull()">🔍 一覧に無いカテゴリーも探す（時間がかかります）</button>';
+  if (filtered.length === 0) { listDiv.innerHTML = '<div style="text-align:center; color:var(--text3); margin-top:40px;">公開カテゴリーがありません</div>' + more; return; }
   listDiv.innerHTML = '';
   filtered.forEach(cat => {
     const card = document.createElement('div'); card.className = 'card'; card.style.cursor = 'pointer'; card.style.position = 'relative';
@@ -614,12 +670,13 @@ function renderPublicCategories() {
     card.innerHTML = `
       <div class="q-card-text">${escapeHtml(cat.catName)}</div>
       <div style="font-size:0.85rem; color:var(--text2); margin-top:4px;">作成者: <span style="color:var(--text);">${escapeHtml(cat.ownerName || 'Unknown')}</span></div>
-      <div style="font-size:0.8rem; color:var(--text3); margin-top:6px;">カード数: <span style="color:var(--primary); font-weight:bold;">${(cat.cards || []).length}問</span> 👥 利用者: <span style="color:var(--accent); font-weight:bold;">${(cat.subscriberUids || []).length}人</span></div>
+      <div style="font-size:0.8rem; color:var(--text3); margin-top:6px;">カード数: <span style="color:var(--primary); font-weight:bold;">${cat.cardCount ?? (cat.cards || []).length}問</span> 👥 利用者: <span style="color:var(--accent); font-weight:bold;">${cat.subscriberCount ?? (cat.subscriberUids || []).length}人</span></div>
       <button class="btn btn-secondary" style="margin-top:10px; width:100%;" onclick="openPage('pgShared'); listenToSharedDoc(${jsArg(cat.id)})">🌐 詳細・共同編集者の管理</button>
       ${subscribeBtn}
       ${isOwner ? `<button class="btn btn-danger" style="margin-top:8px; width:100%;" onclick="deletePublicCategory(${jsArg(cat.id)}, ${jsArg(cat.catName)})">🗑️ 削除</button>` : ''}`;
     listDiv.appendChild(card);
   });
+  if (more) listDiv.insertAdjacentHTML('beforeend', more);
 }
 
 async function unsubscribePublicCategory(docId, catName) {
@@ -636,7 +693,12 @@ async function loadMyPublicCategories() {
   section.style.display = 'block';
   listDiv.innerHTML = '<div style="text-align:center; color:var(--text3); font-size:0.85rem;">読み込み中...</div>';
   try {
-    const snap = await firestore.collection('susuru_anki_shared').where('ownerId', '==', currentUser.uid).get();
+    // ★【0.03.52】まず目次（軽い）から。目次に無ければ、自分の共有カテゴリーを中身ごと読む（そのとき目次も作る）
+    let snap = await firestore.collection(PUB_INDEX_COL).where('ownerId', '==', currentUser.uid).get().catch(() => ({ empty: true, docs: [], forEach() {} }));
+    if (snap.empty) {
+      snap = await firestore.collection('susuru_anki_shared').where('ownerId', '==', currentUser.uid).get();
+      snap.docs.forEach(d => { if (d.data().isPublic) syncPublicIndex(d.id, d.data()); });
+    }
     if (snap.empty) {
       listDiv.innerHTML = '<div style="text-align:center; color:var(--text3); font-size:0.85rem; padding:10px;">公開中のカテゴリーはありません</div>';
       return;
@@ -652,7 +714,7 @@ async function loadMyPublicCategories() {
           <div style="font-weight:bold; font-size:0.9rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(cat.catName || '不明')}</div>
           <div style="font-size:0.75rem; color:var(--text3); margin-top:2px;">
             ${isActive ? '<span style="color:var(--success);">🌐 公開中</span>' : '<span style="color:var(--text3);">🔒 非公開（残存）</span>'}
-             カード: ${(cat.cards || []).length}問 👥 ${(cat.subscriberUids || []).length}人
+             カード: ${cat.cardCount ?? (cat.cards || []).length}問 👥 ${cat.subscriberCount ?? (cat.subscriberUids || []).length}人
           </div>
         </div>
         <button class="btn btn-danger" style="width:auto; padding:6px 12px; font-size:0.8rem; margin-left:10px; flex-shrink:0;" onclick="deleteMyPublicCategory(${jsArg(doc.id)}, ${jsArg(cat.catName || '不明')})">🗑️ 削除</button>`;
@@ -667,7 +729,7 @@ async function deleteMyPublicCategory(docId, catName) {
   if (!currentUser) return alert('ログインしてください');
   if (!confirm(`「${catName}」をFirebaseから完全に削除しますか？\n\n※手元のフォルダーや問題データは消えずに残ります。`)) return;
   try {
-    await firestore.collection('susuru_anki_shared').doc(docId).delete();
+    await deleteSharedDocAndCode(docId);
     detachSharedDoc(docId);
     saveData(true);
     await loadMyPublicCategories();
@@ -679,9 +741,12 @@ async function deleteMyPublicCategory(docId, catName) {
 function filterPublicCategories() { renderPublicCategories(); }
 
 async function importPublicCategory(docId, catName) {
-  const cat = publicCategoriesCache.find(c => c.id === docId); if (!cat) return alert('カテゴリーが見つかりません');
-  if (!confirm(`「${escapeHtml(catName)}」を購読しますか？\n（今後、作成者が問題を編集・追加すると自動で同期されます）`)) return;
+  if (!confirm(`「${catName}」を購読しますか？\n（今後、作成者が問題を編集・追加すると自動で同期されます）`)) return;
   try {
+    // ★【0.03.52】一覧（目次）にはカードの中身が無いので、購読するときにそのカテゴリーだけを読む
+    const s = await firestore.collection('susuru_anki_shared').doc(docId).get();
+    if (!s.exists) return alert('カテゴリーが見つかりません（削除されたかもしれません）');
+    const cat = Object.assign({ id: docId }, s.data());
     const count = subscribeToSharedData(docId, cat);
     autoMerge(); alert(`✅ 購読完了！\n新規追加: ${count}件`); openPage('pgBox');
     syncSubscriptions();
@@ -692,11 +757,10 @@ async function importPublicCategory(docId, catName) {
           subscriberUids: firebase.firestore.FieldValue.arrayUnion(currentUser.uid)
         });
         // ローカルキャッシュも即時更新
+        const subs = new Set(cat.subscriberUids || []); subs.add(currentUser.uid);
+        syncPublicIndex(docId, Object.assign({}, cat, { subscriberUids: [...subs] }));
         const cached = publicCategoriesCache.find(c => c.id === docId);
-        if (cached) {
-          if (!cached.subscriberUids) cached.subscriberUids = [];
-          if (!cached.subscriberUids.includes(currentUser.uid)) cached.subscriberUids.push(currentUser.uid);
-        }
+        if (cached) cached.subscriberCount = subs.size;
       } catch(e2) { /* 失敗しても購読自体は成功しているので無視 */ }
     }
   } catch(e) { alert('⚠️ 購読に失敗しました'); }
@@ -710,13 +774,6 @@ function findEditableSharedDocForCat(catName) {
   return info.shared && info.canEdit ? info.docId : null;
 }
 
-// フォルダー構造の変更を共有ドキュメントへ反映する（旧API名。中身は pushSharedDocFromLocal）
-async function syncSharedDocStructure(docId) { await pushSharedDocFromLocal(docId); }
-async function syncNewCategoryToShared(parentCatName, newCatName) {
-  if (!parentCatName) return;
-  const docId = findEditableSharedDocForCat(parentCatName);
-  if (docId) await pushSharedDocFromLocal(docId);
-}
 
 
 // ================================================================
@@ -727,15 +784,62 @@ function generateShareCode() {
   let c = ''; for (let i = 0; i < 6; i++) c += chars[Math.floor(Math.random() * chars.length)];
   return c;
 }
-// 既存の共有ドキュメントにコードが無ければ発行する（作成者のみ）
+// ★【0.03.15】共有コードは「コード → 共有カテゴリー」の対応表（susuru_anki_share_codes）で探す
+//   以前は共有カテゴリーの一覧からコードで検索していたため、共有カテゴリーの一覧を誰でも読める必要があった。
+//   対応表はコードを知っている人が1件ずつ取れるだけ（一覧は読めない）なので、URLだけで共有したカテゴリーを一覧から見られなくなる
+const SHARE_CODE_COL = 'susuru_anki_share_codes';
+// コードを登録する。すでに別のカテゴリーのコードとして使われていたら false
+async function registerShareCode(docId, code) {
+  const ref = firestore.collection(SHARE_CODE_COL).doc(code);
+  return firestore.runTransaction(async tx => {
+    const s = await tx.get(ref);
+    if (s.exists) return s.data().docId === docId;
+    tx.set(ref, { docId, owner: currentUser.uid, createdAt: Date.now() });
+    return true;
+  });
+}
+// 新しいコードを発行して登録する（重なったら作り直す）
+async function assignNewShareCode(docId) {
+  if (!currentUser) return null;
+  for (let i = 0; i < 6; i++) {
+    const code = generateShareCode();
+    if (await registerShareCode(docId, code)) {
+      await firestore.collection('susuru_anki_shared').doc(docId).update({ shareCode: code });
+      markShareCodeRegistered(docId);
+      return code;
+    }
+  }
+  throw new Error('共有コードを発行できませんでした');
+}
+function registeredShareCodeDocs() { try { return JSON.parse(localStorage.getItem('susuru_anki_share_codes_ok') || '[]'); } catch (e) { return []; } }
+function markShareCodeRegistered(docId) {
+  const list = registeredShareCodeDocs();
+  if (!list.includes(docId)) { list.push(docId); try { localStorage.setItem('susuru_anki_share_codes_ok', JSON.stringify(list.slice(-200))); } catch (e) {} }
+}
+// 既存の共有ドキュメントにコードが無ければ発行する。あれば対応表に登録されているか確かめる（作成者のみ）
 async function ensureShareCode(docId) {
+  if (!currentUser) return null;
   const ref = firestore.collection('susuru_anki_shared').doc(docId);
   const snap = await ref.get();
-  if (!snap.exists) return null;
-  if (snap.data().shareCode) return snap.data().shareCode;
-  const code = generateShareCode();
-  await ref.update({ shareCode: code });
-  return code;
+  if (!snap.exists || snap.data().ownerId !== currentUser.uid) return snap.exists ? (snap.data().shareCode || null) : null;
+  const code = snap.data().shareCode;
+  if (!code) return assignNewShareCode(docId);
+  if (registeredShareCodeDocs().includes(docId)) return code;
+  if (await registerShareCode(docId, code)) { markShareCodeRegistered(docId); return code; }
+  return assignNewShareCode(docId); // 前のコードがほかのカテゴリーと重なっていたら、新しいコードにする
+}
+// 共有ドキュメントを消すときは、コードの対応表も消す
+async function deleteSharedDocAndCode(docId, knownCode) {
+  let code = knownCode;
+  if (!code) { try { const s = await firestore.collection('susuru_anki_shared').doc(docId).get(); code = s.exists ? s.data().shareCode : null; } catch (e) {} }
+  await firestore.collection('susuru_anki_shared').doc(docId).delete();
+  removePublicIndex(docId);
+  if (code) {
+    try {
+      const m = await firestore.collection(SHARE_CODE_COL).doc(code).get();
+      if (m.exists && m.data().docId === docId) await firestore.collection(SHARE_CODE_COL).doc(code).delete();
+    } catch (e) {}
+  }
 }
 async function joinByShareCode() {
   const raw = (document.getElementById('txtShareCode').value || '').trim();
@@ -746,8 +850,13 @@ async function joinByShareCode() {
     if (!docId) {
       const code = raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
       if (code.length === 6) {
-        const snap = await firestore.collection('susuru_anki_shared').where('shareCode', '==', code).limit(1).get();
-        if (!snap.empty) docId = snap.docs[0].id;
+        const m2 = await firestore.collection(SHARE_CODE_COL).doc(code).get().catch(() => null);
+        if (m2 && m2.exists) docId = m2.data().docId;
+        else {
+          // まだ対応表に登録されていない、以前からの公開カテゴリー
+          const snap = await firestore.collection('susuru_anki_shared').where('isPublic', '==', true).where('shareCode', '==', code).limit(1).get().catch(() => null);
+          if (snap && !snap.empty) docId = snap.docs[0].id;
+        }
       } else if (code.length >= 15) docId = raw.trim();
     }
     if (!docId) return alert('⚠️ そのコードの共有カテゴリーが見つかりませんでした。');

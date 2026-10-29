@@ -14,7 +14,7 @@ const CORE_FILES = [
   './version-info.js', './release-notes.js', './config.js', './utils.js', './storage.js', './tree.js', './pages.js', './box.js',
   './quiz.js', './context-menu.js', './import-export.js', './batch-add.js', './scan-import.js', './shared.js', './stats.js',
   './social.js', './match.js', './safety.js', './updates.js', './auth.js', './main.js', './rich-content.js', './rich-editors.js',
-  './chem-search.js', './notify.js',
+  './chem-search.js', './notify.js', './ai.js', './picker.js', './drill.js', './plan.js', './race.js', './text-import.js',
   './icons/icon-192.png', './icons/icon-512.png', './icons/badge-96.png', './icons/apple-touch-icon.png', './icons/favicon-48.png'
 ];
 const CDN_HOSTS = ['cdn.jsdelivr.net', 'cdnjs.cloudflare.com', 'unpkg.com', 'www.gstatic.com', 'fonts.googleapis.com', 'fonts.gstatic.com'];
@@ -90,7 +90,8 @@ self.addEventListener('notificationclick', event => {
   event.notification.close();
   const target = new URL((event.notification.data && event.notification.data.url) || './', self.registration.scope).href;
   event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
-    for (const c of list) { if (c.url.startsWith(self.registration.scope) && 'focus' in c) return c.focus(); }
+    // ★【0.03.36】開いている画面があれば、その画面に「このURLを開いて」と伝える（週間プランの課題をそのまま始める）
+    for (const c of list) { if (c.url.startsWith(self.registration.scope) && 'focus' in c) { if (/[?&]plantask=/.test(target)) c.postMessage({ type: 'open-url', url: target }); return c.focus(); } }
     return self.clients.openWindow(target);
   }));
 });

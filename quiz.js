@@ -115,7 +115,7 @@ function buildQuizScopeDropdown() {
   const container = document.getElementById('scopeSelectors'); if(!container) return;
   loadScopePath();
   renderScopeSubjectSelect();
-  // ★【0.03.02】保存されたパスを「全階層」復元する（以前は最上位しか復元されず、クイズ後にトップだけの表示に戻っていた）
+  // ★【0.03.02】保存されたパスを「全階層」復元する
   let path = [];
   if (selectedScopePath[0] === 'all') path = ['all'];
   else {
@@ -127,30 +127,15 @@ function buildQuizScopeDropdown() {
     }
   }
   selectedScopePath = path;
-  container.innerHTML = ''; createScopeSelect(0, getTopLevelCategories().filter(scopeVisible));
-  if (path[0] === 'all') { const s0 = container.querySelector('select'); if (s0) s0.value = 'all'; return; }
-  path.forEach((val, depth) => {
-    const sel = container.querySelectorAll('select')[depth];
-    if (!sel) return;
-    sel.value = val;
-    const children = getChildCategories(val).filter(scopeVisible);
-    if (children.length > 0) createScopeSelect(depth + 1, children);
-  });
+  // ★【0.03.49】段々のプルダウンをやめて、フォルダーのツリーから選ぶ（picker.js）
+  const cur = path.length && path[0] !== 'all' ? path[path.length - 1] : '';
+  container.innerHTML = folderPickButtonHTML(cur, 'すべてのフォルダーから出題', 'pickQuizScope()', cur ? `${(fpCardCounts()[cur] || 0)}問` : `${db.filter(q => q.kind !== 'intro').length}問`);
 }
-function createScopeSelect(depth, categoriesToShow) {
-  if (categoriesToShow.length === 0) return;
-  const select = document.createElement('select'); select.className = 'form-control';
-  if (depth === 0) { const optAll = document.createElement('option'); optAll.value = "all"; optAll.innerText = "🌐 全てから出題"; select.appendChild(optAll); }
-  const optDefault = document.createElement('option'); optDefault.value = ""; optDefault.innerText = depth === 0 ? "📁 トップカテゴリー..." : "📂 サブカテゴリー..."; optDefault.disabled = true; optDefault.selected = true; select.appendChild(optDefault);
-  categoriesToShow.forEach(cat => { const opt = document.createElement('option'); opt.value = cat; opt.innerText = depth === 0 ? `📁 ${cat}` : `📂 ${cat}`; select.appendChild(opt); });
-  select.onchange = (e) => {
-    const val = e.target.value; const container = document.getElementById('scopeSelectors');
-    const selects = Array.from(container.querySelectorAll('select')); selects.forEach((sel, idx) => { if (idx > depth) sel.remove(); });
-    if (val === "all") { selectedScopePath = ["all"]; saveScopePath(); return; }
-    selectedScopePath[depth] = val; selectedScopePath = selectedScopePath.slice(0, depth + 1); saveScopePath();
-    const children = getChildCategories(val).filter(scopeVisible); if (children.length > 0) createScopeSelect(depth + 1, children);
-  };
-  document.getElementById('scopeSelectors').appendChild(select);
+function pickQuizScope() {
+  const cur = selectedScopePath.length && selectedScopePath[0] !== 'all' ? selectedScopePath[selectedScopePath.length - 1] : '';
+  openFolderPicker({ title: '🎯 出題範囲を選ぶ', current: cur, allLabel: '🌐 すべてのフォルダーから出題', selectable: scopeVisible,
+    hint: 'フォルダーを選ぶと、その下のフォルダーの問題も出題します（「上から出題しない」にしたフォルダーは除く）',
+    onPick: c => { selectedScopePath = c ? getCategoryPath(c) : ['all']; saveScopePath(); buildQuizScopeDropdown(); } });
 }
 
 // ★【0.02.63】このラウンドの構造化解答（品詞タグ付き複数解答）。null なら通常の単一解答。
@@ -159,6 +144,90 @@ let currentStructuredAnswer = null;
 let currentRoundMode = 'desc';
 
 // ★【0.03.00】クイズを途中でやめてホームに戻る（それまでの解答結果は保存済み）
+// ================================================================
+// ★【0.03.37】クイズの結果の画面（解いた問題ごとに、正誤・レベルの変化・今のランク）
+// ================================================================
+let _quizSession = { results: [], startedAt: 0 };
+const SRS_STATUS = { grad: { n: '🎓 卒業', c: 'var(--success)' }, master: { n: '⚡ 得意', c: 'var(--primary)' }, normal: { n: '☕ 普通', c: 'var(--warn)' }, weak: { n: '⚠️ 苦手', c: 'var(--danger)' }, shikkari: { n: '🧱 しっかり', c: '#9aa0a6' }, unseen: { n: '💤 未着手', c: 'var(--text3)' } };
+function srsStatusOf(t) {
+  if (!t) return 'unseen';
+  if (isGraduated(t)) return 'grad';
+  if (t.level === -1) return 'shikkari';
+  if (t.level >= 3) return 'master';
+  if (t.level >= 1) return 'normal';
+  return (t.correct || 0) + (t.incorrect || 0) > 0 ? 'weak' : 'unseen';
+}
+function recordQuizSessionResult(cur, isCorrect, isPass, regrade, m, senseKey, before) {
+  if (window.currentOnlineMatch || !cur) return;
+  const t = m ? (senseKey ? m.senses[senseKey] : m) : null;
+  const key = (cur._sourceId || cur.id) + '\u0001' + (cur._senseKey || '') + '\u0001' + (cur._swapped ? 's' : '');
+  const list = _quizSession.results;
+  const r = { key, id: cur._sourceId || cur.id, q: cur.question, a: getPrimaryAnswer(cur.answer), label: cur._senseLabel || '', swapped: !!cur._swapped,
+    correct: !!isCorrect, pass: !!isPass, stars: m ? m.stars || 0 : 0,
+    before: before || (t ? { level: t.level, status: srsStatusOf(t) } : null), after: t ? { level: t.level, status: srsStatusOf(t), l5: t.level5Correct || 0 } : null };
+  // 採点のやり直しは、同じ問題の記録を置き換える（変化の前は最初の記録のまま）
+  if (regrade && list.length && list[list.length - 1].key === key) { r.before = list[list.length - 1].before; list[list.length - 1] = r; }
+  else list.push(r);
+}
+function lvText(x) { return !x ? '—' : x.status === 'grad' ? '🎓' : x.level === -1 ? 'しっかり' : 'Lv' + (Number(x.level) || 0); }
+function showQuizResults() {
+  const res = _quizSession.results;
+  openPage('pgQuizResult');
+  const box = document.getElementById('quizResultBox');
+  if (!res.length) { box.innerHTML = '<div class="card"><div class="hint-small">解いた問題はありません。</div></div>'; return; }
+  const n = res.filter(r => !r.pass).length, ok = res.filter(r => r.correct).length;
+  const up = res.filter(r => r.before && r.after && (r.after.level > r.before.level || (r.after.status === 'grad' && r.before.status !== 'grad'))).length;
+  const down = res.filter(r => r.before && r.after && r.after.level < r.before.level).length;
+  const grad = res.filter(r => r.after && r.after.status === 'grad' && r.before && r.before.status !== 'grad').length;
+  const secs = Math.round((Date.now() - (_quizSession.startedAt || Date.now())) / 1000);
+  const statusCount = {}; res.forEach(r => { if (r.after) statusCount[r.after.status] = (statusCount[r.after.status] || 0) + 1; });
+  const chip = s => `<span class="res-chip" style="--c:${SRS_STATUS[s].c}">${SRS_STATUS[s].n}</span>`;
+  box.innerHTML = `
+    <div class="card res-summary">
+      <div class="res-score">${ok}<span>/ ${n} 問正解</span></div>
+      <div class="hint-small">正答率 ${n ? Math.round(ok / n * 100) : 0}% ・ ${Math.floor(secs / 60)}分${secs % 60}秒</div>
+      <div class="res-stats"><div><b style="color:var(--success);">⬆ ${up}</b><span>レベルアップ</span></div><div><b style="color:var(--danger);">⬇ ${down}</b><span>レベルダウン</span></div><div><b style="color:var(--success);">🎓 ${grad}</b><span>卒業</span></div></div>
+      <div class="res-status">${Object.keys(SRS_STATUS).filter(s => statusCount[s]).map(s => `${chip(s)} ${statusCount[s]}`).join('　')}</div>
+    </div>
+    <div class="res-filter"><button class="chip active" data-f="all">すべて ${res.length}</button><button class="chip" data-f="ng">✕ 間違い ${res.filter(r => !r.correct).length}</button><button class="chip" data-f="chg">↕ 変化あり ${res.filter(r => r.before && r.after && r.before.level !== r.after.level || (r.after && r.before && r.after.status !== r.before.status)).length}</button></div>
+    <div id="quizResultList">${res.map((r, i) => {
+      const changed = r.before && r.after && (r.before.level !== r.after.level || r.before.status !== r.after.status);
+      const arrow = !r.before || !r.after ? '' : r.after.level > r.before.level || (r.after.status === 'grad' && r.before.status !== 'grad') ? '<b class="res-up">⬆</b>' : r.after.level < r.before.level ? '<b class="res-down">⬇</b>' : '<span class="res-same">→</span>';
+      return `<div class="res-row ${r.correct ? 'ok' : 'ng'}" data-ng="${r.correct ? 0 : 1}" data-chg="${changed ? 1 : 0}">
+        <div class="res-mark">${r.pass ? '🏳️' : r.correct ? '⭕' : '✕'}</div>
+        <div class="res-body"><div class="res-q">${renderRichText(r.q, { escape: true })}${r.label ? ` <span class="res-label">[${escapeHtml(r.label)}]</span>` : ''}${r.stars ? ` <span class="card-stars">${starsText(r.stars)}</span>` : ''}</div>
+          <div class="res-a">${renderRichText(r.a, { escape: true })}</div></div>
+        <div class="res-lv">${r.after ? `<div>${lvText(r.before)} ${arrow} <b>${lvText(r.after)}</b></div>${chip(r.after.status)}${r.after.status !== 'grad' && r.after.level >= 5 ? `<div class="hint-small">卒業まで ${Math.max(0, Math.ceil(getGradThreshold() - r.after.l5))}</div>` : ''}` : ''}</div>
+      </div>`; }).join('')}</div>
+    <div class="plan-btns" style="margin-top:12px;">
+      ${res.some(r => !r.correct) ? '<button class="btn btn-accent" onclick="retryQuizMistakes()">🔁 間違えた問題をもう一度</button>' : ''}
+      <button class="btn btn-secondary" onclick="openPage(\'pgHome\')">🏠 ホーム</button>
+    </div>
+    <button class="btn btn-secondary" style="margin-top:8px;" onclick="openPage('pgStats')">📊 実績を見る</button>`;
+  hydrateRich(box);
+  box.querySelectorAll('.res-filter .chip').forEach(b => b.onclick = () => {
+    box.querySelectorAll('.res-filter .chip').forEach(x => x.classList.toggle('active', x === b));
+    const f = b.dataset.f;
+    box.querySelectorAll('.res-row').forEach(row => { row.style.display = f === 'all' || (f === 'ng' && row.dataset.ng === '1') || (f === 'chg' && row.dataset.chg === '1') ? '' : 'none'; });
+  });
+}
+// 間違えた問題だけでもう一度
+function retryQuizMistakes() {
+  const wrong = _quizSession.results.filter(r => !r.correct);
+  const pool = [];
+  wrong.forEach(r => {
+    const card = db.find(q => q.id === r.id); if (!card) return;
+    let e = card;
+    if (r.label || /\u0001.+\u0001/.test(r.key)) { const sk = r.key.split('\u0001')[1]; const ex = expandSenses([card]).find(x => x._senseKey === sk); if (ex) e = ex; }
+    if (r.swapped) e = swapQuizEntry(e);
+    pool.push(e);
+  });
+  if (!pool.length) return alert('もう一度出せる問題がありません。');
+  currentCombo = 0; todayCorrectCount = 0; currentQuizOrderScope = null;
+  quizPool = pool; quizIndex = 0;
+  openPage('pgQuizPlayer'); loadQuizQuestion();
+}
+
 function quitQuiz() {
   if (window.currentOnlineMatch) {
     if (!confirm('⚔️ 対戦中です。中断してホームに戻りますか？')) return;
@@ -167,7 +236,9 @@ function quitQuiz() {
   }
   stopQuizTimer(); clearTimeout(autoNextTimeout);
   lastQuizScopePath = [...selectedScopePath];
-  openPage('pgHome');
+  // ★【0.03.37】途中でやめても、解いた問題があれば結果を見せる
+  if (!window.currentOnlineMatch && _quizSession.results.length) showQuizResults();
+  else openPage('pgHome');
 }
 
 // ================================================================
@@ -187,11 +258,13 @@ function loadQuizOrderPosition(scope) { try { return localStorage.getItem(quizOr
 // 番号順（続きから）で解いた最後のカードを覚えておく
 function recordQuizOrderProgress(cur) {
   if (!currentQuizOrderScope || !cur || window.currentOnlineMatch) return;
-  try { localStorage.setItem(quizOrderKey(currentQuizOrderScope), cur._sourceId || cur.id); } catch (e) {}
+  // ★【0.03.17】意味ごとの問題なら、どの意味まで解いたかも覚える（「カードID\u0001意味」）
+  const pos = (cur._sourceId || cur.id) + (cur._senseKey ? '\u0001' + cur._senseKey : '');
+  try { localStorage.setItem(quizOrderKey(currentQuizOrderScope), pos); } catch (e) {}
 }
 
 const QUIZ_PREF_KEY = 'susuru_anki_quiz_prefs';
-const QUIZ_PREF_IDS = ['selQuizMode', 'selQuizSpeed', 'selHintMode', 'selQuizOrder', 'numQCount', 'numTimeLimit', 'numAutoNext', 'numGradThreshold', 'chkTTS', 'chkTimeAttack', 'chkIncludeGrad', 'chkSwapQA'];
+const QUIZ_PREF_IDS = ['selQuizMode', 'selQuizSpeed', 'selHintMode', 'chkFocusMode', 'selQuizOrder', 'numQCount', 'numTimeLimit', 'numAutoNext', 'numGradThreshold', 'chkTTS', 'chkTimeAttack', 'chkIncludeGrad', 'chkSwapQA', 'chkVerbAttr'];
 function saveQuizPrefs() {
   const o = {};
   QUIZ_PREF_IDS.forEach(id => { const el = document.getElementById(id); if (el) o[id] = el.type === 'checkbox' ? el.checked : el.value; });
@@ -249,6 +322,25 @@ function isAnswerCorrect(input, correctAnswer) {
 // 品詞タグ付き構造化解答(例: adapt の他動詞/自動詞)を持つカードは、
 // タグ(意味)ごとに独立した単発の問題として連続で出題する。
 // 生成される仮想エントリーは quizPool 内のみに存在し、db には反映されない。
+// ★【0.03.17】意味（品詞タグ）ごとに独立した問題にする（全部の形式で）。意味ごとの成績を問題に写して、優先順位・卒業の判定に使う
+function expandSenses(cards) {
+  const result = [];
+  cards.forEach(card => {
+    if (card.kind === 'intro') return; // ★【0.03.44】導入の文は問題にしない
+    const list = cardSenseList(card);
+    if (!list) { result.push(card); return; }
+    const view = senseStatsView(card, list);
+    list.forEach(sn => {
+      const st = view[sn.key] || {};
+      const e = { ...card, answer: sn.text, _sourceId: card.id, _senseKey: sn.key, _senseLabel: sn.label };
+      SENSE_STAT_FIELDS.forEach(f => { e[f] = Number(st[f]) || 0; });
+      delete e.senses;
+      result.push(e);
+    });
+  });
+  return result;
+}
+
 function expandStructuredForChoiceModes(cards) {
   const result = [];
   cards.forEach(card => {
@@ -265,7 +357,7 @@ function expandStructuredForChoiceModes(cards) {
 }
 
 async function startQuiz(modeType = 'normal') {
-  currentCombo = 0; todayCorrectCount = 0;
+  currentCombo = 0; todayCorrectCount = 0; _quizModeOverride = null;
   if (selectedScopePath.length === 0 && lastQuizScopePath.length > 0) selectedScopePath = [...lastQuizScopePath];
   let scope = "all";
   if (selectedScopePath.length > 0 && selectedScopePath[0] !== "all") scope = "cat:" + selectedScopePath[selectedScopePath.length - 1];
@@ -273,14 +365,15 @@ async function startQuiz(modeType = 'normal') {
   const includeGrad = document.getElementById('chkIncludeGrad').checked;
   const limitCount = parseInt(document.getElementById('numQCount').value) || 10;
 
-  let subset = [...db];
+  // ★【0.03.17】意味ごとに分けてから選ぶ（覚えた意味は出にくく、覚えていない意味が出やすくなる）
+  let subset = window.currentOnlineMatch ? db.filter(q => q.kind !== 'intro') : expandSenses(db);
   if (modeType === 'tokkun') subset = subset.filter(q => q.level <= 0 || q.level === -1);
   else if (modeType === 'review') subset = subset.filter(q => isGraduated(q));
   else if (!includeGrad) subset = subset.filter(q => !(isGraduated(q)));
 
   if(scope.startsWith('cat:')) {
     const cName = scope.replace('cat:', '');
-    const targets = getAllSubcategories(cName);
+    const targets = getQuizSubcategories(cName); // ★【0.03.30】「上から出題するときは出さない」フォルダーを除く
     subset = subset.filter(q => targets.includes(q.category));
   }
   // ★【0.03.07】教科で絞り込み中なら、その教科のフォルダーの問題だけ
@@ -329,7 +422,11 @@ async function startQuiz(modeType = 'normal') {
     let start = 0;
     if (order === 'continue') {
       const lastId = loadQuizOrderPosition(scope);
-      const idx = lastId ? subset.findIndex(q => q.id === lastId) : -1;
+      // 最後に解いた問題（意味ごとの問題なら、その意味）の次から。意味が分からないときは、そのカードの最後の意味の次から
+      const [lastCard, lastSense] = String(lastId || '').split('\u0001');
+      let idx = -1;
+      if (lastCard && lastSense) idx = subset.findIndex(q => q.id === lastCard && q._senseKey === lastSense);
+      if (lastCard && idx < 0) for (let i = subset.length - 1; i >= 0; i--) { if (subset[i].id === lastCard) { idx = i; break; } }
       start = idx >= 0 ? (idx + 1) % subset.length : 0;
     }
     quizPool = [...subset.slice(start), ...subset.slice(0, start)].slice(0, limitCount);
@@ -349,16 +446,63 @@ async function startQuiz(modeType = 'normal') {
   }
   quizIndex = 0;
 
+  // 問題と答えの入れ替え（意味ごとに分けたあとなので「意味 → 見出し語」になる）
   if (document.getElementById('chkSwapQA').checked) quizPool = quizPool.map(swapQuizEntry);
-  // ★【0.02.65】選択式モードは品詞タグごとに独立した問題として連続出題する
-  if (['choice', 'minhaya', 'tap'].includes(document.getElementById('selQuizMode').value)) {
-    quizPool = expandStructuredForChoiceModes(quizPool);
-  }
+  quizPool = arrangeVerbFlow(quizPool);
   openPage('pgQuizPlayer'); loadQuizQuestion();
 }
 
+// ★【0.03.40】動詞（自動詞・他動詞のタグがあるカード）は、自動詞の意味 → 他動詞の意味 → 「自動詞？他動詞？自他両用？」→
+//  （両方あるとき）意味ごとに「自動詞？他動詞？」→ その動詞の熟語・チャンク（communicate with A など。登録順）の順に続けて出す。
+//  自動詞・他動詞を聞く問題は、どの形式でも選択式。レベルは動かさない（正解数・学習記録には入る）
+function verbAttrSegs(card) {
+  const st = parseStructuredAnswer(card && card.answer);
+  if (!st || st.some(s => /句動詞|熟語|成句/.test(s.label))) return null;
+  const segs = st.filter(s => /自動詞|他動詞/.test(s.label));
+  return segs.length ? segs : null;
+}
+function verbAttrEntries(card) {
+  const segs = verbAttrSegs(card); if (!segs) return [];
+  const ji = segs.some(s => /自動詞/.test(s.label)), ta = segs.some(s => /他動詞/.test(s.label));
+  const base = { category: card.category, note: card.note, _sourceId: card.id, _attrQ: true, level: 0, correct: 0, incorrect: 0 };
+  const out = [{ ...base, id: card.id + '#attr', question: `${card.question}\nこの動詞は？`, answer: ji && ta ? '自他両用' : ji ? '自動詞' : '他動詞', choices: ['自動詞', '他動詞', '自他両用'], _senseKey: '#attr' }];
+  if (ji && ta) segs.forEach((s, i) => out.push({ ...base, id: card.id + '#attr' + i, question: `${card.question}\n「${stripParens(s.text).replace(/\s+/g, ' ').trim()}」の意味のときは？`, answer: /自動詞/.test(s.label) ? '自動詞' : '他動詞', choices: ['自動詞', '他動詞'], _senseKey: '#attr' + i }));
+  return out;
+}
+function arrangeVerbFlow(pool) {
+  if (window.currentOnlineMatch || !pool.length) return pool;
+  const el = document.getElementById('chkVerbAttr'); if (el && !el.checked) return pool;
+  const byId = new Map(db.map(q => [q.id, q]));
+  const src = e => byId.get(e._sourceId || e.id);
+  const verbs = new Map(); // 動詞の見出し語（小文字）→ カード
+  pool.forEach(e => { const c = src(e); if (c && !e._attrQ && verbAttrSegs(c) && /^[A-Za-z][A-Za-z'-]*$/.test(String(c.question).trim())) verbs.set(String(c.question).trim().toLowerCase(), c); });
+  if (!verbs.size) return pool;
+  const verbOfPhrase = e => { const c = src(e); if (!c || verbs.has(String(c.question).trim().toLowerCase())) return null; const w = String(c.question).trim().toLowerCase().split(/\s+/); return w.length > 1 && verbs.has(w[0]) ? verbs.get(w[0]) : null; };
+  const groups = new Map(); const out = [];
+  pool.forEach(e => {
+    const c = src(e); const v = c && verbs.get(String(c.question).trim().toLowerCase()) === c ? c : verbOfPhrase(e);
+    if (!v) { out.push(e); return; }
+    let g = groups.get(v.id);
+    if (!g) { g = { v, senses: [], phrases: [] }; groups.set(v.id, g); out.push(g); }
+    (v === c ? g.senses : g.phrases).push(e);
+  });
+  const ord = sortCardsByNumber(db.slice()); const pos = new Map(ord.map((q, i) => [q.id, i]));
+  const jiFirst = e => /自動詞/.test(e._senseLabel || '') ? 0 : /他動詞/.test(e._senseLabel || '') ? 1 : 2;
+  return out.flatMap(x => {
+    if (!x.v) return [x];
+    const senses = x.senses.slice().sort((a, b) => jiFirst(a) - jiFirst(b));
+    const phrases = x.phrases.slice().sort((a, b) => (pos.get(a._sourceId || a.id) || 0) - (pos.get(b._sourceId || b.id) || 0));
+    return [...senses, ...(senses.length ? verbAttrEntries(x.v) : []), ...phrases];
+  });
+}
+
+let _quizModeOverride = null; // ★【0.03.44】このクイズだけ形式を決める（planStartQuiz から）
 function loadQuizQuestion() {
+  if (quizIndex === 0) _quizSession = { results: [], startedAt: Date.now() }; // ★【0.03.37】結果の画面用
   quizPhase='q'; selectedChoiceIdx=null; window.currentSelfJudge=null;
+  _focus = { attempts: 0 }; // ★【0.03.18】重点モードの答え直しの回数
+  _multi = null; // ★【0.03.21】意味の聞き直し
+  const _fs = document.getElementById('lblFocusStatus'); if (_fs) { _fs.style.display = 'none'; _fs.textContent = ''; _fs.classList.remove('multi'); }
   const cur = quizPool[quizIndex];
 
   // ★【0.02.63】品詞タグ付き構造化解答の判定（このラウンドで使い回すのでキャッシュしておく）
@@ -401,20 +545,21 @@ function loadQuizQuestion() {
     speakText(qSpeech);
   }
   // ★【0.03.02】テスト形式で選択肢があるカードは、記述式でも選択肢を問題文の下に表示する
-  if (Array.isArray(cur.choices) && cur.choices.length) {
+  if (Array.isArray(cur.choices) && cur.choices.length && !cur._attrQ) {
     const chDiv = document.createElement('div');
     chDiv.className = 'quiz-card-choices';
     chDiv.innerText = cur.choices.join(' ／ ');
     qEl.appendChild(chDiv);
   }
 
-  let mode = document.getElementById('selQuizMode').value;
+  let mode = _quizModeOverride || document.getElementById('selQuizMode').value;
   // ★【0.03.00】答えが構造式・漢文ブロック・数式の場合は文字入力できないので、記述・みんはや・文字タップは自己申告で出題する
   const _primary = getPrimaryAnswer(cur.answer);
   const richAnswer = hasRichBlock(_primary) || /\$[^$]+\$/.test(_primary);
   if (richAnswer && ['desc', 'minhaya', 'tap'].includes(mode)) mode = 'self';
   // ★【0.03.05】「自己申告」形式のカード（答えが列挙などで文字入力に向かない）は、入力モードでは自己申告で出題する
   if (cur.kind === 'self' && ['desc', 'minhaya', 'tap'].includes(mode)) mode = 'self';
+  if (cur._attrQ) mode = 'choice'; // ★【0.03.40】自動詞・他動詞を聞く問題は、どの形式でも選択式
   currentRoundMode = mode;
   ['boxChoiceArea','boxDescArea','boxMinhayaArea','boxSelfArea', 'boxTapArea'].forEach(id=>document.getElementById(id).style.display='none');
   document.getElementById('btnQuizAction').style.display='inline-flex'; document.getElementById('btnQuizPass').style.display='inline-flex';
@@ -457,10 +602,16 @@ function loadQuizQuestion() {
   hb.style.display = 'none'; hb.innerHTML = '';
   const speed = document.getElementById('selQuizSpeed').value;
   // ★【0.03.08】ヒントのオン・オフ（自動＝「すごい」以外はオン）
-  const hintsOn = hintsEnabled(speed);
+  const hintsOn = hintsEnabled(speed) && !cur._attrQ;
   quizHintState = hintsOn ? buildHintStages(cur, mode, aStructured, richAnswer) : { stages: [], shown: 0 };
   const hintBtn = document.getElementById('btnQuizHint');
   if (hintBtn) hintBtn.style.display = (quizHintState.stages.length && !window.currentOnlineMatch) ? 'inline-flex' : 'none';
+  // ★【0.03.15】AI ヒント（ヒントがオンで、AI が使えるとき）
+  const aiHintBtn = document.getElementById('btnQuizAiHint');
+  if (aiHintBtn) {
+    const showAi = hintsOn && !window.currentOnlineMatch && typeof aiAvailable === 'function' && aiAvailable() && getAiPrefs().hint && !richAnswer && !isBinaryCard(cur);
+    aiHintBtn.style.display = showAi ? 'inline-flex' : 'none'; aiHintBtn.disabled = false; aiHintBtn.innerText = '🤖 AIヒント';
+  }
   const autoHintAt = speed === 'easy' ? [0.15, 0.35, 0.6] : [0.25, 0.55, 0.8];
   const _timerStart = Date.now();
   const _timerBase = base;
@@ -476,6 +627,8 @@ function loadQuizQuestion() {
     updateTimerUI();
     if (quizTimeLeft <= 0) {
       stopQuizTimer();
+      // ★【0.03.18】重点モードなら、時間切れも「答えられなかった」としてヒントを出して答え直す
+      if (focusEnabled(quizPool[quizIndex])) { const c = quizPool[quizIndex]; concludeAttempt(c, false, { typed: currentRoundMode === 'desc', given: '', kind: 'blank', choice: currentRoundMode === 'choice', structuredWrong: currentStructuredAnswer ? currentStructuredAnswer.map((x, i) => i) : undefined }); return; }
       evaluateRoundAnswer(false, "⏰ 時間切れ");
       return;
     }
@@ -519,6 +672,15 @@ function maskAnswerInText(text, answer) {
   });
   return out;
 }
+// ★【0.03.23】もともと選択肢から選ぶ問題（Same/Opposite・Yes/No・選択肢つきのテスト）。
+//  記述式で出しても、頭文字や文字数のヒントは答えそのものになるので出さない
+const BINARY_ANSWER_RE = /^(yes|no|true|false|same|opposite|similar|different|correct|incorrect|right|wrong|t|f|○|×|〇|✕|はい|いいえ|正しい|誤り|正|誤|同じ|反対|同意|反意|同義|反義)$/i;
+function isChoiceCard(cur) { return !!cur && Array.isArray(cur.choices) && cur.choices.length >= 2; }
+function isBinaryCard(cur) {
+  if (!cur) return false;
+  if (Array.isArray(cur.choices) && cur.choices.length === 2) return true;
+  return BINARY_ANSWER_RE.test(String(cur.answer || '').trim());
+}
 function buildHintStages(cur, mode, structured, richAnswer) {
   const stages = [];
   const note = String(cur.note || '').trim();
@@ -526,20 +688,30 @@ function buildHintStages(cur, mode, structured, richAnswer) {
   // ★【0.03.08】和訳・英単語を隠すのは英語（または教科なし）のフォルダーだけ。化学などでは化学式を隠さない
   const hidden = noteHidingApplies(cur.category) ? hideNoteTranslations(note, isLatinAnswer(getPrimaryAnswer(cur.answer))) : note;
   if (note) stages.push({ memo: true, html: '📝 ' + escapeHtml(maskAnswerInText(hidden, cur.answer)).replace(/\n/g, '<br>') });
-  if (richAnswer || mode !== 'desc') return { stages, shown: 0 };
+  // ★【0.03.18】何度も必要になった AI のヒント（この端末に覚えたもの）
+  if (typeof aiMemoryHintsFor === 'function' && !window.currentOnlineMatch && !isBinaryCard(cur)) {
+    const mh = aiMemoryHintsFor(cur, 2);
+    if (mh.length) stages.push({ ai: true, html: mh.map(it => '🤖 ' + escapeHtml(it.h)).join('<br>') });
+  }
+  if (richAnswer || mode !== 'desc' || isChoiceCard(cur) || isBinaryCard(cur)) return { stages, shown: 0 };
   if (structured) {
     stages.push({ structured: structured.map(seg => seg.text.charAt(0)) });
   } else {
-    const ans = getPrimaryAnswer(cur.answer);
-    const chars = [...ans];
-    stages.push({ html: `🔤 先頭は「 ${escapeHtml(chars[0] || '')} 」 （全 ${chars.length} 文字）` });
-    if (chars.length >= 4) {
-      const n = Math.ceil(chars.length / 2);
-      const shown = chars.map((c, i) => i < n || /[\s　]/.test(c) ? c : '＿').join('');
-      stages.push({ html: `🔤 ${escapeHtml(shown)}` });
-    }
+    // 意味ごとの問題は、全角スペース・読点で区切った言い換えの最初のものでヒントを出す
+    const ans = (cur._senseKey && !cur._swapped) ? (String(cur.answer).split(/[\u3000、，,|]/)[0].trim() || getPrimaryAnswer(cur.answer)) : getPrimaryAnswer(cur.answer);
+    stages.push(...letterHintStages(ans));
   }
   return { stages, shown: 0 };
+}
+function letterHintStages(ans) {
+  const chars = [...String(ans || '')];
+  if (!chars.length) return [];
+  const out = [{ html: `🔤 先頭は「 ${escapeHtml(chars[0] || '')} 」 （全 ${chars.length} 文字）` }];
+  if (chars.length >= 4) {
+    const n = Math.ceil(chars.length / 2);
+    out.push({ html: `🔤 ${escapeHtml(chars.map((c, i) => i < n || /[\s　]/.test(c) ? c : '＿').join(''))}` });
+  }
+  return out;
 }
 function showNextHint() {
   if (quizPhase !== 'q' || window.currentOnlineMatch) return;
@@ -668,9 +840,14 @@ function buildChoiceCandidates(cur, correctPrimary) {
   const normCorrect = normalizeAnswer(correctPrimary);
   const seen = new Set([normCorrect]);
   const pool = [];
+  // ★【0.03.25】ダミーは、同じフォルダー → 1つ上のフォルダー（の下）から選ぶ。足りないときだけほかのフォルダーから
+  const cat = cur.category || (db.find(q => q.id === (cur._sourceId || cur.id)) || {}).category;
+  const parent = cat && typeof getCategoryParent === 'function' ? getCategoryParent(cat) : null;
+  const near = new Set(parent ? getAllSubcategories(parent) : (cat ? [cat] : []));
   db.forEach(q => {
     if (q.id === cur.id || q.id === cur._sourceId) return;
     if (Array.isArray(q.choices) && q.choices.length) return; // テスト問題の Yes/No 等は混ぜない
+    if (q.kind === 'intro') return; // 導入の文
     const info = choiceInfoOf(q, swapped);
     const t = info.t;
     if (!t) return;
@@ -682,12 +859,13 @@ function buildChoiceCandidates(cur, correctPrimary) {
     if (sh.rich === want.rich) score += 6;             // 構造式つきの答えには構造式つきの選択肢
     if (sh.ph === want.ph) score += 3;                 // 「A」「～」入りの熟語なら熟語どうし
     if (Math.abs(sh.words - want.words) <= 1) score += 2;
-    if (q.category === cur.category) score += 2;
     if (q.kind === cur.kind) score += 1;
-    pool.push({ t, score: score + Math.random() * 1.5 });
+    const tier = q.category === cat ? 0 : near.has(q.category) ? 1 : 2;
+    pool.push({ t, tier, score: score + (tier === 0 ? 3 : 0) + Math.random() * 1.5 });
   });
-  pool.sort((a, b) => b.score - a.score);
-  return pool.map(p => p.t);
+  const nearPool = pool.filter(p => p.tier < 2).sort((a, b) => b.score - a.score);
+  const far = pool.filter(p => p.tier === 2).sort((a, b) => b.score - a.score);
+  return nearPool.concat(far).map(p => p.t);
 }
 
 function buildFourChoices(cur) {
@@ -702,15 +880,16 @@ function buildFourChoices(cur) {
     options = [correctPrimary, ...buildChoiceCandidates(cur, correctPrimary).slice(0, 3)];
     while (options.length < 4) options.push(`選択肢_${Math.floor(Math.random()*1000)}`);
   }
-  options.sort(() => Math.random() - 0.5);
+  if (!cur._attrQ) options.sort(() => Math.random() - 0.5); // 自動詞・他動詞は決まった順
 
   options.forEach((text, i) => {
     const btn = document.createElement('button'); btn.className = 'choice-btn';
     btn.innerHTML = `<div class="choice-idx">${i+1}</div><div style="flex:1;">${renderRichText(text, { escape: true, kanbunRows: 8 })}</div>`;
     hydrateRich(btn, { chemScale: 1.1 });
+    btn._choiceText = text;
     btn.onclick = () => {
-      if(quizPhase !== 'q') return;
-      document.querySelectorAll('.choice-btn').forEach(b => b.style.borderColor = 'var(--border)');
+      if(quizPhase !== 'q' || btn.disabled) return;
+      document.querySelectorAll('.choice-btn').forEach(b => { if (!b.disabled) b.style.borderColor = 'var(--border)'; });
       btn.style.borderColor = 'var(--primary)'; selectedChoiceIdx = text;
     };
     area.appendChild(btn);
@@ -859,6 +1038,12 @@ function submitSelfMode(judge) {
 
 function passQuizQuestion() {
   stopQuizTimer();
+  if (_aiJudging || _focusBusy) return;
+  // ★【0.03.21】意味の聞き直しの途中でパスしたら、答えられた分は「一部正解」
+  if (_multi && _multi.found.length && quizPhase === 'q') {
+    const fs = document.getElementById('lblFocusStatus'); if (fs) fs.style.display = 'none';
+    return finishPartialMeanings(multiFoundNames(), _focus.attempts + 1, { typed: true, given: multiFoundNames().join('、') });
+  }
   // ★【0.03.06】パスは不正解として記録する
   evaluateRoundAnswer(false, "🏳️ パスしました（不正解として記録）");
 }
@@ -885,20 +1070,349 @@ function submitQuizAction() {
               [window.currentOnlineMatch.myRole + '.finished']: true
           }).catch(()=>{});
       } else {
-          alert("🏁 クイズ終了！実績を確認しましょう。");
-          openPage('pgStats');
+          showQuizResults(); // ★【0.03.37】解いた問題ごとの結果
       }
     }
     return;
   }
   
+  if (_aiJudging || _focusBusy) return; // AI の判定中・ヒントの用意中
   stopQuizTimer();
-  const cur = quizPool[quizIndex]; let isCorrect = false;
+  const cur = quizPool[quizIndex];
   const mode = currentRoundMode;
-  if (mode === 'choice') { if(!selectedChoiceIdx) return; isCorrect = isAnswerCorrect(selectedChoiceIdx, cur.answer); } 
-  else if (currentStructuredAnswer) { isCorrect = gradeStructuredAnswer(currentStructuredAnswer); }
-  else { isCorrect = isAnswerCorrect(document.getElementById('txtDescAnswer').value, cur.answer); }
-  evaluateRoundAnswer(isCorrect, isCorrect ? "🎉 正解！" : "❌ 不正解");
+  if (mode === 'choice') {
+    if (!selectedChoiceIdx) return;
+    const given = selectedChoiceIdx;
+    return concludeAttempt(cur, isAnswerCorrect(given, cur.answer), { given, kind: 'wrong', choice: true });
+  }
+  // ★【0.03.21】意味をいくつも並べた答え（地域社会、共同体 など）で、一部だけ答えたら、ほかの意味も聞き直す
+  if (handleMultiMeaning(cur)) return;
+  if (currentStructuredAnswer) {
+    const ok = gradeStructuredAnswer(currentStructuredAnswer);
+    const vals = currentStructuredAnswer.map((seg, i) => (document.getElementById('structAns_' + i) || {}).value || '');
+    const givenAll = vals.join(' / ');
+    const wrong = currentStructuredAnswer.map((seg, i) => ({ i, seg, given: vals[i] })).filter(x => !isStructuredSegmentCorrect(x.given, x.seg.text));
+    // ★【0.03.15】完全一致しなかった欄は、意味が同じかを AI に確かめる
+    if (!ok && aiJudgeEnabled() && wrong.every(x => x.given.trim())) {
+      aiJudgeItems(cur, wrong.map(x => ({ label: x.seg.label, expected: x.seg.text, given: x.given }))).then(r => {
+        if (quizPool[quizIndex] !== cur || quizPhase === 'a' || !document.getElementById('pgQuizPlayer').classList.contains('active')) return;
+        const stillWrong = [];
+        wrong.forEach((x, k) => {
+          const rr = r && r.results && r.results[k];
+          const input = document.getElementById('structAns_' + x.i);
+          if (rr && rr.correct) { if (input) { input.style.borderColor = 'var(--success)'; input.style.background = 'rgba(34,199,122,0.1)'; } }
+          else stillWrong.push(x.i);
+        });
+        if ((stillWrong.length === 0 || aiVerdictKind(r) === 'partial') && startAiPartialReask(cur, givenAll, stillWrong.length === 0, r)) return;
+        concludeAttempt(cur, stillWrong.length === 0, { typed: true, given: givenAll, ai: r, kind: aiVerdictKind(r), hint: aiFirstHint(r), structuredWrong: stillWrong });
+      });
+      return;
+    }
+    return concludeAttempt(cur, ok, { typed: true, given: givenAll, kind: vals.every(v => !v.trim()) ? 'blank' : 'wrong', structuredWrong: wrong.map(x => x.i) });
+  }
+  const given = document.getElementById('txtDescAnswer').value;
+  // 意味ごとの問題は、全角スペース・読点で区切った言い換えのどれか1つで正解
+  const ok = (cur._senseKey && !cur._swapped) ? isStructuredSegmentCorrect(given, cur.answer) : isAnswerCorrect(given, cur.answer);
+  // ★【0.03.15】完全一致しなくても、意味が同じなら正解にする（AI に確かめる）
+  if (!ok && given.trim() && aiJudgeEnabled() && !isChoiceCard(cur) && !isBinaryCard(cur)) { // 選択肢から選ぶ問題は、言い換えを認めない
+    aiJudgeItems(cur, [{ label: cur._senseLabel && !cur._swapped ? cur._senseLabel : '', expected: cur.answer, given }]).then(r => {
+      if (quizPool[quizIndex] !== cur || quizPhase === 'a' || !document.getElementById('pgQuizPlayer').classList.contains('active')) return;
+      const allOk = !!(r && r.results && r.results.length && r.results.every(x => x.correct));
+      // 意味をいくつも並べた答えに、言い換えで一部だけ答えた → ほかの意味を聞き直す
+      if ((aiVerdictKind(r) === 'partial' || allOk) && startAiPartialReask(cur, given, allOk, r)) return;
+      concludeAttempt(cur, allOk, { typed: true, given, ai: r, kind: aiVerdictKind(r), hint: aiFirstHint(r) });
+    });
+    return;
+  }
+  concludeAttempt(cur, ok, { typed: true, given, kind: given.trim() ? 'wrong' : 'blank' });
+}
+
+// ================================================================
+// ★【0.03.18】重点モード：間違えた・足りなかった・答えられなかったら、ヒントを見て答え直す
+//  1回目で正解 → 普通の正解
+//  ヒントを1回見てから正解 → ヒントを見た正解（レベルは上がりにくい）
+//  ヒントを2回以上見てから正解 → 正解にはせず、不正解寄りとして記録（不正解よりは軽い）
+// ================================================================
+const FOCUS_MAX_RETRY = 3; // 答え直せる回数（これを超えたら答えを表示）
+let _focus = { attempts: 0 };
+let _focusBusy = false;
+function focusEnabled(cur) {
+  const el = document.getElementById('chkFocusMode');
+  // 2択の問題は、間違えたらもう片方が答えなので、答え直しはしない
+  return !!(el && el.checked) && !window.currentOnlineMatch && ['desc', 'choice'].includes(currentRoundMode) && !(cur && cur.kind === 'self') && !isBinaryCard(cur);
+}
+function aiVerdictKind(r) {
+  if (!r || !r.results) return 'wrong';
+  return r.results.some(x => x.verdict === 'wrong') ? 'wrong' : r.results.some(x => x.verdict === 'partial') ? 'partial' : 'wrong';
+}
+// ★【0.03.22】AI が見つけた誤りの種類（スペルミス・品詞の誤り）
+function aiIssueOf(r) { const x = r && r.results && r.results.find(y => !y.correct && (y.issue === 'spelling' || y.issue === 'pos')); return x ? x.issue : ''; }
+const AI_ISSUE_LABEL = { spelling: '✏️ スペルミス・誤字', pos: '🏷️ 品詞の誤り' };
+function aiFirstHint(r) { const x = r && r.results && r.results.find(y => !y.correct && y.hint); return x ? x.hint : ''; }
+
+// 1回の解答の結果を決める（重点モードなら、間違いのときは答え直しへ）
+function concludeAttempt(cur, ok, info) {
+  const attempt = _focus.attempts + 1;
+  if (!ok && focusEnabled(cur) && _focus.attempts < FOCUS_MAX_RETRY) { startFocusRetry(cur, info); return; }
+  const fs = document.getElementById('lblFocusStatus'); if (fs) fs.style.display = 'none';
+  // 普通のモードでも、AI が出した「答え直すためのヒント」は覚えておく
+  if (!ok && info.hint && typeof rememberAiHint === 'function') rememberAiHint(cur, info.kind, info.given, info.hint);
+  const opts = { typed: !!info.typed, given: info.given || '', ai: info.ai || null };
+  if (!ok && info.partialFound && info.partialFound.length) return finishPartialMeanings(info.partialFound, attempt, opts);
+  if (ok) {
+    if (attempt === 1) return evaluateRoundAnswer(true, info.label || (info.ai && info.ai.results ? '🤖 正解（同じ意味）' : '🎉 正解！'), opts);
+    if (attempt === 2) { quizHintState.aiUsed = true; return evaluateRoundAnswer(true, '🎯 ヒントのあとで正解', opts); }
+    return evaluateRoundAnswer(false, `△ ヒント${attempt - 1}回のあとで正解（不正解寄りとして記録）`, Object.assign(opts, { softWrong: true, focusLate: true }));
+  }
+  const issue = aiIssueOf(info.ai);
+  evaluateRoundAnswer(false, issue ? `❌ ${AI_ISSUE_LABEL[issue]}` + (attempt > 1 ? `（ヒント${attempt - 1}回）` : '') : info.kind === 'partial' ? '△ 解答不足' : (attempt > 1 ? `❌ 不正解（ヒント${attempt - 1}回）` : '❌ 不正解'), opts);
+}
+
+// ================================================================
+// ★【0.03.21】意味をいくつも並べた答えの聞き直し
+//  例：community → 地域社会、共同体。「地域社会」だけ答えたら ⭕ にして「ほかの意味は？」と聞き直す
+//  全部答えられたら正解。答えられなかったら「一部正解」（ヒントを見た正解と同じ扱い。重点モードで答え直したあとなら不正解寄り）
+// ================================================================
+let _multi = null; // { key, meanings, found: [番号], aiGiven: [AI が一部の意味と認めた答え] }
+function multiMeaningTarget(cur) {
+  if (currentRoundMode !== 'desc' || window.currentOnlineMatch || !cur) return null;
+  let text, inputId;
+  if (currentStructuredAnswer) {
+    if (currentStructuredAnswer.length !== 1) return null; // 欄が複数あるときは、欄ごとの採点のまま
+    text = currentStructuredAnswer[0].text; inputId = 'structAns_0';
+  } else { text = cur.answer; inputId = 'txtDescAnswer'; }
+  const meanings = splitAnswerMeanings(text);
+  return meanings.length >= 2 ? { key: text, meanings, inputId } : null;
+}
+// 聞き直しの処理をしたら true（いつもの採点はしない）
+function handleMultiMeaning(cur) {
+  const mt = multiMeaningTarget(cur);
+  if (!mt) return false;
+  if (!_multi || _multi.key !== mt.key) _multi = { key: mt.key, meanings: mt.meanings, found: [], aiGiven: [] };
+  const input = document.getElementById(mt.inputId);
+  const given = input ? input.value : '';
+  const hit = matchAnswerMeanings(given, mt.meanings);
+  if (hit && hit.length) {
+    const before = _multi.found.length + _multi.aiGiven.length;
+    const beforeFound = _multi.found.length;
+    hit.forEach(i => { if (!_multi.found.includes(i)) _multi.found.push(i); });
+    if (_multi.found.length + _multi.aiGiven.length >= mt.meanings.length) {
+      concludeAttempt(cur, true, { typed: true, given: multiFoundNames().join('、'), label: before ? '🎉 全部の意味を正解！' : '🎉 正解！' });
+      return true;
+    }
+    askOtherMeanings(cur, mt, _multi.found.length === beforeFound);
+    return true;
+  }
+  if (!_multi.found.length && !_multi.aiGiven.length) return false; // 1つも当たっていない → いつもの採点（AI の判定を含む）
+  // 聞き直しで、残りの意味に当たらなかった（空欄・違う答え）→ AI に、これまでの答えと合わせて全部の意味がそろったか確かめる
+  const rest = _multi.aiGiven.length ? mt.meanings : mt.meanings.filter((m, i) => !_multi.found.includes(i));
+  const miss = r => concludeAttempt(cur, false, { typed: true, given: multiFoundNames().join('、'), kind: 'partial', partialFound: multiFoundNames(), ai: r || null, hint: aiFirstHint(r), structuredWrong: currentStructuredAnswer ? [0] : undefined });
+  if (given.trim() && aiJudgeEnabled()) {
+    aiJudgeItems(cur, [{ label: '', expected: rest.join('、'), given: _multi.aiGiven.length ? multiFoundNames().concat(given).join('、') : given }]).then(r => {
+      if (quizPool[quizIndex] !== cur || quizPhase === 'a' || !document.getElementById('pgQuizPlayer').classList.contains('active')) return;
+      const x = r && r.results && r.results[0];
+      if (x && x.correct) { _multi.found = mt.meanings.map((m, i) => i); concludeAttempt(cur, true, { typed: true, given: multiFoundNames().join('、'), ai: r, label: '🤖 全部の意味を正解！（同じ意味）' }); }
+      else miss(r);
+    });
+    return true;
+  }
+  miss(null);
+  return true;
+}
+function multiFoundNames() { return _multi ? _multi.found.map(i => _multi.meanings[i]).concat(_multi.aiGiven || []) : []; }
+// AI が「意味の一部（解答不足）」と判定した言い換えの答えから、聞き直しを始める
+//  AI が「正解」と判定しても、並べた意味の数より少ない言葉しか答えていなければ聞き直す（例：地域社会、共同体 に「コミュニティ」）
+function startAiPartialReask(cur, given, aiSaidCorrect, r) {
+  const mt = multiMeaningTarget(cur);
+  if (!mt || !String(given || '').trim()) return false;
+  if (aiSaidCorrect) {
+    const parts = String(given).split(/[\s\u3000、,，・／/]+/).filter(p => normalizeStructuredToken(p) !== '');
+    if (parts.length >= mt.meanings.length) return false;
+  }
+  _multi = { key: mt.key, meanings: mt.meanings, found: [], aiGiven: [String(given).trim()] };
+  askOtherMeanings(cur, mt, false);
+  const st = document.getElementById('lblFocusStatus');
+  if (st) st.textContent = st.textContent.replace('⭕ ', aiSaidCorrect ? '⭕（🤖 同じ意味）' : '△（🤖 意味の一部）');
+  return true;
+}
+function askOtherMeanings(cur, mt, again) {
+  const left = Math.max(1, mt.meanings.length - _multi.found.length - _multi.aiGiven.length);
+  const st = document.getElementById('lblFocusStatus');
+  if (st) {
+    st.style.display = 'block'; st.classList.add('multi');
+    st.textContent = `⭕ ${multiFoundNames().join('、')}${again ? '（もう答えました）' : ''}　ほかの意味もあります。答えてください（あと${left}つ）`;
+  }
+  const timerText = document.getElementById('lblQuizTimerText'); if (timerText) timerText.innerText = '🔁';
+  // 文字のヒントは、まだ答えていない意味のものにする
+  const hs = quizHintState;
+  if (hs && hs.stages && hs.stages.some(x => !x.memo && !x.ai) && currentRoundMode === 'desc') {
+    const restText = mt.meanings.find((m, i) => !_multi.found.includes(i)) || '';
+    const keep = hs.stages.filter(x => x.memo || x.ai);
+    const shownKeep = Math.min(hs.shown, keep.length);
+    hs.stages = keep.concat(letterHintStages(getPrimaryAnswer(restText).replace(/\([^()]*\)|（[^（）]*）/g, '').trim()));
+    hs.shown = shownKeep; hs.aiUsed = hs.aiUsed || false;
+    document.querySelectorAll('#lblQuizHint .hint-letter, [id^=structHint_]').forEach(el => { if (el.id) el.style.display = 'none'; else el.remove(); });
+    const hb = document.getElementById('btnQuizHint'); if (hb && hs.shown < hs.stages.length) hb.style.display = '';
+  }
+  const input = document.getElementById(mt.inputId);
+  if (input) { input.disabled = false; input.value = ''; input.style.borderColor = ''; input.style.background = ''; input.focus(); }
+}
+// 一部の意味だけ答えられたときの記録
+function finishPartialMeanings(found, attempt, opts) {
+  const names = found.join('、');
+  if (attempt === 1) { quizHintState.aiUsed = true; return evaluateRoundAnswer(true, `△ 一部正解（${names}）`, opts); }
+  return evaluateRoundAnswer(false, `△ 一部だけ正解（${names}）・不正解寄りとして記録`, Object.assign(opts, { softWrong: true, focusLate: true }));
+}
+
+async function startFocusRetry(cur, info) {
+  _focus.attempts++;
+  _focusBusy = true;
+  const btn = document.getElementById('btnQuizAction');
+  const prevText = btn ? btn.innerText : '';
+  if (btn) { btn.disabled = true; btn.innerText = '🎯 ヒントを用意中...'; }
+  const kind = info.kind || 'wrong', given = info.given || '';
+  let hint = typeof recallAiHint === 'function' ? recallAiHint(cur, kind, given) : null; // 前に同じ状況で出したヒント
+  if (!hint && info.hint) { hint = typeof maskAnswerInText === 'function' ? maskAnswerInText(info.hint, cur.answer) : info.hint; rememberAiHint(cur, kind, given, info.hint); }
+  if (!hint && typeof aiAvailable === 'function' && aiAvailable() && navigator.onLine !== false) {
+    try { hint = await aiRetryHint(cur, kind, given); if (hint) rememberAiHint(cur, kind, given, hint); } catch (e) { console.warn(e); }
+  }
+  _focusBusy = false;
+  if (btn) { btn.disabled = false; btn.innerText = prevText || '確定する'; }
+  if (quizPool[quizIndex] !== cur || quizPhase === 'a' || !document.getElementById('pgQuizPlayer').classList.contains('active')) return;
+  const hb = document.getElementById('lblQuizHint');
+  // 同じヒントがもう出ているときは、重ねて出さずに、いつものヒントを1段階進める
+  const already = hint && [...hb.querySelectorAll('.hint-focus, .hint-ai')].some(el => el.textContent.replace(/^\S+\s/, '') === hint);
+  if (hint && !already) {
+    const line = document.createElement('div'); line.className = 'hint-focus'; line.textContent = `🎯 ${hint}`;
+    hb.appendChild(line); hb.style.display = 'block';
+  } else {
+    // AI が使えないときは、いつものヒントを1段階（ヒントをオフにしていても、重点モードでは出す）
+    if (!quizHintState.stages.length && !quizHintState.aiUsed) {
+      const built = buildHintStages(cur, currentRoundMode, currentStructuredAnswer, false);
+      quizHintState.stages = built.stages; quizHintState.shown = 0;
+    }
+    // 覚えたヒントの段階が、いま出したものと同じなら飛ばす
+    const st = quizHintState, shownText = hb.innerText;
+    while (st.shown < st.stages.length && st.stages[st.shown].ai && st.stages[st.shown].html.split('<br>').every(h => shownText.includes(h.replace(/^\S+\s/, '').replace(/&[a-z]+;/g, '')))) st.shown++;
+    if (st.shown < st.stages.length) showNextHint();
+  }
+  const issue = aiIssueOf(info.ai);
+  const label = issue === 'spelling' ? 'つづり・字が違います' : issue === 'pos' ? '品詞が違います' : ({ blank: '答えが空欄です', partial: '足りない部分があります', wrong: '違います' }[kind] || '違います');
+  const st = document.getElementById('lblFocusStatus');
+  if (st) { st.style.display = 'block'; st.classList.remove('multi'); st.textContent = `🔁 ${label}。ヒントを見て、もう一度答えてください（あと${FOCUS_MAX_RETRY - _focus.attempts + 1}回）`; }
+  // 答え直せるようにする（制限時間は止めたまま）
+  const timerText = document.getElementById('lblQuizTimerText'); if (timerText) timerText.innerText = '🎯';
+  if (info.choice) {
+    document.querySelectorAll('.choice-btn').forEach(b => {
+      if (b._choiceText === given) { b.disabled = true; b.style.opacity = '0.45'; b.style.borderColor = 'var(--danger)'; }
+      else if (!b.disabled) b.style.borderColor = 'var(--border)';
+    });
+    selectedChoiceIdx = null;
+  } else if (currentStructuredAnswer) {
+    (info.structuredWrong || []).forEach(i => { const input = document.getElementById('structAns_' + i); if (input) { input.disabled = false; input.value = ''; input.style.borderColor = ''; input.style.background = ''; } });
+    const first = document.getElementById('structAns_' + ((info.structuredWrong || [])[0] || 0)); if (first) first.focus();
+  } else {
+    const inp = document.getElementById('txtDescAnswer'); if (inp) { inp.disabled = false; inp.value = ''; inp.focus(); }
+  }
+}
+
+// ================================================================
+// ★【0.03.15】AI：意味で採点・判定の取り消し・解説・ヒント
+// ================================================================
+let _aiJudging = false;
+let _lastEval = null;    // 直前の採点の前の成績（「やっぱり不正解」「正解にする」で戻すため）
+let _aiExplainHold = false;
+function aiJudgeEnabled() {
+  return typeof aiAvailable === 'function' && aiAvailable() && getAiPrefs().judge && !window.currentOnlineMatch && navigator.onLine !== false;
+}
+async function aiJudgeItems(cur, items) {
+  _aiJudging = true;
+  const btn = document.getElementById('btnQuizAction');
+  const prevText = btn ? btn.innerText : '';
+  if (btn) { btn.innerText = '🤖 AIが意味を確認中...'; btn.disabled = true; }
+  const locked = [...document.querySelectorAll('#txtDescAnswer, #boxDescStructuredArea input')].filter(el => !el.disabled);
+  locked.forEach(el => { el.disabled = true; });
+  let r;
+  try { r = await aiJudgeAnswers(cur.question, items, cur.note); }
+  catch (e) { r = { error: e.message }; }
+  _aiJudging = false;
+  if (btn) { btn.disabled = false; btn.innerText = prevText; }
+  document.querySelectorAll('#txtDescAnswer').forEach(el => { el.disabled = false; });
+  return r;
+}
+
+// 採点をやり直す（AI の判定や、表記ちがいの答えを自分で直す）
+function regradeLastAnswer(newCorrect) {
+  if (quizPhase !== 'a' || !_lastEval) return;
+  const m = db.find(q => q.id === _lastEval.id);
+  if (m) { const st = Object.assign({}, _lastEval.stats); if (st.senses) st.senses = JSON.parse(JSON.stringify(st.senses)); else delete st.senses; Object.assign(m, st); }
+  currentCombo = _lastEval.combo; todayCorrectCount = _lastEval.today;
+  clearTimeout(autoNextTimeout);
+  const prev = _lastEval;
+  quizPhase = 'q';
+  evaluateRoundAnswer(newCorrect, newCorrect ? '🙆 正解にしました' : '🙅 不正解にしました', { regrade: true, typed: prev.typed, given: prev.given, ai: prev.ai ? Object.assign({}, prev.ai, { overridden: true }) : null });
+}
+
+// 答えを見た後の AI の欄（理由・解説・覚え方と、採点の直しボタン）
+function renderAiFeedbackBox(cur, isCorrect, opts) {
+  let box = document.getElementById('aiFeedbackBox');
+  if (!box) {
+    box = document.createElement('div'); box.id = 'aiFeedbackBox'; box.className = 'ai-feedback';
+    document.getElementById('feedbackAnswerText').insertAdjacentElement('afterend', box);
+  }
+  _aiExplainHold = false;
+  const ai = opts.ai || null;
+  const parts = [];
+  if (ai && ai.results && ai.results.length) {
+    const reasons = ai.results.map(r => r.reason).filter(Boolean);
+    if (reasons.length) parts.push(`<div>🤖 ${escapeHtml(reasons.join(' ／ '))}</div>`);
+  } else if (ai && ai.error) parts.push(`<div class="ai-muted">🤖 AI の判定は使えませんでした（${escapeHtml(ai.error)}）</div>`);
+  if (!isCorrect && ai && ai.tip) { parts.push(`<div>💡 ${escapeHtml(ai.tip)}</div>`); _aiExplainHold = true; }
+  // ★【0.03.18】足りない・違うときの手がかり（次に同じ問題で迷ったときにも出す）
+  const aiHint = !isCorrect && typeof aiFirstHint === 'function' ? aiFirstHint(ai) : '';
+  if (aiHint) parts.push(`<div>🎯 ${escapeHtml(maskAnswerInText(aiHint, cur.answer))}</div>`);
+  const btns = [];
+  if (isCorrect && ai && ai.results && !ai.overridden) btns.push(`<button type="button" class="chip" onclick="regradeLastAnswer(false)">🙅 やっぱり不正解</button>`);
+  if (!isCorrect && opts.typed && !opts.focusLate && String(opts.given || '').trim()) btns.push(`<button type="button" class="chip" onclick="regradeLastAnswer(true)">🙆 合っているので正解にする</button>`);
+  const canExplain = !isCorrect && !opts.pass && typeof aiAvailable === 'function' && aiAvailable() && getAiPrefs().hint && !window.currentOnlineMatch && !(ai && ai.tip);
+  if (canExplain) btns.push(`<button type="button" class="chip" id="btnAiExplain" onclick="showAiExplanation()">🤖 AIの解説</button>`);
+  box.innerHTML = parts.join('') + (btns.length ? `<div class="ai-btns">${btns.join('')}</div>` : '') + '<div id="aiExplainArea"></div>';
+  box.style.display = (parts.length || btns.length) ? 'block' : 'none';
+  if (canExplain && getAiPrefs().explainAuto) showAiExplanation();
+}
+async function showAiExplanation() {
+  const cur = quizPool[quizIndex]; if (!cur) return;
+  const area = document.getElementById('aiExplainArea'); if (!area) return;
+  const btn = document.getElementById('btnAiExplain'); if (btn) btn.remove();
+  _aiExplainHold = true; // 読み終わるまで自動で次へ進まない
+  area.innerHTML = '<div class="ai-muted">🤖 解説を考えています...</div>';
+  try {
+    const given = _lastEval && _lastEval.given;
+    const r = await aiExplainMistake({ question: cur.question + (cur._senseLabel ? `（${cur._senseLabel}）` : ''), answer: cur.answer, note: cur.note }, given);
+    // ★【0.03.18】次に同じ問題で迷ったときのヒントとして覚えておく
+    if (r.hint && typeof rememberAiHint === 'function') rememberAiHint(cur, String(given || '').trim() ? 'wrong' : 'blank', given, r.hint);
+    if (quizPool[quizIndex] !== cur) return;
+    area.innerHTML = (r.explain ? `<div>🤖 ${escapeHtml(r.explain)}</div>` : '') + (r.tip ? `<div>💡 ${escapeHtml(r.tip)}</div>` : '');
+  } catch (e) { area.innerHTML = `<div class="ai-muted">⚠️ ${escapeHtml(e.message)}</div>`; }
+}
+// 解いている途中の AI ヒント
+async function showAiHint() {
+  const cur = quizPool[quizIndex]; if (!cur || quizPhase !== 'q') return;
+  const btn = document.getElementById('btnQuizAiHint');
+  if (btn) { btn.disabled = true; btn.innerText = '🤖 考え中...'; }
+  try {
+    let h = typeof recallAiHint === 'function' ? recallAiHint(cur, 'hint', '') : null;
+    if (!h) { h = await aiHintFor({ id: (cur._swapped ? 'swap:' : '') + (cur._sourceId || cur.id) + (cur._senseLabel ? ':' + cur._senseLabel : ''), question: cur.question + (cur._senseLabel ? `（${cur._senseLabel}）` : ''), answer: getPrimaryAnswer(cur.answer), note: cur.note }); rememberAiHint(cur, 'hint', '', h); }
+    if (quizPool[quizIndex] !== cur || quizPhase !== 'q') return;
+    quizHintState.aiUsed = true; // ヒントを見たのでレベルは上がりにくくなる
+    const hb = document.getElementById('lblQuizHint');
+    const line = document.createElement('div'); line.className = 'hint-ai'; line.textContent = '🤖 ' + h;
+    hb.appendChild(line); hb.style.display = 'block';
+    if (btn) btn.style.display = 'none';
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.innerText = '🤖 AIヒント'; }
+    alert('⚠️ ' + e.message);
+  }
 }
 
 // ★【0.02.63】タグごとの入力欄を採点する。全欄正解の場合のみ true。
@@ -917,16 +1431,81 @@ function gradeStructuredAnswer(structured) {
   return allCorrect;
 }
 
+// ★【0.03.24】1回の結果でカード（または意味）の成績・レベルを動かす（クイズと暗記テストで共通）
+// o: { multiplier, gain, loss, regrade, keepStreak, noCategory }。レベルが変わったら { type, level } を返す
+function applySrsResult(m, senseKey, isCorrect, o = {}) {
+  let levelChange = null;
+  const t = senseKey ? m.senses[senseKey] : m; // 成績を動かす相手
+  if(t.wrongStreak === undefined) t.wrongStreak = 0; if(t.shikkariStreak === undefined) t.shikkariStreak = 0;
+  const multiplier = o.multiplier || 1;
+  // ★【0.03.03】設定の「卒業認定正解数」に比例して、レベルの上がり下がりの回数も変わる
+  const P = srsParams();
+  const gain = o.gain === undefined ? 1 : o.gain, loss = o.loss === undefined ? 1 : o.loss, regrade = !!o.regrade;
+  if(t.level5Correct === undefined) t.level5Correct = 0;
+  const isGrad = isGraduated(t);
+  const beforeLevel = t.level;
+
+  if(isCorrect) {
+    t.correct++; if (!regrade && !o.noCategory) recordCategoryScore(m.category, true);
+    if (o.keepStreak) t.wrongStreak = 0;
+    else { t.streak = roundStat((t.streak || 0) + gain); t.wrongStreak = 0; }
+    
+    if (t.level === -1) {
+      t.shikkariStreak = roundStat(t.shikkariStreak + gain);
+      if (t.shikkariStreak >= P.recoverAt * multiplier) { t.level = 0; t.shikkariStreak = 0; t.streak = 0; }
+    } else if (isGrad) {
+      // 卒業済み：何もしない
+    } else if (t.level >= 5) {
+      // レベル5で未卒業：正解を積む
+      t.level5Correct = roundStat(t.level5Correct + gain);
+      if (isGraduated(t)) levelChange = { type: 'grad' };
+    } else {
+      if (t.streak >= P.upStreak * multiplier - 1e-9 && t.level < 5) {
+        t.level++;
+        if (t.level === 5) t.level5Correct = 0;
+        t.streak = 0;
+      }
+    }
+  } else {
+    t.incorrect++; t.streak = 0; t.shikkariStreak = 0;
+    const prevWrong = t.wrongStreak || 0;
+    t.wrongStreak = roundStat(prevWrong + loss);
+    if (!regrade && !o.noCategory) recordCategoryScore(m.category, false);
+    const crossed = (every) => Math.floor(t.wrongStreak / every + 1e-9) > Math.floor(prevWrong / every + 1e-9);
+
+    if (isGrad) {
+      // 卒業済みで不正解：続けて間違えると卒業取り消し（レベル5に留まる）
+      if (t.wrongStreak >= P.ungradAt * multiplier - 1e-9) { t.level5Correct = 0; t.wrongStreak = 0; levelChange = { type: 'ungrad' }; }
+    } else if (t.level >= 5) {
+      // レベル5・未卒業で不正解：続けて間違えるとレベル4に下がる
+      if (t.wrongStreak >= P.level5Down * multiplier - 1e-9) { t.level = 4; t.level5Correct = 0; t.wrongStreak = 0; }
+    } else {
+      if (t.level !== -1) {
+        if (t.wrongStreak >= P.shikkariAt * multiplier - 1e-9) { t.level = -1; t.wrongStreak = 0; t.correct = 0; } 
+        else if (crossed(P.downEvery * multiplier) && t.level > 0) t.level--;
+      }
+    }
+  }
+  if (!levelChange && t.level !== beforeLevel) levelChange = { type: t.level > beforeLevel ? 'up' : 'down', level: t.level };
+  if (senseKey) recomputeCardFromSenses(m);
+  touchStats(m);
+  saveData();
+  return levelChange;
+}
+
 function evaluateRoundAnswer(isCorrect, head, opts = {}) {
   if (quizPhase === 'a') return; // 二重呼び出し防止
   quizPhase = 'a'; const cur = quizPool[quizIndex];
   const isPass = !!opts.pass; // ★【0.03.03】パスは不正解として記録しない（答えを見るだけ）
-  if (!isPass) recordQuizOrderProgress(cur);
+  const regrade = !!opts.regrade; // ★【0.03.15】採点のやり直し（記録は数え直さない）
+  if (!isPass && !regrade) recordQuizOrderProgress(cur);
+  const prevCombo = currentCombo, prevToday = todayCorrectCount;
+  if (regrade) recordDailyLogAdjust(isCorrect ? 1 : -1);
   
   if (isPass) {
     // 成績・コンボ・連続記録はそのまま
   } else if(isCorrect) {
-    currentCombo++; todayCorrectCount++; showComboAnim(); recordDailyLog(true);
+    currentCombo++; todayCorrectCount++; showComboAnim(); if (!regrade) recordDailyLog(true);
     // ★ オンライン対戦なら自分のスコアをFirebaseに送信（即時反映）
     if (window.currentOnlineMatch) {
       firestore.collection('susuru_anki_match_rooms').doc(window.currentOnlineMatch.roomId)
@@ -934,77 +1513,40 @@ function evaluateRoundAnswer(isCorrect, head, opts = {}) {
         .catch(e => console.warn("スコア送信エラー:", e));
     }
   } else {
-    currentCombo = 0; recordDailyLog(false);
+    currentCombo = 0; if (!regrade) recordDailyLog(false);
   }
 
   // ローカル学習記録の更新 (自分が持っている問題の場合のみ)
   let m = isPass ? null : db.find(q => q.id === cur.id);
   let levelChange = null; // ★【0.03.08】LEVEL UP!/level down… の表示用
+  // ★【0.03.17】意味ごとの問題なら、その意味の成績を動かす（カード全体の成績はあとで意味ごとの成績から決め直す）
+  const senseKey = (m && cur._senseKey && ensureSenseStats(m) && m.senses[cur._senseKey]) ? cur._senseKey : null;
+  if (!isPass) {
+    const snap = {}; if (m) { CARD_STAT_FIELDS.forEach(f => { snap[f] = f === 'senses' ? (m.senses ? JSON.parse(JSON.stringify(m.senses)) : undefined) : m[f]; }); snap.statsAt = m.statsAt; }
+    _lastEval = { id: m ? m.id : null, stats: snap, combo: prevCombo, today: prevToday, correct: isCorrect, typed: !!opts.typed, given: opts.given || '', ai: opts.ai || null };
+  }
+  // ★【0.03.37】この問題のレベル・ランクの変化を記録する（クイズの結果の画面）
+  const _tb = m ? (senseKey ? m.senses[senseKey] : m) : null;
+  const _before = _tb ? { level: _tb.level, status: srsStatusOf(_tb) } : null;
   if(m) {
-    if(m.wrongStreak === undefined) m.wrongStreak = 0; if(m.shikkariStreak === undefined) m.shikkariStreak = 0;
     const mode = currentRoundMode;
-    const multiplier = (mode === 'choice' || mode === 'tap' || mode === 'minhaya') ? 2 : 1; 
-    // ★【0.03.03】設定の「卒業認定正解数」に比例して、レベルの上がり下がりの回数も変わる
-    const P = srsParams();
     // ★【0.03.08】難易度とヒントで1回の重みを変える（対戦中は難易度どおり・ヒントなし）
     const W = srsSpeedWeights(window.currentOnlineMatch ? 'normal' : document.getElementById('selQuizSpeed').value);
     const hs = quizHintState || { stages: [], shown: 0 };
     const memoShown = hs.shown > 0 && hs.stages[0] && hs.stages[0].memo;
-    const letterStages = Math.max(0, hs.shown - (hs.stages[0] && hs.stages[0].memo ? 1 : 0));
-    const gain = W.up * srsHintFactor(memoShown, letterStages);
-    const loss = W.down;
-
-    if(m.level5Correct === undefined) m.level5Correct = 0;
-    const isGrad = isGraduated(m);
-    const beforeLevel = m.level;
-
-    if(isCorrect) {
-      m.correct++; recordCategoryScore(m.category, true);
-      if (mode === 'self' && window.currentSelfJudge === 'good') m.wrongStreak = 0;
-      else { m.streak = roundStat((m.streak || 0) + gain); m.wrongStreak = 0; }
-      
-      if (m.level === -1) {
-        m.shikkariStreak = roundStat(m.shikkariStreak + gain);
-        if (m.shikkariStreak >= P.recoverAt * multiplier) { m.level = 0; m.shikkariStreak = 0; m.streak = 0; }
-      } else if (isGrad) {
-        // 卒業済み：何もしない
-      } else if (m.level >= 5) {
-        // レベル5で未卒業：正解を積む
-        m.level5Correct = roundStat(m.level5Correct + gain);
-        if (isGraduated(m)) levelChange = { type: 'grad' };
-      } else {
-        if (m.streak >= P.upStreak * multiplier - 1e-9 && m.level < 5) {
-          m.level++;
-          if (m.level === 5) m.level5Correct = 0;
-          m.streak = 0;
-        }
-      }
-    } else {
-      m.incorrect++; m.streak = 0; m.shikkariStreak = 0;
-      const prevWrong = m.wrongStreak || 0;
-      m.wrongStreak = roundStat(prevWrong + loss);
-      recordCategoryScore(m.category, false);
-      const crossed = (every) => Math.floor(m.wrongStreak / every + 1e-9) > Math.floor(prevWrong / every + 1e-9);
-
-      if (isGrad) {
-        // 卒業済みで不正解：続けて間違えると卒業取り消し（レベル5に留まる）
-        if (m.wrongStreak >= P.ungradAt * multiplier - 1e-9) { m.level5Correct = 0; m.wrongStreak = 0; levelChange = { type: 'ungrad' }; }
-      } else if (m.level >= 5) {
-        // レベル5・未卒業で不正解：続けて間違えるとレベル4に下がる
-        if (m.wrongStreak >= P.level5Down * multiplier - 1e-9) { m.level = 4; m.level5Correct = 0; m.wrongStreak = 0; }
-      } else {
-        if (m.level !== -1) {
-          if (m.wrongStreak >= P.shikkariAt * multiplier - 1e-9) { m.level = -1; m.wrongStreak = 0; m.correct = 0; } 
-          else if (crossed(P.downEvery * multiplier) && m.level > 0) m.level--;
-        }
-      }
-    }
-    if (!levelChange && m.level !== beforeLevel) levelChange = { type: m.level > beforeLevel ? 'up' : 'down', level: m.level };
-    touchStats(m);
-    saveData();
+    const letterStages = Math.max(0, hs.shown - (hs.stages[0] && hs.stages[0].memo ? 1 : 0)) + (hs.aiUsed ? 1 : 0);
+    levelChange = applySrsResult(m, senseKey, isCorrect, {
+      multiplier: (mode === 'choice' || mode === 'tap' || mode === 'minhaya') ? 2 : 1,
+      gain: W.up * srsHintFactor(memoShown, letterStages),
+      loss: W.down * (opts.softWrong ? 0.5 : 1), // ★【0.03.18】重点モードでヒント2回以上のあとの正解は、不正解より軽く
+      regrade, keepStreak: mode === 'self' && window.currentSelfJudge === 'good'
+    });
+    if (levelChange && senseKey) levelChange.label = cur._senseLabel;
   }
+  recordQuizSessionResult(cur, isCorrect, isPass, regrade, m, senseKey, _before);
   if (levelChange) showLevelAnim(levelChange);
   const _hintBtn = document.getElementById('btnQuizHint'); if (_hintBtn) _hintBtn.style.display = 'none';
+  const _aiHintBtn = document.getElementById('btnQuizAiHint'); if (_aiHintBtn) _aiHintBtn.style.display = 'none';
   
   const fb = document.getElementById('quizFeedback');
   document.getElementById('feedbackResultText').innerText = head;
@@ -1022,7 +1564,8 @@ function evaluateRoundAnswer(isCorrect, head, opts = {}) {
     fbAnsEl.appendChild(aImg);
   }
   hydrateRich(fbAnsEl, { chemScale: 1.3 });
-  speakText(getPrimaryAnswer(cur.answer));
+  renderAiFeedbackBox(cur, isCorrect, opts); // ★【0.03.15】AI の理由・解説と、採点の直しボタン
+  if (!regrade) speakText(getPrimaryAnswer(cur.answer));
   fb.className = `feedback-area ${isCorrect ? 'correct' : isPass ? 'pass' : 'incorrect'}`; fb.style.display = 'flex';
   
   document.getElementById('btnQuizPass').style.display = 'none';
@@ -1038,13 +1581,15 @@ function evaluateRoundAnswer(isCorrect, head, opts = {}) {
     // ★【0.03.03】自動進行（秒）。0＝自動で進まない
     const autoSec = getQuizPrefNumber('numAutoNext');
     const baseDelay = autoSec === null ? 3000 : autoSec * 1000;
-    const advanceDelay = currentStructuredAnswer ? Math.min(baseDelay + 12000, baseDelay + currentStructuredAnswer.length * 2000) : baseDelay;
+    let advanceDelay = currentStructuredAnswer ? Math.min(baseDelay + 12000, baseDelay + currentStructuredAnswer.length * 2000) : baseDelay;
+    if (opts.ai && opts.ai.results) advanceDelay += 4000; // AI の判定理由を読んで、直せる時間を取る
     // ★【0.03.02】クイックメモを入力中は自動で次へ進まない（入力が終わるまで待つ）
     const scheduleAdvance = (delay) => {
       autoNextTimeout = setTimeout(() => {
         if (quizPhase !== 'a') return;
         const ae = document.activeElement;
         if (ae && ae.id === 'txtQuickNote') { scheduleAdvance(1500); return; }
+        if (_aiExplainHold) return; // ★【0.03.15】AI の解説を読んでいる間は自動で進まない（「次の問題へ」で進む）
         submitQuizAction();
       }, delay);
     };
@@ -1061,7 +1606,7 @@ function showLevelAnim(ch) {
     grad: ['🎓 GRADUATED!', 'up'], ungrad: ['卒業取り消し… (Lv.5)', 'down']
   };
   const [txt, cls] = map[ch.type] || map.up;
-  el.innerText = txt; el.className = 'level-display ' + cls;
+  el.innerText = ch.label ? `${txt}\n${ch.label}` : txt; // 意味ごとの問題なら、どの意味かも el.className = 'level-display ' + cls;
   void el.offsetWidth; el.classList.add('pop');
 }
 
@@ -1110,15 +1655,31 @@ function autoResizeNote(el) {
   el.style.height = Math.min(160, Math.max(38, el.scrollHeight + 2)) + 'px';
 }
 
-async function recordDailyLog(isCorrect) {
+// ★【0.03.15】採点をやり直したとき、今日の正解数を1つ増減する
+async function recordDailyLogAdjust(delta) {
+  if (!currentUser || !delta) return;
+  const d = getTodayStr();
+  try {
+    await firestore.collection('susuru_anki_logs').doc(`${d}_${currentUser.uid}`).set({ correct: firebase.firestore.FieldValue.increment(delta) }, { merge: true });
+    await firestore.collection('susuru_anki_daily_scores').doc(`${d}_${currentUser.uid}`).set({ score: firebase.firestore.FieldValue.increment(delta) }, { merge: true });
+  } catch (e) {}
+}
+// ★【0.03.39】opts.drill：暗記テストの答え（ランキングの正解数は暗記テストの分を別に数える：drillScore）
+async function recordDailyLog(isCorrect, opts = {}) {
   if (typeof notifyMarkStudied === 'function') notifyMarkStudied(); // ★【0.03.14】今日は学習済み（催促しない）
   if(!currentUser) return;
   const d = getTodayStr(); 
+  const inc = firebase.firestore.FieldValue.increment;
   const lRef = firestore.collection('susuru_anki_logs').doc(`${d}_${currentUser.uid}`);
   const sRef = firestore.collection('susuru_anki_daily_scores').doc(`${d}_${currentUser.uid}`);
   try {
-    await lRef.set({ date:d, uid:currentUser.uid, name:currentUser.displayName, answered:firebase.firestore.FieldValue.increment(1), correct:firebase.firestore.FieldValue.increment(isCorrect?1:0) }, {merge:true});
-    if(isCorrect) await sRef.set({ date:d, uid:currentUser.uid, name:currentUser.displayName, score:firebase.firestore.FieldValue.increment(1) }, {merge:true});
+    if (opts.drill) {
+      await lRef.set({ date:d, uid:currentUser.uid, name:currentUser.displayName, answered:inc(1), correct:inc(isCorrect?1:0), drillAnswered:inc(1), drillCorrect:inc(isCorrect?1:0) }, {merge:true});
+      await sRef.set({ date:d, uid:currentUser.uid, name:currentUser.displayName, drillScore:inc(isCorrect?1:0), drillTotal:inc(1) }, {merge:true});
+      return;
+    }
+    await lRef.set({ date:d, uid:currentUser.uid, name:currentUser.displayName, answered:inc(1), correct:inc(isCorrect?1:0) }, {merge:true});
+    if(isCorrect) await sRef.set({ date:d, uid:currentUser.uid, name:currentUser.displayName, score:inc(1) }, {merge:true});
   } catch(e){}
 }
 

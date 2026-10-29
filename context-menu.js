@@ -158,6 +158,7 @@ function openCategoryEditor(catName) {
       ${btn('bulk', '📋', '一括追加', { disabled: ro })}
       ${btn('scan', '📚', '単語帳取込', { disabled: ro })}
       ${btn('sub', '➕', 'サブフォルダー作成', { disabled: ro })}
+      ${btn('intro', '📖', getCategoryIntroCard(catName) ? '導入の文を編集' : '導入の文を登録', { disabled: ro })}
     </div>
     <div class="cat-edit-sec">整理</div>
     <div class="cat-act-grid">
@@ -166,6 +167,7 @@ function openCategoryEditor(catName) {
       ${btn('merge', '🔀', '他のフォルダーに統合', { disabled: lock })}
       ${btn('reset', '🔄', '成績をリセット')}
       ${btn('renumber', '🔢', '問題番号を振り直す', { disabled: ro })}
+      ${btn('pickdel', '☑️', '問題を選んで削除', { disabled: ro || !total, danger: true })}
     </div>
     <div id="catEditPanel"></div>
     <div class="cat-edit-sec">🏷️ 教科タグ ${subjectStatusHTML(catName)}</div>
@@ -175,6 +177,10 @@ function openCategoryEditor(catName) {
       <button type="button" class="chip" data-subj-custom="1">＋ 自分で入力</button>
       <button type="button" class="chip" data-subj-clear="1">${catSubjects && Object.prototype.hasOwnProperty.call(catSubjects, catName) ? '↩️ 設定を外す' : '— なし'}</button>
     </div>
+    ${path.length > 1 ? `<div class="cat-edit-sec">🚫 出題</div>
+    <label class="toggle-pill" style="display:flex; align-items:center; gap:8px;"><input type="checkbox" id="chkCatSkip" ${isCatSkipped(catName) ? 'checked' : ''}>上のフォルダー（${escapeHtml(path[path.length - 2])} など）から出題するときは、このフォルダーの問題を出さない</label>
+    <div class="hint-small">例文・Review Test などのフォルダー向け。このフォルダーを選べば、ここだけで出題できます。</div>` : ''}
+    ${children ? `<div class="cat-act-grid" style="margin-top:6px;">${btn('skipauto', '🚫', '下の「例文」「Review」「テスト」「チャンツ」フォルダーをまとめて出題から外す')}</div>` : ''}
     <div class="cat-edit-sec">共有</div>
     <div class="cat-act-grid">
       ${info.shared ? '' : btn('share', '🔗', '共有URLを発行', { disabled: isRoot })}
@@ -187,6 +193,9 @@ function openCategoryEditor(catName) {
     <button type="button" class="btn btn-secondary" style="margin-top:14px;" onclick="closeCategoryEditor()">閉じる</button>`;
 
   body.querySelectorAll('.cat-act').forEach(b => { b.onclick = () => runCategoryAction(catName, b.getAttribute('data-act'), info); });
+  // ★【0.03.30】上のフォルダーから出題するときに出さない
+  const skipChk = body.querySelector('#chkCatSkip');
+  if (skipChk) skipChk.onchange = () => { setCategorySkip(catName, skipChk.checked); };
   // ★【0.03.07】教科タグ
   const afterSubj = () => { afterCategoryChange(); openCategoryEditor(catName); };
   body.querySelectorAll('[data-subj]').forEach(b => { b.onclick = () => {
@@ -213,6 +222,138 @@ function openCategoryEditor(catName) {
   ov.style.display = 'flex';
 }
 
+function setCategorySkip(cat, on) {
+  catSkip = catSkip || {};
+  if (on) catSkip[cat] = true; else if (catSkip[cat]) catSkip[cat] = false;
+  saveData(true);
+  if (typeof refreshVisibleViews === 'function') refreshVisibleViews(true);
+}
+const CAT_SKIP_NAME_RE = /例文|review|テスト|チャンツ|chant|check/i;
+function autoSkipSubfolders(cat) {
+  const targets = getAllSubcategories(cat).filter(c => c !== cat && CAT_SKIP_NAME_RE.test(c) && !isCatSkipped(c));
+  if (!targets.length) return alert('名前に「例文」「Review」「テスト」「チャンツ」が入ったサブフォルダーで、まだ外していないものはありません。');
+  if (!confirm(`次の ${targets.length} 個のフォルダーを、上のフォルダーから出題するときに出さないようにしますか？\n\n${targets.slice(0, 30).join('\n')}${targets.length > 30 ? '\n…' : ''}`)) return;
+  targets.forEach(c => { catSkip[c] = true; });
+  saveData(true);
+  if (typeof refreshVisibleViews === 'function') refreshVisibleViews(true);
+  openCategoryEditor(cat);
+}
+
+// ================================================================
+// ★【0.03.38】フォルダーの中の問題を選んで、まとめて削除する
+// ================================================================
+let _bulkDel = null; // { cat, sub, sel: Set(id), q }
+function openBulkDeleteDialog(cat) {
+  _bulkDel = { cat, sub: false, sel: new Set(), q: '' };
+  let ov = document.getElementById('bulkDelOverlay');
+  if (!ov) {
+    ov = document.createElement('div'); ov.className = 'ctx-overlay'; ov.id = 'bulkDelOverlay'; ov.style.zIndex = '1060';
+    ov.innerHTML = `<div class="menu-card editor-card bulkdel-card" onclick="event.stopPropagation()"><div id="bulkDelBody"></div></div>`;
+    ov.onclick = closeBulkDeleteDialog;
+    document.body.appendChild(ov);
+  }
+  ov.style.display = 'flex';
+  renderBulkDelete();
+}
+function closeBulkDeleteDialog() { const ov = document.getElementById('bulkDelOverlay'); if (ov) ov.style.display = 'none'; _bulkDel = null; }
+function bulkDeleteCards() {
+  const st = _bulkDel; if (!st) return [];
+  const cats = new Set(st.sub ? getAllSubcategories(st.cat) : [st.cat]);
+  const kw = st.q.trim().toLowerCase();
+  return sortCardsByNumber(db.filter(q => cats.has(q.category) && (!kw || String(q.question).toLowerCase().includes(kw) || String(q.answer).toLowerCase().includes(kw) || String(q.note || '').toLowerCase().includes(kw))));
+}
+function bulkDelCanDelete(q) { const a = getSharedAccess(q.sharedDocId); return !(a.shared && a.readOnly); }
+function renderBulkDelete() {
+  const st = _bulkDel; if (!st) return;
+  const body = document.getElementById('bulkDelBody');
+  const cards = bulkDeleteCards();
+  const hasSub = getAllSubcategories(st.cat).length > 1;
+  const keepScroll = (document.getElementById('bulkDelList') || {}).scrollTop || 0;
+  body.innerHTML = `
+    <div class="cat-edit-title">☑️ 問題を選んで削除</div>
+    <div class="cat-edit-path">📁 ${escapeHtml(st.cat)}</div>
+    <input type="text" id="bulkDelSearch" class="form-control" placeholder="🔍 問題・答え・メモで絞り込み" value="${escAttr(st.q)}" style="margin-top:8px;">
+    ${hasSub ? `<label class="toggle-pill" style="margin-top:6px; display:flex; align-items:center; gap:8px;"><input type="checkbox" id="bulkDelSub" ${st.sub ? 'checked' : ''}>下のフォルダーの問題も表示</label>` : ''}
+    <div class="bulkdel-bar">
+      <button type="button" class="chip" id="bulkDelAll">表示中を全部選ぶ</button>
+      <button type="button" class="chip" id="bulkDelNone">選択を外す</button>
+      <span class="hint-small">${st.sel.size} 件を選択中 ・ ${cards.length} 件を表示</span>
+    </div>
+    <div id="bulkDelList" class="bulkdel-list">${cards.map(q => {
+      const ok = bulkDelCanDelete(q);
+      return `<label class="bulkdel-row${ok ? '' : ' ro'}"><input type="checkbox" data-id="${escAttr(q.id)}" ${st.sel.has(q.id) ? 'checked' : ''} ${ok ? '' : 'disabled'}>
+        <div style="min-width:0; flex:1;"><div class="bulkdel-q">${q.no ? `<span class="card-no">No.${cardNoText(q.no)}</span>` : ''}${escapeHtml(String(q.question).slice(0, 120))}</div>
+        <div class="hint-small">${escapeHtml(String(q.answer).slice(0, 80))}${st.sub && q.category !== st.cat ? `　📂 ${escapeHtml(q.category)}` : ''}${ok ? '' : '　🔒 閲覧専用'}</div></div></label>`;
+    }).join('') || '<div class="hint-small" style="padding:12px;">問題がありません。</div>'}</div>
+    <div class="plan-btns" style="margin-top:10px;">
+      <button type="button" class="btn btn-danger" id="bulkDelGo" ${st.sel.size ? '' : 'disabled'}>🗑️ ${st.sel.size} 件を削除</button>
+      <button type="button" class="btn btn-secondary" onclick="closeBulkDeleteDialog()">閉じる</button>
+    </div>`;
+  const list = document.getElementById('bulkDelList'); list.scrollTop = keepScroll;
+  list.querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = () => { if (cb.checked) st.sel.add(cb.dataset.id); else st.sel.delete(cb.dataset.id); renderBulkDelete(); });
+  const s = document.getElementById('bulkDelSearch');
+  s.oninput = () => { st.q = s.value; const pos = s.selectionStart; renderBulkDelete(); const s2 = document.getElementById('bulkDelSearch'); s2.focus(); try { s2.setSelectionRange(pos, pos); } catch (e) {} };
+  const sub = document.getElementById('bulkDelSub'); if (sub) sub.onchange = () => { st.sub = sub.checked; renderBulkDelete(); };
+  document.getElementById('bulkDelAll').onclick = () => { cards.filter(bulkDelCanDelete).forEach(q => st.sel.add(q.id)); renderBulkDelete(); };
+  document.getElementById('bulkDelNone').onclick = () => { st.sel.clear(); renderBulkDelete(); };
+  document.getElementById('bulkDelGo').onclick = runBulkDelete;
+}
+async function runBulkDelete() {
+  const st = _bulkDel; if (!st || !st.sel.size) return;
+  const targets = db.filter(q => st.sel.has(q.id) && bulkDelCanDelete(q));
+  if (!targets.length) return;
+  const shared = targets.filter(q => q.sharedDocId).length;
+  if (!confirm(`選んだ ${targets.length} 件の問題を削除しますか？${shared ? `\n\n⚠️ そのうち ${shared} 件は共有カテゴリーのカードなので、共有している全員の手元からも消えます。` : ''}\n（削除の前の状態は「復元ポイント」から戻せます）`)) return;
+  if (typeof takeSnapshot === 'function') await takeSnapshot(`問題の一括削除（${st.cat}・${targets.length}件）`);
+  const ids = targets.map(q => q.id), idSet = new Set(ids);
+  tombstoneCards(ids);
+  db = db.filter(q => !idSet.has(q.id));
+  const byDoc = {};
+  targets.forEach(q => { if (q.sharedDocId) (byDoc[q.sharedDocId] = byDoc[q.sharedDocId] || []).push(q.id); });
+  saveData(true);
+  for (const d of Object.keys(byDoc)) await removeCardsFromSharedDoc(d, byDoc[d]);
+  st.sel.clear();
+  if (typeof refreshVisibleViews === 'function') refreshVisibleViews(true);
+  renderBulkDelete();
+  if (typeof showAppToast === 'function') showAppToast(`🗑️ ${targets.length} 件を削除しました`); else alert(`🗑️ ${targets.length} 件を削除しました`);
+}
+
+// ================================================================
+// ★【0.03.44】📖 フォルダーの導入の文（単語帳のグループのはじめの文章など）
+// 種類「導入」（kind: 'intro'）のカードとしてそのフォルダーに1枚だけ持つ（端末間の同期・共有カテゴリーにも乗る）。
+// クイズ・暗記テストの問題には出さない。暗記テストの2周目で、グループの切れ目ごとに読む（AI があればその文から4択も）
+// ================================================================
+function getCategoryIntroCard(cat) { return db.find(q => q.category === cat && q.kind === 'intro') || null; }
+function openCategoryIntroEditor(catName, info) {
+  const cur = getCategoryIntroCard(catName);
+  const panel = showCategoryPanel(`<div class="cat-edit-sec" style="margin-top:0;">📖 導入の文</div>
+    <textarea id="catIntroText" class="form-control" rows="7" placeholder="このフォルダー（グループ）のはじめの文章。暗記テストの2周目で、グループの切れ目ごとに読みます">${escapeHtml(cur ? cur.answer : '')}</textarea>
+    <div class="plan-btns" style="margin-top:8px;"><button type="button" class="btn btn-primary" id="catIntroSave">💾 保存</button>${cur ? '<button type="button" class="btn btn-secondary" id="catIntroDel">🗑️ 消す</button>' : ''}</div>`);
+  panel.querySelector('#catIntroSave').onclick = () => saveCategoryIntro(catName, panel.querySelector('#catIntroText').value, info);
+  const del = panel.querySelector('#catIntroDel'); if (del) del.onclick = () => { if (confirm('導入の文を消しますか？')) saveCategoryIntro(catName, '', info); };
+}
+async function saveCategoryIntro(catName, text, info) {
+  text = String(text || '').trim();
+  const cur = getCategoryIntroCard(catName);
+  if (!text) {
+    if (!cur) return;
+    tombstoneCards([cur.id]); db = db.filter(q => q !== cur); saveData(true);
+    if (cur.sharedDocId) await removeCardsFromSharedDoc(cur.sharedDocId, [cur.id]);
+  } else if (cur) {
+    cur.answer = text; touchCard(cur); saveData(true);
+    if (cur.sharedDocId) await updateCardInSharedDoc(cur.sharedDocId, cur, 'edit');
+  } else {
+    const card = { id: newCardId(), question: '📖 導入の文', answer: text, kind: 'intro', category: catName, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 };
+    touchCard(card);
+    if (info && info.shared && info.canEdit) card.sharedDocId = info.docId;
+    db.push(card); saveData(true);
+    if (card.sharedDocId) await updateCardInSharedDoc(card.sharedDocId, card, 'add');
+  }
+  if (typeof refreshVisibleViews === 'function') refreshVisibleViews(true);
+  openCategoryEditor(catName);
+  if (typeof showAppToast === 'function') showAppToast(text ? '📖 導入の文を保存しました' : '📖 導入の文を消しました');
+}
+
 function showCategoryPanel(html) {
   const panel = document.getElementById('catEditPanel');
   panel.innerHTML = `<div class="cat-edit-panel">${html}</div>`;
@@ -230,6 +371,9 @@ function runCategoryAction(catName, act, info) {
       closeCategoryEditor(); openPage('pgHome'); buildQuizScopeDropdown();
       return;
     }
+    case 'skipauto': autoSkipSubfolders(catName); return;
+    case 'pickdel': closeCategoryEditor(); openBulkDeleteDialog(catName); return;
+    case 'intro': openCategoryIntroEditor(catName, info); return;
     case 'open': closeCategoryEditor(); currentViewContext = { type: 'category', value: catName }; openPage('pgBox'); return;
     case 'add': closeCategoryEditor(); currentViewContext = { type: 'category', value: catName }; showAddQModal(); return;
     case 'bulk': closeCategoryEditor(); showBulkAddModal(catName); return;
@@ -241,7 +385,7 @@ function runCategoryAction(catName, act, info) {
       let resetCount = 0;
       db.forEach(q => {
         if(targetCats.includes(q.category)) {
-          q.level = 0; q.correct = 0; q.incorrect = 0; q.streak = 0; q.wrongStreak = 0; q.shikkariStreak = 0; q.level5Correct = 0;
+          q.level = 0; q.correct = 0; q.incorrect = 0; q.streak = 0; q.wrongStreak = 0; q.shikkariStreak = 0; q.level5Correct = 0; delete q.senses; delete q.drillStats;
           touchStats(q); resetCount++;
         }
       });
@@ -355,6 +499,7 @@ function renameCategory(oldName, newName) {
   db.forEach(q => { if (q.category === oldName) { q.category = newName; touchCard(q); } });
   renameInSharedMeta(oldName, newName);
   if (catSubjects && Object.prototype.hasOwnProperty.call(catSubjects, oldName)) { catSubjects[newName] = catSubjects[oldName]; delete catSubjects[oldName]; }
+  if (catSkip && Object.prototype.hasOwnProperty.call(catSkip, oldName)) { catSkip[newName] = catSkip[oldName]; delete catSkip[oldName]; }
   markCatsDeleted([oldName]);
   markCatCreated(newName);
   replaceInScopePaths(oldName, newName);
@@ -425,7 +570,7 @@ async function deleteCategoryTree(catName, info) {
   takeSnapshot(`「${catName}」の削除`);
   if (ownerRoot) {
     // 先に共有を止めてから手元を消す（空になった状態を共有先へ書き戻さない）
-    try { await firestore.collection('susuru_anki_shared').doc(info.docId).delete(); } catch (e) { console.warn(e); }
+    try { await deleteSharedDocAndCode(info.docId); } catch (e) { console.warn(e); }
     detachSharedDoc(info.docId);
   }
   tombstoneCards(db.filter(q => toDelete.includes(q.category)).map(q => q.id));

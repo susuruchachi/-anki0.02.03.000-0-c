@@ -47,19 +47,20 @@ async function loadUpdates() {
       : '<p style="text-align:center; color:var(--text3); font-size:0.9rem;">まだお知らせはありません。</p>';
     return;
   }
-  area.innerHTML = '';
+  const html = [];
   items.forEach(it => {
     const dateStr = it.date ? it.date.toLocaleDateString('ja-JP') : '';
     const delBtn = (isAdmin && it.fromCloud) ? `<button class="btn btn-danger" style="padding:4px 10px; font-size:0.75rem; margin-top:10px; width:auto;" onclick="deleteUpdate(${jsArg(it.id)})">🗑️ このお知らせを削除</button>` : '';
-    area.innerHTML += `<div class="card" style="margin-bottom:10px;">
+    html.push(`<div class="card" style="margin-bottom:10px;">
       <div class="update-banner-title" style="margin-bottom:8px;">🎉 ${escapeHtml(it.title)} (v${escapeHtml(it.version)}) 
         <span style="font-size:0.7rem; color:var(--text3); margin-left:auto;">${dateStr}</span>
       </div>
       <div style="font-size:0.85rem; line-height:1.5; color:var(--text); white-space:pre-wrap;">${escapeHtml(it.content)}</div>
       ${delBtn}
-    </div>`;
+    </div>`);
   });
-  if (fetchFailed) area.innerHTML += '<p style="text-align:center; color:var(--text3); font-size:0.75rem;">※ オンラインのお知らせは取得できませんでした</p>';
+  if (fetchFailed) html.push('<p style="text-align:center; color:var(--text3); font-size:0.75rem;">※ オンラインのお知らせは取得できませんでした</p>');
+  area.innerHTML = html.join(''); // まとめて1回で書く（1件ずつ += すると件数の2乗で重くなる）
   markLatestReleaseNoteSeen();
 }
 
@@ -141,6 +142,43 @@ async function submitUserReport() {
   } catch(e) { alert("⚠️ 送信に失敗しました。"); }
 }
 
+// ★【0.03.27】文字をコピーする。押した瞬間に（同期的に）コピーする方法を先に使う（iPhone・アプリ版などで確実に効くように）。
+// どれも使えないときは、文字を選んだ状態の枠を出して、手でコピーしてもらう
+function copyTextToClipboard(text) {
+  let ok = false;
+  const ta = document.createElement('textarea');
+  ta.value = text; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed; left:0; top:0; width:1px; height:1px; opacity:0;';
+  document.body.appendChild(ta);
+  ta.focus(); ta.select(); try { ta.setSelectionRange(0, text.length); } catch (e) {}
+  try { ok = document.execCommand('copy'); } catch (e) {}
+  ta.remove();
+  if (ok) return Promise.resolve(true);
+  if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text).then(() => true, () => { showCopyFallback(text); return 'manual'; });
+  showCopyFallback(text); return Promise.resolve('manual');
+}
+function showCopyFallback(text) {
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:10000; display:flex; align-items:center; justify-content:center; padding:16px;';
+  wrap.innerHTML = `<div class="card" style="width:100%; max-width:520px;"><div class="setting-box-title">📋 下の文字を長押し（または Ctrl+C）でコピーしてください</div><textarea class="form-control" rows="10" readonly style="font-size:0.8rem;"></textarea><button class="btn btn-secondary" style="margin-top:8px;">閉じる</button></div>`;
+  const ta = wrap.querySelector('textarea'); ta.value = text;
+  wrap.querySelector('button').onclick = () => wrap.remove();
+  document.body.appendChild(wrap); ta.focus(); ta.select();
+}
+let _adminReports = [];
+function copiedToast(msg) { if (typeof showAppToast === 'function') showAppToast(msg); else alert(msg); }
+function reportToText(r) { return `【${r.dateStr || '日時不明'}】${r.name || '名無し'}（v${r.version || '?'}・UID: ${r.uid || '?'}）\n${r.content || ''}`; }
+async function copyUserReport(i) {
+  const r = _adminReports[i]; if (!r) return;
+  const ok = await copyTextToClipboard(reportToText(r));
+  if (ok === true) copiedToast('📋 コピーしました');
+}
+async function copyAllUserReports() {
+  if (!_adminReports.length) return alert('コピーする報告がありません。');
+  const text = _adminReports.map(reportToText).join('\n\n---\n\n');
+  const ok = await copyTextToClipboard(text);
+  if (ok === true) copiedToast(`📋 ${_adminReports.length} 件をまとめてコピーしました`);
+}
+
 // ★ 管理者用：要望一覧を読み込む
 async function loadUserReports() {
   if(!currentUser || currentUser.uid !== ADMIN_UID) return;
@@ -148,20 +186,25 @@ async function loadUserReports() {
   list.innerHTML = '<p style="text-align:center; color:var(--text3); font-size:0.8rem;">読み込み中...</p>';
   try {
     const snap = await firestore.collection('susuru_anki_reports').orderBy('date','desc').limit(50).get();
-    list.innerHTML = '';
+    _adminReports = []; const rows = [];
     if(snap.empty) { list.innerHTML = '<p style="text-align:center; color:var(--text3); font-size:0.8rem;">まだ報告はありません。</p>'; return; }
     snap.forEach(doc => {
       const d = doc.data();
       const dateStr = d.date && d.date.toDate ? d.date.toDate().toLocaleString('ja-JP') : '';
-      list.innerHTML += `<div style="background:var(--bg3); padding:10px; border-radius:8px; border:1px solid var(--border);">
+      const idx = _adminReports.push(Object.assign({ id: doc.id, dateStr }, d)) - 1;
+      rows.push(`<div style="background:var(--bg3); padding:10px; border-radius:8px; border:1px solid var(--border);">
         <div style="font-size:0.75rem; color:var(--text2); display:flex; justify-content:space-between;">
           <span>👤 ${escapeHtml(d.name)} (v${escapeHtml(d.version)})</span>
           <span>${dateStr}</span>
         </div>
         <div style="font-size:0.85rem; color:var(--text); margin-top:5px; white-space:pre-wrap;">${escapeHtml(d.content)}</div>
-        <button class="btn btn-danger" style="padding:4px 10px; font-size:0.75rem; margin-top:10px; width:auto;" onclick="deleteUserReport(${jsArg(doc.id)})">✅ 対応完了 (削除)</button>
-      </div>`;
+        <div style="display:flex; gap:8px; margin-top:10px;">
+          <button class="btn btn-secondary" style="padding:4px 10px; font-size:0.75rem; width:auto;" onclick="copyUserReport(${idx})">📋 コピー</button>
+          <button class="btn btn-danger" style="padding:4px 10px; font-size:0.75rem; width:auto;" onclick="deleteUserReport(${jsArg(doc.id)})">✅ 対応完了 (削除)</button>
+        </div>
+      </div>`);
     });
+    list.innerHTML = rows.join('');
   } catch(e) { list.innerHTML = '<p style="color:var(--danger); font-size:0.8rem;">読み込みエラー</p>'; }
 }
 

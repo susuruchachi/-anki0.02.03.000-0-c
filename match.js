@@ -83,18 +83,14 @@ function initOnlineMatchPage() {
     container.innerHTML = '';
     const opts = onlineMatchScopeOptions();
     if (opts.length === 0) {
-      container.innerHTML = '<div style="color:var(--danger); font-size:0.85rem; padding:10px; background:var(--bg3); border-radius:8px; border:1px solid rgba(255,79,106,0.3);">⚠️ 共有カテゴリーがありません。オンライン対戦は共有カテゴリーのみ出題可能です。まずは公開カテゴリーを購読するか、共有URLから追加してください。</div>';
+      container.innerHTML = '<div style="color:var(--danger); font-size:0.85rem; padding:10px; background:var(--bg3); border-radius:8px; border:1px solid rgba(255,79,106,0.3);">⚠️ 共有カテゴリーがありません。オンライン対戦は共有カテゴリーのみ出題可能です。まずは公開カテゴリーを購読するか、共有URLから追加してください。<button class="btn btn-secondary" style="margin-top:8px;" onclick="openPage(\'pgPublicCategories\')">🌐 公開カテゴリーを探す</button></div>';
       selectedScopePath = [];
     } else {
-      const select = document.createElement('select');
-      select.className = 'form-control';
-      select.style.marginBottom = '8px';
+      // ★【0.03.49】フォルダーのツリーから選ぶ（picker.js）。共有カテゴリーのフォルダーだけ
       const keep = selectedScopePath && selectedScopePath.length === 1 && opts.some(o => o.cat === selectedScopePath[0]) ? selectedScopePath[0] : '';
-      select.innerHTML = `<option value="" disabled ${keep ? '' : 'selected'}>🌐 対戦する共有カテゴリーを選択...</option>` +
-        opts.map(o => `<option value="${escapeHtml(o.cat)}" ${o.cat === keep ? 'selected' : ''}>${'　'.repeat(o.depth)}${o.depth ? '└ ' : '🌐 '}${escapeHtml(o.cat)}（${o.count}問）</option>`).join('');
       if (!keep) selectedScopePath = [];
-      select.onchange = (e) => { selectedScopePath = [e.target.value]; updateOnlineWaitingCount(); };
-      container.appendChild(select);
+      const o = opts.find(x => x.cat === keep);
+      container.innerHTML = folderPickButtonHTML(keep, '共有カテゴリーを選んでください', 'pickOnlineMatchScope()', o ? `${o.count}問` : '');
     }
   }
   const gameView = document.getElementById('onlineGameView');
@@ -102,6 +98,13 @@ function initOnlineMatchPage() {
   updateOnlineWaitingCount();
 }
 
+function pickOnlineMatchScope() {
+  const opts = onlineMatchScopeOptions(), cnt = {}; opts.forEach(o => { cnt[o.cat] = o.count; });
+  openFolderPicker({ title: '📋 対戦するカテゴリー', current: selectedScopePath[0] || '',
+    hint: '対戦で出せるのは共有・公開カテゴリーの問題だけです（相手も同じ問題を持っているため）',
+    selectable: c => !!cnt[c], visible: c => !!cnt[c], count: c => cnt[c] || 0,
+    onPick: c => { if (!c) return; selectedScopePath = [c]; initOnlineMatchPage(); } });
+}
 async function updateOnlineWaitingCount() {
   const el = document.getElementById('onlineWaitingCountBadge');
   if (!el) return;
@@ -181,9 +184,9 @@ async function startOnlineMatch(scope, qCount, timeLimit, isPrivate, quizFormat 
       }
     }
     // 共有カードだけから出題する（親フォルダーを選んだ場合はサブフォルダーもすべて）
-    const subCats = typeof getAllSubcategories === 'function' ? getAllSubcategories(scope) : [scope];
+    const subCats = typeof getQuizSubcategories === 'function' ? getQuizSubcategories(scope) : [scope];
     const subSet = new Set(subCats);
-    const pool = db.filter(q => subSet.has(q.category) && q.sharedDocId);
+    const pool = db.filter(q => subSet.has(q.category) && q.sharedDocId && q.kind !== 'intro');
     if (pool.length === 0) {
       removeOnlineMatchOverlay();
       return alert('⚠️ 出題できる問題カードがありません。先にカードを作成するか同期してください。');
@@ -192,6 +195,8 @@ async function startOnlineMatch(scope, qCount, timeLimit, isPrivate, quizFormat 
     const selectedQuestions = pool.slice(0, qCount).map(q => {
       const o = { id: q.id, question: q.question, answer: q.answer };
       if (Array.isArray(q.choices) && q.choices.length) o.choices = q.choices;
+      // ★【0.03.25】4択のダミーは、部屋を作った人がその問題と同じフォルダー（なければ1つ上のフォルダー）から選んで、2人で同じものを使う
+      else if (typeof buildChoiceCandidates === 'function') o.dummies = buildChoiceCandidates(q, primaryOf(q.answer)).slice(0, 3);
       return o;
     });
     const matchData = {
@@ -548,7 +553,7 @@ function renderOnlineQuestion(timeLimit) {
       choices = [...q.choices];
       if (!choices.includes(correctPrimary)) choices.push(correctPrimary);
     } else {
-      const dummys = buildChoiceCandidates(q, correctPrimary);
+      const dummys = Array.isArray(q.dummies) && q.dummies.length >= 3 ? q.dummies : buildChoiceCandidates(q, correctPrimary);
       choices = [correctPrimary];
       for (let i = 0; i < 3; i++) choices.push(dummys[i] || `ダミー候補 ${i + 1}`);
     }
@@ -1090,16 +1095,4 @@ function renderMatchHistory() {
   });
 }
 
-async function sendFriendRequestFromMatch(uid, name) {
-  if (!currentUser) return alert('ログインが必要です');
-  if (uid === currentUser.uid) return alert('自分にはフレンド申請できません');
-  try {
-    const myRef = firestore.collection('susuru_anki_profiles').doc(currentUser.uid);
-    const mySnap = await myRef.get();
-    const myFriends = mySnap.exists ? (mySnap.data().friends || []) : [];
-    if (myFriends.includes(uid)) return alert(`${name} さんはすでにフレンドです`);
-    const reqRef = firestore.collection('susuru_anki_friend_requests').doc(`${currentUser.uid}_${uid}`);
-    await reqRef.set({ from: currentUser.uid, fromName: currentUser.displayName || 'Unknown', to: uid, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
-    alert(`✅ ${name} さんにフレンド申請を送りました`);
-  } catch(e) { alert('フレンド申請に失敗しました'); console.error(e); }
-}
+async function sendFriendRequestFromMatch(uid, name) { return sendFriendRequest(uid, name); } // ★【0.03.25】承認制のフレンド申請（social.js）

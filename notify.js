@@ -20,7 +20,7 @@ let _periodicOk = null;
 function getNotifyPrefs() {
   let p = {};
   try { p = JSON.parse(localStorage.getItem(NOTIFY_PREFS_KEY) || '{}') || {}; } catch (e) {}
-  return { reminder: !!p.reminder, time: /^\d{1,2}:\d{2}$/.test(p.time || '') ? p.time : '20:00', updates: p.updates !== false };
+  return { reminder: !!p.reminder, time: /^\d{1,2}:\d{2}$/.test(p.time || '') ? p.time : '20:00', updates: p.updates !== false, friends: p.friends !== false, taunt: p.taunt !== false };
 }
 function saveNotifyPrefs(p) {
   try { localStorage.setItem(NOTIFY_PREFS_KEY, JSON.stringify(p)); } catch (e) {}
@@ -155,7 +155,7 @@ function syncPushDoc(immediate) {
     const p = getNotifyPrefs();
     let lastStudy = null; try { lastStudy = localStorage.getItem('susuru_anki_last_study'); } catch (e) {}
     const body = {
-      uid: currentUser.uid, reminder: p.reminder, time: p.time, updates: p.updates,
+      uid: currentUser.uid, reminder: p.reminder, time: p.time, updates: p.updates, friends: p.friends, taunt: p.taunt,
       tzOffset: new Date().getTimezoneOffset(), weakCount: weakCardCount(), updatedAt: Date.now(),
       tokens: { [token]: { at: Date.now(), ua: (isAndroidDevice() ? 'android' : isIOSDevice() ? 'ios' : 'other') + (isStandaloneApp() ? '-app' : '') } }
     };
@@ -233,8 +233,10 @@ function onNotifyPrefChange() {
   if (r) p.reminder = r.checked;
   if (t && /^\d{1,2}:\d{2}$/.test(t.value)) p.time = t.value;
   if (u) p.updates = u.checked;
+  const f = document.getElementById('chkNotifyFriends'); if (f) p.friends = f.checked;
+  const tn = document.getElementById('chkNotifyTaunt'); if (tn) p.taunt = tn.checked;
   saveNotifyPrefs(p);
-  if ((p.reminder || p.updates) && typeof Notification !== 'undefined' && Notification.permission === 'default') enableNotifications();
+  if ((p.reminder || p.updates || p.friends) && typeof Notification !== 'undefined' && Notification.permission === 'default') enableNotifications();
   renderNotifySettings();
 }
 
@@ -250,8 +252,7 @@ function renderNotifySettings() {
   else if (_deferredInstall) installHTML = '<button class="btn btn-accent" onclick="installApp()">📲 アプリとしてインストール（ホーム画面に追加）</button>';
   else if (isIOSDevice()) installHTML = '<div class="hint-small">📲 アプリにするには：Safari の共有ボタン（□に↑）→「ホーム画面に追加」</div>';
   else installHTML = '<button class="btn btn-secondary" onclick="installApp()">📲 アプリとしてインストールする方法</button>';
-  const apkHTML = isAndroidDevice() && !standalone
-    ? `<a class="btn btn-secondary" style="margin-top:8px; text-decoration:none; justify-content:center;" href="${APK_URL}" download>🤖 Android アプリ（APK）</a>` : '';
+  const apkHTML = ''; // ★【0.03.25】APK のボタンは、設定画面にいつも出す（index.html）
   let permHTML;
   if (perm === 'granted') permHTML = '<div class="hint-small" style="color:var(--success);">✅ 通知は許可されています</div>';
   else if (perm === 'denied') permHTML = '<div class="hint-small" style="color:var(--danger);">🚫 通知がブロックされています。ブラウザ（端末）の設定で、このサイトの通知を許可してください。</div>';
@@ -273,7 +274,66 @@ function renderNotifySettings() {
       <input type="time" id="txtNotifyTime" class="form-control" value="${p.time}" onchange="onNotifyPrefChange()" style="max-width:140px;">
     </div>
     <label class="toggle-pill" style="margin-top:8px; display:flex; align-items:center; gap:8px;"><input type="checkbox" id="chkNotifyUpdates" ${p.updates ? 'checked' : ''} onchange="onNotifyPrefChange()">🆕 アップデートのお知らせ</label>
+    <label class="toggle-pill" style="margin-top:8px; display:flex; align-items:center; gap:8px;"><input type="checkbox" id="chkNotifyFriends" ${p.friends ? 'checked' : ''} onchange="onNotifyPrefChange()">🤝 フレンド申請・承認のお知らせ</label>
+    <label class="toggle-pill" style="margin-top:8px; display:flex; align-items:center; gap:8px;"><input type="checkbox" id="chkNotifyTaunt" ${p.taunt ? 'checked' : ''} onchange="onNotifyPrefChange()">🔥 フレンドの頑張りのお知らせ（フレンドのほうが進んでいたら、通知の時刻から4時間ごとに夜まであおります）</label>
     <div class="hint-small" style="margin-top:8px; line-height:1.6;">${[how, bg].filter(Boolean).join('<br>')}</div>
     ${perm === 'granted' ? '<button class="btn btn-secondary" style="margin-top:8px;" onclick="sendTestNotification()">🔔 テスト通知を送る</button>' : ''}
   `;
 }
+
+// ================================================================
+// ★【0.03.31】アップデートの確認（アプリを開いている間）
+// 新しいバージョンが公開されたら、画面の上に「再読み込みしますか？」を出す。
+// アプリを裏に回しているときは通知でも知らせる（同じバージョンは1回だけ）
+// ================================================================
+const UPDATE_CHECK_MS = 3 * 60 * 1000;
+let _updateFound = null, _updateDismissed = null, _updateTimer = null;
+function versionNewer(a, b) {
+  const pa = String(a).split('.').map(Number), pb = String(b).split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) { const x = pa[i] || 0, y = pb[i] || 0; if (x !== y) return x > y; }
+  return false;
+}
+async function checkForAppUpdate() {
+  if (typeof APP_VERSION === 'undefined' || navigator.onLine === false) return;
+  try {
+    const txt = await (await fetch('./version-info.js?t=' + Date.now(), { cache: 'no-store' })).text();
+    const v = (txt.match(/APP_VERSION\s*=\s*["']([^"']+)["']/) || [])[1];
+    if (!v || !versionNewer(v, APP_VERSION)) return;
+    if (_updateFound && _updateFound.version === v) { showUpdateBar(); return; }
+    let title = '';
+    try { const rn = await (await fetch('./release-notes.js?t=' + Date.now(), { cache: 'no-store' })).text(); const m = rn.match(new RegExp(`version:\\s*'${v.replace(/\./g, '\\.')}'[\\s\\S]*?title:\\s*'([^']*)'`)); if (m) title = m[1]; } catch (e) {}
+    _updateFound = { version: v, title };
+    showUpdateBar();
+    // 裏にいるときは通知でも（プッシュ通知・バックグラウンド確認と同じバージョンを二重に出さない）
+    const notified = typeof notifyKvGet === 'function' ? await notifyKvGet('notifiedVersion') : null;
+    if (notified !== v && document.visibilityState !== 'visible' && getNotifyPrefs().updates && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      if (typeof notifyKvSet === 'function') notifyKvSet('notifiedVersion', v);
+      showLocalNotification(`🆕 すするanki v${v} が出ました`, (title ? title + '。' : '') + '開いて「再読み込み」すると新しいバージョンになります', 'update');
+    }
+  } catch (e) { /* オフラインなど */ }
+}
+function showUpdateBar() {
+  if (!_updateFound || _updateDismissed === _updateFound.version) return;
+  let bar = document.getElementById('updateBar');
+  if (!bar) { bar = document.createElement('div'); bar.id = 'updateBar'; bar.className = 'update-bar'; document.body.appendChild(bar); }
+  const busy = document.body.classList.contains('in-quiz') || (typeof _drillActive !== 'undefined' && _drillActive);
+  bar.innerHTML = `<div style="flex:1; min-width:0;"><b>🆕 新しいバージョン v${escapeHtml(_updateFound.version)} があります</b>
+      <div class="hint-small">${_updateFound.title ? escapeHtml(_updateFound.title) + '。' : ''}再読み込みすると新しくなります${busy ? '（クイズ中の問題は最初からになります。暗記テストの途中経過は保存されます）' : ''}</div></div>
+    <div style="display:flex; gap:6px; flex-shrink:0;"><button class="btn btn-primary" style="width:auto; padding:6px 12px;" onclick="applyAppUpdate()">🔄 再読み込み</button><button class="btn btn-secondary" style="width:auto; padding:6px 10px;" onclick="dismissUpdateBar()">あとで</button></div>`;
+  bar.style.display = 'flex';
+}
+function dismissUpdateBar() { if (_updateFound) _updateDismissed = _updateFound.version; const bar = document.getElementById('updateBar'); if (bar) bar.style.display = 'none'; }
+async function applyAppUpdate() {
+  try { if (typeof drillSave === 'function' && typeof _drillActive !== 'undefined' && _drillActive) drillSave(); } catch (e) {}
+  try { if (typeof flushPendingSaves === 'function') flushPendingSaves(); } catch (e) {}
+  try { if (_swReg) await _swReg.update(); } catch (e) {}
+  setTimeout(() => location.reload(), 300);
+}
+function startUpdateWatch() {
+  clearInterval(_updateTimer);
+  _updateTimer = setInterval(checkForAppUpdate, UPDATE_CHECK_MS);
+  setTimeout(checkForAppUpdate, 15000);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { checkForAppUpdate(); showUpdateBar(); } });
+  window.addEventListener('online', checkForAppUpdate);
+}
+startUpdateWatch();

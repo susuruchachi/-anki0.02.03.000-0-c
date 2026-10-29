@@ -14,6 +14,43 @@ let deletedCats = [];
 // ================================================================
 let catStamps = {};   // { フォルダー名: { a: 作成(復活)時刻, d: 削除時刻 } }
 let catSubjects = {}; // ★【0.03.07】フォルダーの教科タグ { フォルダー名: '英語' }（'' は「なし（親から引き継がない）」）
+// ★【0.03.30】上のフォルダーから出題するときに出さないフォルダー { フォルダー名: true }（false は「出す」を明示。同期で外せるように）
+let catSkip = {};
+function isCatSkipped(cat) { return !!(catSkip && catSkip[cat] === true); }
+// 出題に使うフォルダー：自分と、その下のフォルダー（ただし「上から出題するときは出さない」フォルダーとその下は除く）
+function getQuizSubcategories(cat, result = []) {
+  if (result.includes(cat)) return result;
+  result.push(cat);
+  (categoryTree[cat] || []).forEach(c => { if (!isCatSkipped(c)) getQuizSubcategories(c, result); });
+  return result;
+}
+let studyPlan = null; // ★【0.03.27】週間プラン（plan.js）。設定は新しく変えた方、達成の記録は両方を残す
+// ★【0.03.33】週間プランは複数持てる：studyPlan = { v: 2, plans: { id: プラン } }（解除したプランは { deleted: true, planAt }）
+function normalizeStudyPlans(x) {
+  if (!x) return { v: 2, plans: {} };
+  if (x.v === 2) return { v: 2, plans: Object.assign({}, x.plans || {}) };
+  // 前の形（プラン1つ）
+  if (x.root || x.weeks) return { v: 2, plans: { p1: Object.assign({ id: 'p1' }, x, x.enabled === false ? { deleted: true } : {}) } };
+  return { v: 2, plans: x.planAt ? { p1: { id: 'p1', deleted: true, planAt: x.planAt } } : {} };
+}
+function mergeOnePlan(a, b) {
+  if (!a) return b || null; if (!b) return a;
+  const base = (a.planAt || 0) >= (b.planAt || 0) ? a : b, other = base === a ? b : a;
+  if (base.deleted) return base;
+  const log = {};
+  [other.log || {}, base.log || {}].forEach(L => Object.keys(L).forEach(k => {
+    const x = log[k] = log[k] || {};
+    Object.keys(L[k] || {}).forEach(f => { const v = L[k][f]; x[f] = typeof v === 'number' && typeof x[f] === 'number' ? Math.min(x[f], v) : (x[f] === undefined ? v : x[f]); });
+  }));
+  return Object.assign({}, base, { log });
+}
+function mergeStudyPlans(a, b) {
+  if (!a && !b) return null;
+  const A = normalizeStudyPlans(a), B = normalizeStudyPlans(b);
+  const plans = {};
+  new Set([...Object.keys(A.plans), ...Object.keys(B.plans)]).forEach(id => { plans[id] = mergeOnePlan(A.plans[id], B.plans[id]); });
+  return { v: 2, plans };
+}
 let deletedCardsAt = {}; // { カードID: 削除時刻 }（削除後に取り込み直したカードは updatedAt が新しいので復活できる）
 let docStamps = {};   // { 共有docId: { a: 購読時刻, d: 解除時刻 } }
 let structAt = 0;     // フォルダー構造・購読状態を最後に変更した時刻
@@ -32,7 +69,65 @@ const DEVICE_ID = (() => {
 })();
 
 const CARD_CONTENT_FIELDS = ['question', 'answer', 'category', 'note', 'questionImage', 'answerImage', 'choices', 'kind', 'sharedDocId', 'no'];
-const CARD_STAT_FIELDS = ['level', 'correct', 'incorrect', 'streak', 'wrongStreak', 'shikkariStreak', 'level5Correct'];
+const CARD_STAT_FIELDS = ['level', 'correct', 'incorrect', 'streak', 'wrongStreak', 'shikkariStreak', 'level5Correct', 'senses', 'drillStats']; // drillStats：暗記テストだけの正解・不正解
+
+// ★【0.03.17】意味（品詞タグ）ごとの成績
+//  答えが「(他動詞)…/(自動詞)…」のように2つ以上の意味に分かれているカードは、意味ごとに成績（レベル・正誤数・連続記録）を持つ。
+//  card.senses = { 意味の名前: { level, correct, incorrect, streak, wrongStreak, shikkariStreak, level5Correct } }
+//  カード全体の成績は意味ごとの成績から決める（レベル＝いちばん低い意味のレベル、正誤数＝合計、全部の意味が卒業したら卒業）
+const SENSE_STAT_FIELDS = ['level', 'correct', 'incorrect', 'streak', 'wrongStreak', 'shikkariStreak', 'level5Correct'];
+function cardSenseList(card) {
+  if (!card || typeof parseStructuredAnswer !== 'function') return null;
+  const st = parseStructuredAnswer(card.answer);
+  if (!st || st.length < 2) return null;
+  const seen = {};
+  return st.map((seg, i) => {
+    let key = seg.tagKey || seg.label || ('#' + (i + 1)); // ★【0.03.44】キーは前の版と同じ（成績を引き継ぐ）
+    seen[key] = (seen[key] || 0) + 1;
+    if (seen[key] > 1) key += '#' + seen[key];
+    return { key, label: seg.label, text: seg.text };
+  });
+}
+// 意味ごとの成績を読む（保存はしない）。まだ意味ごとの成績が無いカードは、今までのカードの成績を引き継いだものとして扱う
+function senseStatsView(card, list) {
+  list = list || cardSenseList(card);
+  if (!list) return null;
+  const out = {};
+  const n = list.length;
+  list.forEach((s, i) => {
+    if (card.senses && card.senses[s.key]) { out[s.key] = card.senses[s.key]; return; }
+    if (card.senses) { out[s.key] = { level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0, level5Correct: 0 }; return; } // 後から増えた意味
+    const o = {};
+    SENSE_STAT_FIELDS.forEach(f => { o[f] = Number(card[f]) || 0; });
+    // 正誤数は、合計が変わらないように分ける
+    ['correct', 'incorrect'].forEach(f => { const total = Math.max(0, Math.floor(Number(card[f]) || 0)); o[f] = Math.floor(total / n) + (i < total % n ? 1 : 0); });
+    out[s.key] = o;
+  });
+  return out;
+}
+// 意味ごとの成績をカードに保存できる形にする（その意味を解いたときだけ呼ぶ。データを無駄に増やさないため）
+function ensureSenseStats(card) {
+  const list = cardSenseList(card);
+  if (!list) return null;
+  const view = senseStatsView(card, list);
+  card.senses = Object.assign({}, card.senses || {});
+  list.forEach(s => { card.senses[s.key] = Object.assign({}, view[s.key]); });
+  return list;
+}
+function recomputeCardFromSenses(card) {
+  const list = cardSenseList(card);
+  if (!list || !card.senses) return;
+  const ss = list.map(s => card.senses[s.key]).filter(Boolean);
+  if (!ss.length) return;
+  const num = (s, f) => Number(s[f]) || 0;
+  card.level = Math.min(...ss.map(s => num(s, 'level')));
+  card.correct = ss.reduce((a, s) => a + num(s, 'correct'), 0);
+  card.incorrect = ss.reduce((a, s) => a + num(s, 'incorrect'), 0);
+  card.level5Correct = card.level >= 5 ? Math.min(...ss.map(s => num(s, 'level5Correct'))) : 0;
+  card.streak = Math.min(...ss.map(s => num(s, 'streak')));
+  card.wrongStreak = Math.max(...ss.map(s => num(s, 'wrongStreak')));
+  card.shikkariStreak = Math.min(...ss.map(s => num(s, 'shikkariStreak')));
+}
 
 function newCardId() { return 'id_' + Math.random().toString(36).slice(2) + Date.now().toString(36); }
 // カードの内容（問題・答え・フォルダー・メモ等）を変更したら呼ぶ
@@ -108,6 +203,8 @@ function loadData() {
       if(p.deletedCats) deletedCats=p.deletedCats;
       if(p.catStamps) catStamps=p.catStamps;
       if(p.catSubjects) catSubjects=p.catSubjects;
+      if(p.catSkip) catSkip=p.catSkip;
+      if(p.studyPlan) studyPlan=p.studyPlan;
       if(p.deletedCardsAt) deletedCardsAt=p.deletedCardsAt;
       if(p.docStamps) docStamps=p.docStamps;
       if(p.structAt) structAt=p.structAt;
@@ -160,7 +257,7 @@ function repairInflatedStats(silent = false) {
   let fixed = 0;
   db.forEach(q => {
     if ((Number(q.correct) || 0) >= INFLATED_STATS_LIMIT || (Number(q.incorrect) || 0) >= INFLATED_STATS_LIMIT) {
-      q.correct = 0; q.incorrect = 0; touchStats(q); fixed++;
+      q.correct = 0; q.incorrect = 0; delete q.senses; touchStats(q); fixed++;
     }
   });
   if (!silent) {
@@ -175,7 +272,9 @@ function structFingerprint() {
   Object.keys(categoryTree || {}).sort().forEach(k => { tree[k] = categoryTree[k]; });
   const subj = {};
   Object.keys(catSubjects || {}).sort().forEach(k => { subj[k] = catSubjects[k]; });
-  return JSON.stringify([categories, tree, [...(subscribedDocs || [])].sort(), [...(ownedDocs || [])].sort(), subj]);
+  const skip = {};
+  Object.keys(catSkip || {}).sort().forEach(k => { skip[k] = catSkip[k]; });
+  return JSON.stringify([categories, tree, [...(subscribedDocs || [])].sort(), [...(ownedDocs || [])].sort(), subj, skip]);
 }
 // フォルダー構造が変わっていれば変更時刻を更新する（クラウドから取り込んだ変更では呼ばない）
 function updateStructStamp() {
@@ -185,7 +284,7 @@ function updateStructStamp() {
 }
 
 function buildSyncPayload() {
-  return { db, categories, categoryTree, subscribedDocs, ownedDocs, deletedCards, deletedCardsAt, deletedCats, catStamps, docStamps, structAt, catSubjects };
+  return { db, categories, categoryTree, subscribedDocs, ownedDocs, deletedCards, deletedCardsAt, deletedCats, catStamps, docStamps, structAt, catSubjects, catSkip, studyPlan };
 }
 
 let _quotaWarned = false;
@@ -432,7 +531,9 @@ function mergeSyncStates(L, C) {
     deletedCards: delCards, deletedCardsAt: delAt, deletedCats: deadCats, catStamps: cs, docStamps: ds,
     // 教科タグ：フォルダー構造を新しく変更した側を優先し、もう一方にしか無いものは足す
     catSubjects: (() => { const o = Object.assign({}, older.catSubjects || {}, newer.catSubjects || {}); Object.keys(o).forEach(k => { if (!aliveSet.has(k)) delete o[k]; }); return o; })(),
+    catSkip: (() => { const o = Object.assign({}, older.catSkip || {}, newer.catSkip || {}); Object.keys(o).forEach(k => { if (!aliveSet.has(k)) delete o[k]; }); return o; })(),
     structAt: Math.max(L.structAt || 0, C.structAt || 0),
+    studyPlan: mergeStudyPlans(L.studyPlan, C.studyPlan),
     subscribedDocs: subs, ownedDocs: owned
   };
 }
@@ -442,7 +543,7 @@ function mergeIntoLocal(r) {
   const merged = mergeSyncStates(buildSyncPayload(), r);
   db = merged.db; categories = merged.categories; categoryTree = merged.categoryTree;
   deletedCards = merged.deletedCards; deletedCardsAt = merged.deletedCardsAt; deletedCats = merged.deletedCats;
-  catStamps = merged.catStamps; docStamps = merged.docStamps; structAt = merged.structAt; catSubjects = merged.catSubjects || {};
+  catStamps = merged.catStamps; docStamps = merged.docStamps; structAt = merged.structAt; catSubjects = merged.catSubjects || {}; catSkip = merged.catSkip || {}; studyPlan = merged.studyPlan || null;
   subscribedDocs = merged.subscribedDocs; ownedDocs = merged.ownedDocs;
   ensureSystemSanity();
   autoMerge(true);
@@ -472,7 +573,7 @@ function syncFingerprint(p) {
   return stableStringify({
     db: dbSorted, categories: [...(p.categories || [])].sort(), categoryTree: p.categoryTree || {},
     deletedCards: [...(p.deletedCards || [])].sort(), deletedCardsAt: p.deletedCardsAt || {}, deletedCats: [...(p.deletedCats || [])].sort(),
-    catStamps: p.catStamps || {}, docStamps: p.docStamps || {}, structAt: p.structAt || 0, catSubjects: p.catSubjects || {},
+    catStamps: p.catStamps || {}, docStamps: p.docStamps || {}, structAt: p.structAt || 0, catSubjects: p.catSubjects || {}, catSkip: p.catSkip || {}, studyPlan: p.studyPlan || null,
     subscribedDocs: [...(p.subscribedDocs || [])].sort(), ownedDocs: [...(p.ownedDocs || [])].sort()
   });
 }
@@ -483,7 +584,7 @@ function refreshVisibleViews(contentChanged = true) {
     if (contentChanged) {
       if (isActive('pgTree') && typeof renderTree === 'function') renderTree();
       if (isActive('pgBox') && typeof renderBox === 'function') renderBox();
-      if (isActive('pgHome')) { if (typeof buildQuizScopeDropdown === 'function') buildQuizScopeDropdown(); }
+      if (isActive('pgHome')) { if (typeof buildQuizScopeDropdown === 'function') buildQuizScopeDropdown(); if (typeof renderPlanHome === 'function') renderPlanHome(); }
     }
     if (typeof updateHomeSummary === 'function') updateHomeSummary();
   } catch (e) { console.warn(e); }
@@ -537,6 +638,7 @@ function ensureSystemSanity() {
   });
   for (const p in categoryTree) { if (categoryTree[p].length === 0) delete categoryTree[p]; }
   Object.keys(catSubjects || {}).forEach(k => { if (!categories.includes(k)) delete catSubjects[k]; });
+  Object.keys(catSkip || {}).forEach(k => { if (!categories.includes(k)) delete catSkip[k]; });
 
   const knownDocs = new Set([...(subscribedDocs || []), ...(ownedDocs || [])]);
   const delSet = new Set(deletedCards);
@@ -565,7 +667,8 @@ function assignCardNumbers() {
   db.forEach(q => {
     if (q.no !== undefined && q.no !== null && q.no !== '') {
       const n = Number(q.no);
-      if (Number.isFinite(n) && n > 0) { q.no = Math.floor(n); maxNo[q.category] = Math.max(maxNo[q.category] || 0, q.no); }
+      // ★【0.03.45】派生語・熟語の 1000.01 / 1000.0001 のような小数の番号はそのまま（「1000-1」と表示）
+      if (Number.isFinite(n) && n > 0) { q.no = Math.round(n * 10000) / 10000; maxNo[q.category] = Math.max(maxNo[q.category] || 0, Math.floor(q.no)); }
       else delete q.no;
     }
   });
@@ -594,7 +697,7 @@ function autoMerge(skipSave = false) {
       String(a.id).localeCompare(String(b.id)));
     const keep = Object.assign({}, sorted[0]);
     sorted.slice(1).forEach(dup => {
-      CARD_STAT_FIELDS.forEach(f => { keep[f] = Math.max(Number(keep[f]) || 0, Number(dup[f]) || 0); });
+      CARD_STAT_FIELDS.forEach(f => { if (f === 'senses' || f === 'drillStats') { if (!keep[f] && dup[f]) keep[f] = dup[f]; return; } keep[f] = Math.max(Number(keep[f]) || 0, Number(dup[f]) || 0); });
       if (!keep.note && dup.note) keep.note = dup.note;
       if (!keep.choices && dup.choices) keep.choices = dup.choices;
       if (!keep.kind && dup.kind) keep.kind = dup.kind;
@@ -622,7 +725,7 @@ function resolveAccountSwitch() {
     if (!merge) {
       takeSnapshot('アカウント変更（置き換え）');
       db = []; categories = ['未分類']; categoryTree = {}; subscribedDocs = []; ownedDocs = [];
-      deletedCards = []; deletedCardsAt = {}; deletedCats = []; catStamps = {}; docStamps = {}; structAt = 0; catSubjects = {};
+      deletedCards = []; deletedCardsAt = {}; deletedCats = []; catStamps = {}; docStamps = {}; structAt = 0; catSubjects = {}; catSkip = {}; studyPlan = null;
       sharedDocPermissions = {};
       _structHash = structFingerprint(); writeLocal();
     } else {

@@ -4,7 +4,12 @@ let _boxAnswerCache = {};
 let _boxSearchTimer = null;
 function scheduleBoxSearch() { clearTimeout(_boxSearchTimer); _boxSearchTimer = setTimeout(renderBox, 250); }
 function showAllCards() { currentViewContext = 'all'; const sb = document.getElementById('txtSearchBox'); if(sb) sb.value = ''; renderBox(); }
-function filterBoxByStatus(statusType) { currentViewContext = statusType; openPage('pgBox'); }
+// ★【0.03.24】実績画面で選んでいるフォルダーがあれば、そのフォルダーの中だけで絞り込む
+function filterBoxByStatus(statusType) {
+  const cat = typeof statsCategory !== 'undefined' && statsCategory && categories.includes(statsCategory) ? statsCategory : '';
+  currentViewContext = cat ? { type: 'status', status: statusType, category: cat } : statusType;
+  openPage('pgBox');
+}
 
 function renderBox() {
   const container = document.getElementById('boxList'); container.innerHTML = '';
@@ -101,6 +106,24 @@ function renderBox() {
       });
       navContainer.appendChild(subGrid);
     }
+  } else if (typeof currentViewContext === 'object' && currentViewContext.type === 'status') {
+    // ★【0.03.24】フォルダーの中の、そのランクのカード
+    const v = currentViewContext;
+    filtered = statsCards(v.category).filter(STATUS_TESTS[v.status] || (() => true));
+    titleString = `📊 ${v.category}：${STATUS_NAMES[v.status] || ''}`;
+    navContainer = document.createElement('div');
+    navContainer.style.cssText = 'display:flex; gap:8px; flex-wrap:wrap; padding-bottom:12px; margin-bottom:12px; border-bottom:1px solid var(--border);';
+    Object.keys(STATUS_NAMES).forEach(k => {
+      const b = document.createElement('button'); b.type = 'button';
+      b.className = 'chip' + (k === v.status ? ' active' : '');
+      b.textContent = `${STATUS_NAMES[k]} ${statsCards(v.category).filter(STATUS_TESTS[k]).length}`;
+      b.onclick = e => { e.preventDefault(); currentViewContext = { type: 'status', status: k, category: v.category }; renderBox(); };
+      navContainer.appendChild(b);
+    });
+    const back = document.createElement('button'); back.type = 'button'; back.className = 'chip';
+    back.textContent = '📁 フォルダーを開く';
+    back.onclick = e => { e.preventDefault(); currentViewContext = { type: 'category', value: v.category, showAllSub: true }; renderBox(); };
+    navContainer.appendChild(back);
   } else if (typeof currentViewContext === 'string' && currentViewContext !== 'all') {
     titleString = `📊 実績抽出カードの一覧`;
     if (currentViewContext === 'grad') filtered = db.filter(q => isGraduated(q));
@@ -183,14 +206,24 @@ function buildBoxCard(item) {
     _boxAnswerCache[item.id] = { text: item.answer, image: item.answerImage || null };
 
     const lvlStr = item.level === -1 ? 'しっかり' : 'LV '+item.level;
-    const noHTML = item.no ? `<span class="card-no">No.${Number(item.no)}</span>` : '';
-    const badgeHTML = `<span class="badge ${isGrad ? 'badge-grad':'badge-level'}">${isGrad ? 'GRADUATE' : lvlStr}</span>`;
+    const noHTML = (item.no ? `<span class="card-no">No.${cardNoText(item.no)}</span>` : '') + (item.stars ? `<span class="card-stars">${starsText(item.stars)}</span>` : '');
+    const badgeHTML = `<span class="badge ${isGrad ? 'badge-grad':'badge-level'}">${isGrad ? 'GRADUATE' : lvlStr}</span>`
+      + (item.drillStats ? `<span class="badge badge-level" style="margin-left:4px;" title="暗記テストの正解・不正解">🧠 〇${Number(item.drillStats.c) || 0} ×${Number(item.drillStats.w) || 0}</span>` : ''); // ★【0.03.29】
+    // ★【0.03.17】意味ごとのレベル
+    const senseList = cardSenseList(item);
+    let _senseView = null;
+    const senseHTML = senseList ? `<div class="card-senses">${senseList.map(sn => {
+      const st = (_senseView || (_senseView = senseStatsView(item, senseList)))[sn.key] || item;
+      const g = isGraduated(st);
+      const lv = g ? '🎓' : (st.level === -1 ? 'しっかり' : 'Lv' + (Number(st.level) || 0));
+      return `<span class="sense-chip${g ? ' grad' : (st.level <= 0 ? ' weak' : '')}">🏷️ ${escapeHtml(sn.label || sn.key)} ${lv}</span>`;
+    }).join('')}</div>` : '';
     
     const sharedIcon = item.sharedDocId ? `<span style="margin-left:6px; font-size:0.75rem; color:var(--accent);">🌐同期</span>` : '';
     // ★【0.03.02】クイックメモを一覧にも表示する（長いものは折りたたみ）
     // ★【0.03.04】メモの和訳（答えが英語のカードは英単語・語根）は隠し、タップで表示する
     const noteHTML = item.note ? `<div class="q-card-note" onclick="this.classList.toggle('expanded')" title="タップで全文表示">📝 ${(noteHidingApplies(item.category) ? noteToSpoilerHTML(item.note, isLatinAnswer(getPrimaryAnswer(item.answer))) : escapeHtml(item.note))}</div>` : '';
-    const kindBadge = item.kind === 'test' ? '<span class="badge badge-level" style="margin-right:4px;">テスト</span>' : item.kind === 'cloze' ? '<span class="badge badge-level" style="margin-right:4px;">例文</span>' : item.kind === 'self' ? '<span class="badge badge-level" style="margin-right:4px;">自己申告</span>' : '';
+    const kindBadge = item.kind === 'test' ? '<span class="badge badge-level" style="margin-right:4px;">テスト</span>' : item.kind === 'cloze' ? '<span class="badge badge-level" style="margin-right:4px;">例文</span>' : item.kind === 'self' ? '<span class="badge badge-level" style="margin-right:4px;">自己申告</span>' : item.kind === 'intro' ? '<span class="badge badge-level" style="margin-right:4px;">導入の文</span>' : '';
     // ★【0.02.63】問題に画像が添付されていればサムネイル表示
     const qImgHTML = item.questionImage ? `<img src="${escAttr(item.questionImage)}" alt="問題画像" style="max-width:100%; max-height:120px; border-radius:8px; margin-bottom:8px; display:block;">` : '';
     
@@ -201,6 +234,7 @@ function buildBoxCard(item) {
         A: <span style="background:var(--bg4); color:var(--text2); padding:2px 8px; border-radius:6px; border:1px solid var(--border); display:inline-block; font-size:0.75rem;">👆 タップして答えを表示</span>
       </div>
       ${noteHTML}
+      ${senseHTML}
       <div class="q-card-sub">${badgeHTML}<span>正: ${item.correct} / 誤: ${item.incorrect}</span><span style="font-size:0.75rem; color:var(--text3);">📂 ${escapeHtml(item.category)}${sharedIcon}</span></div>
     `;
     return card;
@@ -306,6 +340,7 @@ function openCardModal(mode, itemOrDefaults) {
   document.getElementById('txtCardAnswer').value = mode === 'edit' ? (itemOrDefaults.answer || '') : '';
   document.getElementById('txtCardNote').value = mode === 'edit' ? (itemOrDefaults.note || '') : '';
   document.getElementById('numCardNo').value = mode === 'edit' && itemOrDefaults.no ? itemOrDefaults.no : '';
+  document.getElementById('selCardStars').value = String(mode === 'edit' ? (Number(itemOrDefaults.stars) || 0) : 0);
   updateCardImagePreview('question');
   updateCardImagePreview('answer');
   document.getElementById('cardModalOverlay').style.display = 'flex';
@@ -346,6 +381,7 @@ async function submitCardModal() {
   const note = document.getElementById('txtCardNote').value.trim();
   const noVal = parseInt(document.getElementById('numCardNo').value, 10);
   const no = Number.isFinite(noVal) && noVal > 0 ? noVal : null;
+  const stars = parseStars(document.getElementById('selCardStars').value);
   if (!q) { alert('問題文を入力してください。'); document.getElementById('txtCardQuestion').focus(); return; }
   if (!a) { alert('答えを入力してください。'); document.getElementById('txtCardAnswer').focus(); return; }
 
@@ -354,7 +390,8 @@ async function submitCardModal() {
     const item = db.find(x => x.id === _cardModalState.item.id) || _cardModalState.item;
     item.question = q; item.answer = a;
     if (note) item.note = note; else delete item.note;
-    if (no) item.no = no;
+    if (no && !(item.no && Math.floor(item.no) === no)) item.no = no; // 「1000-1」などはそのまま
+    if (stars) item.stars = stars; else delete item.stars;
     touchCard(item);
     if (_cardModalState.qImage) item.questionImage = _cardModalState.qImage; else delete item.questionImage;
     if (_cardModalState.aImage) item.answerImage = _cardModalState.aImage; else delete item.answerImage;
@@ -364,6 +401,7 @@ async function submitCardModal() {
     const newCard = { id: newCardId(), question: q, answer: a, category: _cardModalState.category, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 };
     if (note) newCard.note = note;
     if (no) newCard.no = no;
+    if (stars) newCard.stars = stars;
     touchCard(newCard);
     if (_cardModalState.qImage) newCard.questionImage = _cardModalState.qImage;
     if (_cardModalState.aImage) newCard.answerImage = _cardModalState.aImage;

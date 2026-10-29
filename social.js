@@ -4,6 +4,8 @@
 window.shareStats = localStorage.getItem('shareStats') === 'true';
 
 // ★ 本日のデイリーランキング表示
+let rankingMode = 'quiz'; // ★【0.03.39】'quiz'（通常のクイズ）／'drill'（暗記テスト）
+function setRankingMode(m) { rankingMode = m; document.querySelectorAll('[data-rankmode]').forEach(b => b.classList.toggle('active', b.dataset.rankmode === m)); loadDailyRanking(); }
 async function loadDailyRanking() {
   const listDiv = document.getElementById('rankingList');
   if (!currentUser) { listDiv.innerHTML = 'ログインしてください'; return; }
@@ -14,15 +16,18 @@ async function loadDailyRanking() {
     
     if(snap.empty) { listDiv.innerHTML = 'まだ今日のスコアがありません。あなたが1番乗りです！'; return; }
     
+    const key = rankingMode === 'drill' ? 'drillScore' : 'score';
     let scores = [];
-    snap.forEach(doc => scores.push(doc.data()));
-    scores.sort((a, b) => (b.score || 0) - (a.score || 0));
+    snap.forEach(doc => { const x = doc.data(); if ((x[key] || 0) > 0) scores.push(x); });
+    if (!scores.length) { listDiv.innerHTML = rankingMode === 'drill' ? '今日はまだ暗記テストのスコアがありません。' : 'まだ今日のスコアがありません。あなたが1番乗りです！'; return; }
+    scores.sort((a, b) => (b[key] || 0) - (a[key] || 0));
     scores = scores.slice(0, 10);
     
     listDiv.innerHTML = '';
     let rank = 1;
     scores.forEach(data => {
-      listDiv.innerHTML += `<div><span style="display:inline-block; width:24px; color:var(--warn); font-weight:bold;">${rank}</span>: ${escapeHtml(data.name)} <span style="color:var(--success); font-weight:bold;">(${data.score}問)</span></div>`;
+      const extra = rankingMode === 'drill' && data.drillTotal ? ` <span class="hint-small">正答率 ${Math.round(data.drillScore / data.drillTotal * 100)}%</span>` : '';
+      listDiv.innerHTML += `<div><span style="display:inline-block; width:24px; color:var(--warn); font-weight:bold;">${rank}</span>: ${escapeHtml(data.name)} <span style="color:var(--success); font-weight:bold;">(${data[key]}問)</span>${extra}</div>`;
       rank++;
     });
   } catch(e) {
@@ -38,19 +43,237 @@ function copyMyUid() {
   navigator.clipboard.writeText(uid).then(() => alert("✅ UIDをコピーしました！"));
 }
 
-// ★ フレンド追加（双方向登録）
-async function addAppFriend() {
-  const fUid = document.getElementById('txtAddFriendUid').value.trim();
-  if (!fUid) return alert("UIDを入力してください。"); 
-  if (!currentUser) return alert("ログインが必要です。"); 
-  if (fUid === currentUser.uid) return alert("自分自身は登録できません。");
+// ================================================================
+// ★【0.03.25】フレンド申請と承認
+//  申請：susuru_anki_friend_requests/{送った人_受け取る人} に { from, to, status: 'pending' } を作る
+//  承認：受け取った人が、自分のフレンド一覧に相手を足して、申請を status: 'accepted' にする
+//        → 送った人の画面がそれに気づいて、自分のフレンド一覧に相手を足し、申請を消す
+//  （相手のプロフィールには書き込まないので、勝手にフレンドにされることはない）
+//  通知：アプリを開いている間はその場で、閉じているときはプッシュ通知（送信側 tools/push-notify.js）で知らせる
+// ================================================================
+const FRIEND_REQ_COL = 'susuru_anki_friend_requests';
+let _friendReqIn = [], _friendReqOut = [], _friendReqUnsubs = [];
+function friendErrMsg(e) {
+  const c = (e && (e.code || e.message)) || '';
+  if (/permission/i.test(c)) return 'Firestore のルールで拒否されました。管理者が docs/firestore.rules の最新のルールを公開しているか確認してください。';
+  if (/unavailable|network/i.test(c)) return '通信できませんでした。電波の良いところでもう一度試してください。';
+  return c;
+}
+async function myFriendList() {
+  const snap = await firestore.collection('susuru_anki_profiles').doc(currentUser.uid).get();
+  return snap.exists ? (snap.data().friends || []) : [];
+}
+// フレンド申請を送る（UID の入力欄・対戦履歴から）
+async function sendFriendRequest(toUid, toName) {
+  if (!currentUser) return alert('ログインが必要です。');
+  toUid = String(toUid || '').trim();
+  if (!toUid) return alert('UIDを入力してください。');
+  if (toUid === currentUser.uid) return alert('自分自身には申請できません。');
   try {
-    await firestore.collection('susuru_anki_profiles').doc(currentUser.uid).set({ friends: firebase.firestore.FieldValue.arrayUnion(fUid) }, { merge: true });
-    await firestore.collection('susuru_anki_profiles').doc(fUid).set({ friends: firebase.firestore.FieldValue.arrayUnion(currentUser.uid) }, { merge: true });
-    document.getElementById('txtAddFriendUid').value = ''; 
-    alert("✅ フレンドを追加しました！"); 
+    const prof = await firestore.collection('susuru_anki_profiles').doc(toUid).get();
+    if (!prof.exists) return alert('⚠️ そのUIDのユーザーが見つかりません。UIDをもう一度確かめてください（相手が一度ログインしている必要があります）。');
+    const name = toName || prof.data().displayName || '名無し';
+    if ((await myFriendList()).includes(toUid)) return alert(`${name} さんはすでにフレンドです。`);
+    // 相手からの申請が届いていれば、それを承認する
+    const back = _friendReqIn.find(r => r.from === toUid && r.status === 'pending');
+    if (back) { await acceptFriendRequest(back.id); return; }
+    await firestore.collection(FRIEND_REQ_COL).doc(`${currentUser.uid}_${toUid}`).set({
+      from: currentUser.uid, fromName: currentUser.displayName || '名無し', to: toUid, toName: name,
+      status: 'pending', createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    alert(`✅ ${name} さんにフレンド申請を送りました。相手が承認するとフレンドになります。`);
+  } catch (e) { console.error(e); alert('⚠️ フレンド申請に失敗しました。\n' + friendErrMsg(e)); }
+}
+async function addAppFriend() {
+  const el = document.getElementById('txtAddFriendUid');
+  await sendFriendRequest(el.value);
+  el.value = '';
+}
+async function acceptFriendRequest(id) {
+  const r = _friendReqIn.find(x => x.id === id); if (!r || !currentUser) return;
+  try {
+    await firestore.collection('susuru_anki_profiles').doc(currentUser.uid).set({ friends: firebase.firestore.FieldValue.arrayUnion(r.from) }, { merge: true });
+    await firestore.collection(FRIEND_REQ_COL).doc(id).update({ status: 'accepted', toName: currentUser.displayName || '名無し', respondedAt: firebase.firestore.FieldValue.serverTimestamp() });
+    alert(`✅ ${r.fromName || '相手'} さんとフレンドになりました。`);
     loadAppFriends();
-  } catch (e) { alert("⚠️ フレンド追加に失敗しました。ルールの確認を。"); }
+  } catch (e) { console.error(e); alert('⚠️ 承認に失敗しました。\n' + friendErrMsg(e)); }
+}
+async function rejectFriendRequest(id) {
+  const r = _friendReqIn.find(x => x.id === id);
+  if (!confirm(`${(r && r.fromName) || '相手'} さんからの申請を断りますか？（相手には知らせません）`)) return;
+  try { await firestore.collection(FRIEND_REQ_COL).doc(id).delete(); } catch (e) { alert('⚠️ 失敗しました。\n' + friendErrMsg(e)); }
+}
+async function cancelFriendRequest(id) {
+  if (!confirm('この申請を取り消しますか？')) return;
+  try { await firestore.collection(FRIEND_REQ_COL).doc(id).delete(); } catch (e) { alert('⚠️ 失敗しました。\n' + friendErrMsg(e)); }
+}
+// 届いた申請・承認をその場で知らせる（一度知らせたものは知らせない）
+function friendNoticeSeen(key) {
+  let seen = {}; try { seen = JSON.parse(localStorage.getItem('susuru_anki_friend_seen') || '{}') || {}; } catch (e) {}
+  if (seen[key]) return true;
+  seen[key] = Date.now();
+  const ks = Object.keys(seen); if (ks.length > 300) ks.sort((a, b) => seen[a] - seen[b]).slice(0, ks.length - 300).forEach(k => delete seen[k]);
+  try { localStorage.setItem('susuru_anki_friend_seen', JSON.stringify(seen)); } catch (e) {}
+  return false;
+}
+function friendNotify(title, body, key) {
+  if (friendNoticeSeen(key)) return;
+  if (typeof showLocalNotification === 'function' && typeof Notification !== 'undefined' && Notification.permission === 'granted' && document.visibilityState !== 'visible') showLocalNotification(title, body, 'friend');
+  else showAppToast(`${title}　${body}`, () => { openPage('pgFriends'); loadAppFriends(); });
+}
+function showAppToast(text, onClick) {
+  const t = document.createElement('div'); t.className = 'app-toast'; t.textContent = text;
+  t.onclick = () => { t.remove(); if (onClick) onClick(); };
+  document.body.appendChild(t);
+  setTimeout(() => t.classList.add('show'), 10);
+  setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 400); }, 6000);
+}
+// ログインしたら、自分あての申請・自分が送った申請を見張る
+function startFriendRequestWatch() {
+  _friendReqUnsubs.forEach(u => { try { u(); } catch (e) {} }); _friendReqUnsubs = [];
+  _friendReqIn = []; _friendReqOut = []; renderFriendRequests();
+  if (!currentUser) return;
+  const col = firestore.collection(FRIEND_REQ_COL);
+  _friendReqUnsubs.push(col.where('to', '==', currentUser.uid).onSnapshot(snap => {
+    _friendReqIn = snap.docs.map(d => Object.assign({ id: d.id }, d.data())).filter(r => r.status === 'pending');
+    _friendReqIn.forEach(r => friendNotify('🤝 フレンド申請', `${r.fromName || '名無し'} さんから申請が届きました`, 'in:' + r.id));
+    renderFriendRequests();
+  }, e => console.warn('フレンド申請の読み込みに失敗:', e.message)));
+  _friendReqUnsubs.push(col.where('from', '==', currentUser.uid).onSnapshot(async snap => {
+    const all = snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
+    _friendReqOut = all.filter(r => r.status === 'pending');
+    renderFriendRequests();
+    // 承認された申請：自分のフレンド一覧にも相手を足して、申請を片づける
+    for (const r of all.filter(x => x.status === 'accepted')) {
+      try {
+        await firestore.collection('susuru_anki_profiles').doc(currentUser.uid).set({ friends: firebase.firestore.FieldValue.arrayUnion(r.to) }, { merge: true });
+        await col.doc(r.id).delete();
+        friendNotify('✅ フレンド申請が承認されました', `${r.toName || '相手'} さんとフレンドになりました`, 'ok:' + r.id);
+        if (document.getElementById('pgFriends').classList.contains('active')) loadAppFriends();
+      } catch (e) { console.warn('承認された申請の処理に失敗:', e.message); }
+    }
+  }, e => console.warn('送ったフレンド申請の読み込みに失敗:', e.message)));
+  // ★【0.03.47】フレンドからの紹介
+  _friendIntros = []; 
+  _friendReqUnsubs.push(firestore.collection(FRIEND_INTRO_COL).where('to', '==', currentUser.uid).onSnapshot(snap => {
+    _friendIntros = snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
+    _friendIntros.forEach(r => friendNotify('🤝 フレンドの紹介', `${r.fromName || 'フレンド'} さんが ${r.introName || '名無し'} さんを紹介しました`, 'intro:' + r.id));
+    renderFriendRequests();
+  }, e => console.warn('フレンドの紹介の読み込みに失敗:', e.message)));
+  if (location.hash === '#friends') { history.replaceState(null, '', location.pathname + location.search); openPage('pgFriends'); loadAppFriends(); }
+}
+function renderFriendRequests() {
+  const n = _friendReqIn.length + _friendIntros.length;
+  document.querySelectorAll('.friend-req-badge').forEach(b => { b.textContent = n; b.style.display = n ? 'inline-flex' : 'none'; });
+  const box = document.getElementById('friendRequestsBox');
+  if (!box) return;
+  const rows = [];
+  _friendReqIn.forEach(r => rows.push(`<div class="achieve-row"><div class="achieve-label">📨 ${escapeHtml(r.fromName || '名無し')}<div class="hint-small" style="font-family:'JetBrains Mono',monospace;">${escapeHtml(String(r.from).slice(0, 10))}…</div></div>
+    <div style="display:flex; gap:6px;"><button class="btn btn-success" style="width:auto; padding:6px 12px; font-size:0.8rem;" onclick="acceptFriendRequest(${jsArg(r.id)})">承認</button><button class="btn btn-secondary" style="width:auto; padding:6px 10px; font-size:0.8rem;" onclick="rejectFriendRequest(${jsArg(r.id)})">断る</button></div></div>`));
+  _friendIntros.forEach(r => rows.push(`<div class="achieve-row"><div class="achieve-label">🤝 ${escapeHtml(r.fromName || 'フレンド')} さんからの紹介：<b>${escapeHtml(r.introName || '名無し')}</b> さん</div>
+    <div style="display:flex; gap:6px;"><button class="btn btn-success" style="width:auto; padding:6px 12px; font-size:0.8rem;" onclick="acceptFriendIntro(${jsArg(r.id)})">申請を送る</button><button class="btn btn-secondary" style="width:auto; padding:6px 10px; font-size:0.8rem;" onclick="dismissFriendIntro(${jsArg(r.id)})">閉じる</button></div></div>`));
+  _friendReqOut.forEach(r => rows.push(`<div class="achieve-row"><div class="achieve-label">⏳ ${escapeHtml(r.toName || '名無し')} <span class="hint-small">（承認待ち）</span></div><button class="btn btn-secondary" style="width:auto; padding:6px 10px; font-size:0.8rem;" onclick="cancelFriendRequest(${jsArg(r.id)})">取り消す</button></div>`));
+  box.innerHTML = rows.length ? rows.join('') : '<div class="hint-small">届いている申請・送った申請はありません。</div>';
+}
+
+// ================================================================
+// ★【0.03.47】フレンドの紹介・表示名・URL でフレンド申請
+// ================================================================
+const FRIEND_INTRO_COL = 'susuru_anki_friend_intros';
+let _friendIntros = [];
+const _friendNames = {};
+async function friendNameOf(uid) {
+  if (_friendNames[uid]) return _friendNames[uid];
+  try { const p = await firestore.collection('susuru_anki_profiles').doc(uid).get(); _friendNames[uid] = (p.exists && p.data().displayName) || '名無し'; } catch (e) { return '名無し'; }
+  return _friendNames[uid];
+}
+// 自分のフレンド（uid）を、ほかのフレンドに紹介する（相手の画面の「📨 フレンド申請」に出る。押すと申請が送られる）
+async function openFriendIntro(uid) {
+  const friends = (await myFriendList()).filter(f => f !== uid);
+  if (!friends.length) return alert('紹介できるほかのフレンドがいません。');
+  const name = await friendNameOf(uid);
+  const names = await Promise.all(friends.map(friendNameOf));
+  let ov = document.getElementById('friendIntroOverlay');
+  if (!ov) { ov = document.createElement('div'); ov.id = 'friendIntroOverlay'; ov.className = 'ctx-overlay'; ov.style.zIndex = '1060'; ov.onclick = () => { ov.style.display = 'none'; }; document.body.appendChild(ov); }
+  ov.innerHTML = `<div class="menu-card editor-card" onclick="event.stopPropagation()"><div class="cat-edit-title">🤝 ${escapeHtml(name)} さんを紹介</div>
+    <div class="hint-small" style="margin:6px 0;">紹介する相手を選んでください（お互いに紹介が届き、押すとフレンド申請が送られます）</div>
+    ${friends.map((f, i) => `<label class="bulkdel-row"><input type="checkbox" value="${escAttr(f)}"><div>${escapeHtml(names[i])}</div></label>`).join('')}
+    <div class="plan-btns" style="margin-top:10px;"><button class="btn btn-primary" id="friendIntroGo">紹介する</button><button class="btn btn-secondary" onclick="document.getElementById('friendIntroOverlay').style.display='none'">やめる</button></div></div>`;
+  ov.style.display = 'flex';
+  document.getElementById('friendIntroGo').onclick = async () => {
+    const to = [...ov.querySelectorAll('input:checked')].map(x => x.value);
+    if (!to.length) return;
+    const me = currentUser.displayName || '名無し';
+    try {
+      for (const t of to) {
+        const tName = await friendNameOf(t);
+        const at = firebase.firestore.FieldValue.serverTimestamp();
+        // t さんに uid さんを、uid さんに t さんを紹介する
+        await firestore.collection(FRIEND_INTRO_COL).doc(`${currentUser.uid}_${t}_${uid}`).set({ from: currentUser.uid, fromName: me, to: t, intro: uid, introName: name, createdAt: at });
+        await firestore.collection(FRIEND_INTRO_COL).doc(`${currentUser.uid}_${uid}_${t}`).set({ from: currentUser.uid, fromName: me, to: uid, intro: t, introName: tName, createdAt: at });
+      }
+      ov.style.display = 'none';
+      showAppToast(`🤝 ${name} さんを紹介しました`);
+    } catch (e) { console.error(e); alert('⚠️ 紹介に失敗しました。\n' + friendErrMsg(e)); }
+  };
+}
+async function acceptFriendIntro(id) {
+  const r = _friendIntros.find(x => x.id === id); if (!r) return;
+  await sendFriendRequest(r.intro, r.introName);
+  dismissFriendIntro(id, true);
+}
+async function dismissFriendIntro(id, silent) {
+  try { await firestore.collection(FRIEND_INTRO_COL).doc(id).delete(); } catch (e) { if (!silent) alert('⚠️ 消せませんでした。\n' + friendErrMsg(e)); }
+}
+// 表示名：プロフィールの customName に保存して、ログインのたびに使う（Google の名前より優先）
+async function saveMyDisplayName() {
+  if (!currentUser) return alert('ログインが必要です。');
+  const el = document.getElementById('txtMyDisplayName');
+  const name = String(el.value || '').trim().slice(0, 20);
+  if (!name) return alert('表示名を入力してください。');
+  try {
+    await firestore.collection('susuru_anki_profiles').doc(currentUser.uid).set({ displayName: name, customName: name }, { merge: true });
+    await applyMyDisplayName(name);
+    alert(`✅ 表示名を「${name}」にしました。`);
+  } catch (e) { alert('⚠️ 表示名を変えられませんでした。\n' + friendErrMsg(e)); }
+}
+async function applyMyDisplayName(name) {
+  if (!currentUser || !name) return;
+  try { if (currentUser.displayName !== name && typeof currentUser.updateProfile === 'function') await currentUser.updateProfile({ displayName: name }); } catch (e) { console.warn('表示名の反映に失敗:', e.message); }
+  try { Object.defineProperty(currentUser, 'displayName', { value: name, configurable: true, writable: true }); } catch (e) { try { currentUser.displayName = name; } catch (e2) {} }
+  const el = document.getElementById('txtMyDisplayName'); if (el) el.value = name;
+  const ls = document.getElementById('fbLoginState'); if (ls && ls.querySelector('span')) ls.querySelector('span').textContent = '✅ ' + name;
+}
+// フレンド申請の URL（開いた人に「○○さんにフレンド申請を送りますか？」と聞く）
+function friendLinkUrl() { return location.origin + location.pathname + '?friend=' + encodeURIComponent(currentUser.uid); }
+async function shareFriendLink() {
+  if (!currentUser) return alert('ログインが必要です。');
+  const url = friendLinkUrl(), text = `${currentUser.displayName || ''} さんから すするanki のフレンド申請のリンクです`;
+  try { if (navigator.share) { await navigator.share({ title: 'すするanki フレンド申請', text, url }); return; } } catch (e) { if (e && e.name === 'AbortError') return; }
+  try { await navigator.clipboard.writeText(url); alert('📋 フレンド申請のURLをコピーしました。\n' + url); } catch (e) { prompt('このURLを送ってください', url); }
+}
+(function captureFriendLink() {
+  try {
+    const u = new URL(location.href), f = u.searchParams.get('friend');
+    if (!f) return;
+    localStorage.setItem('susuru_anki_pending_friend', f);
+    u.searchParams.delete('friend'); history.replaceState(null, '', u.pathname + (u.search ? u.search : '') + u.hash);
+  } catch (e) {}
+})();
+// ログインが終わったら（auth.js から）：表示名の反映と、URL で開いたフレンド申請
+async function onFriendAuthReady() {
+  if (!currentUser) return;
+  try {
+    const p = await firestore.collection('susuru_anki_profiles').doc(currentUser.uid).get();
+    const cn = p.exists && p.data().customName;
+    if (cn) await applyMyDisplayName(cn);
+    else { const el = document.getElementById('txtMyDisplayName'); if (el) el.value = currentUser.displayName || ''; }
+  } catch (e) {}
+  let f = null; try { f = localStorage.getItem('susuru_anki_pending_friend'); localStorage.removeItem('susuru_anki_pending_friend'); } catch (e) {}
+  if (!f || f === currentUser.uid) return;
+  if ((await myFriendList()).includes(f)) return showAppToast('🤝 もうフレンドです');
+  const name = await friendNameOf(f);
+  if (confirm(`🤝 ${name} さんにフレンド申請を送りますか？`)) sendFriendRequest(f, name);
 }
 
 // ★ フレンド一覧を読み込んで表示
@@ -63,14 +286,15 @@ async function loadAppFriends() {
     const friends = myProfileSnap.exists ? (myProfileSnap.data().friends || []) : [];
     if (friends.length === 0) { listDiv.innerHTML = '<p style="color:var(--text3); font-size:0.85rem; text-align:center;">フレンドはいません。</p>'; return; }
     listDiv.innerHTML = '';
-    for (const fUid of friends) {
-      const fProfSnap = await firestore.collection('susuru_anki_profiles').doc(fUid).get();
-      const fName = fProfSnap.exists ? fProfSnap.data().displayName : '未登録ユーザー';
+    const names = await Promise.all(friends.map(friendNameOf)); // ★【0.03.48】1人ずつ待たずに、まとめて読む
+    friends.forEach((fUid, i) => {
+      const fName = names[i];
       const div = document.createElement('div'); div.className = 'achieve-row';
-      div.innerHTML = `<div class="achieve-label">👤 ${escapeHtml(fName)}</div><button class="btn" style="width:auto; padding:6px 12px; font-size:0.8rem;" onclick="openChat(${jsArg(fUid)}, ${jsArg(fName)})">💬</button>`;
+      div.innerHTML = `<div class="achieve-label">👤 ${escapeHtml(fName)}</div><div style="display:flex; gap:6px;">${friends.length > 1 ? `<button class="btn btn-secondary" style="width:auto; padding:6px 10px; font-size:0.8rem;" onclick="openFriendIntro(${jsArg(fUid)})" title="ほかのフレンドに紹介">🤝 紹介</button>` : ''}<button class="btn" style="width:auto; padding:6px 12px; font-size:0.8rem;" onclick="openChat(${jsArg(fUid)}, ${jsArg(fName)})">💬</button></div>`;
       listDiv.appendChild(div);
-    }
+    });
   } catch (e) { listDiv.innerHTML = '<p style="color:var(--danger); font-size:0.8rem; text-align:center;">エラーが発生しました。</p>'; }
+  if (typeof renderRace === 'function') renderRace();
 }
 
 let currentChatUnsubscribe = null, currentChatFriendUid = null;
@@ -117,45 +341,21 @@ async function sendChatMessage() {
   } catch (e) { alert("⚠️ エラーが発生しました。"); }
 }
 
-// ★ カテゴリー別ランキング
-async function loadCategoryRanking(catName) {
-  const listDiv = document.getElementById('categoryRankingList');
-  if (!currentUser) { listDiv.innerHTML = 'ログインしてください'; return; }
-  const d = getTodayStr();
-  try {
-    listDiv.innerHTML = '(読み込み中...)';
-    const snap = await firestore.collection('susuru_anki_category_scores').where('date', '==', d).where('category', '==', catName).get();
-    
-    if(snap.empty) { listDiv.innerHTML = `このカテゴリーはまだスコアがありません。`; return; }
-    
-    let scores = [];
-    snap.forEach(doc => scores.push(doc.data()));
-    scores.sort((a, b) => (b.score || 0) - (a.score || 0));
-    scores = scores.slice(0, 10);
-    
-    listDiv.innerHTML = '';
-    let rank = 1;
-    scores.forEach(data => {
-      listDiv.innerHTML += `<div class="card" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; padding:10px;"><span style="color:var(--warn); font-weight:bold; font-size:1.1rem;">#${rank}</span><span>${escapeHtml(data.name || 'Unknown')}</span><span style="color:var(--success); font-weight:bold;">${data.score || 0}問</span></div>`;
-      rank++;
-    });
-  } catch(e) {
-    console.error(e);
-    listDiv.innerHTML = '<span style="color:var(--danger)">ランキング取得エラー</span>';
-  }
-}
 
 // ★ 成績保存
-async function recordCategoryScore(catName, isCorrect) {
+// ★【0.03.39】mode：'drill' なら暗記テストの成績として別に記録する（通常のクイズとは混ぜない）
+async function recordCategoryScore(catName, isCorrect, mode) {
   const isShared = typeof window.shareStats !== 'undefined' ? window.shareStats : (localStorage.getItem('shareStats') === 'true');
   if(!currentUser || !isShared) return;
 
   const d = getTodayStr();
-  const ref = firestore.collection('susuru_anki_category_scores').doc(`${d}_${currentUser.uid}_${catName}`);
+  const drill = mode === 'drill';
+  const ref = firestore.collection('susuru_anki_category_scores').doc(`${d}_${currentUser.uid}_${drill ? 'drill_' : ''}${catName}`);
   try {
     await ref.set({
       date: d,
       category: catName,
+      mode: drill ? 'drill' : 'quiz',
       uid: currentUser.uid,
       name: currentUser.displayName || 'Anonymous',
       score: firebase.firestore.FieldValue.increment(isCorrect ? 1 : 0),
@@ -182,16 +382,13 @@ async function loadFriendsForComparison() {
     const select = document.getElementById('selCompareFriend');
     select.innerHTML = '<option value="">フレンドを選択...</option>';
     
-    for (const friendUid of friends) {
-      try {
-        const friendSnap = await firestore.collection('susuru_anki_profiles').doc(friendUid).get();
-        const friendName = friendSnap.exists ? (friendSnap.data().displayName || friendUid) : friendUid;
-        const opt = document.createElement('option');
-        opt.value = friendUid;
-        opt.innerText = friendName;
-        select.appendChild(opt);
-      } catch(e) {}
-    }
+    const names = await Promise.all(friends.map(friendNameOf));
+    friends.forEach((friendUid, i) => {
+      const opt = document.createElement('option');
+      opt.value = friendUid;
+      opt.innerText = names[i];
+      select.appendChild(opt);
+    });
     
     const catSelect = document.getElementById('selCompareCategory');
     catSelect.innerHTML = '<option value="">🌐 全カテゴリー</option>';
@@ -210,6 +407,7 @@ let compareChartInstance = null;
 async function renderCompareStats() {
   const friendUid = document.getElementById('selCompareFriend').value;
   const category = document.getElementById('selCompareCategory').value;
+  const cmpMode = (document.getElementById('selCompareMode') || {}).value || 'quiz'; // ★【0.03.39】通常のクイズ／暗記テスト
   const area = document.getElementById('compareStatsArea');
 
   if (!friendUid) {
@@ -231,7 +429,9 @@ async function renderCompareStats() {
 
     const accumulate = (doc, isMe) => {
       const d = doc.data();
+      if (d.mode === 'race') return;
       if (category && d.category !== category) return;
+      if ((d.mode === 'drill' ? 'drill' : 'quiz') !== cmpMode) return;
       if (!dateMap[d.date]) dateMap[d.date] = { myScore: 0, myTotal: 0, friendScore: 0, friendTotal: 0, friendName: '?' };
       if (isMe) {
         dateMap[d.date].myScore += (d.score || 0);
@@ -262,7 +462,7 @@ async function renderCompareStats() {
 
     const titleDiv = document.createElement('div');
     titleDiv.style.cssText = 'font-size:0.85rem; color:var(--text2); margin-bottom:10px; text-align:center;';
-    titleDiv.innerText = category ? `📂 ${category} の正答率推移` : '🌐 全カテゴリー 正答率推移';
+    titleDiv.innerText = (cmpMode === 'drill' ? '🧠 暗記テスト：' : '') + (category ? `📂 ${category} の正答率推移` : '🌐 全カテゴリー 正答率推移');
     chartWrap.appendChild(titleDiv);
 
     const canvas = document.createElement('canvas');

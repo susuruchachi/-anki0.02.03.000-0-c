@@ -167,6 +167,12 @@ const KNOWN_POS_TAGS = ['名詞', '動詞', '他動詞', '自動詞', '形容詞
 function isKnownPosTag(label) {
   return KNOWN_POS_TAGS.includes(String(label || '').replace(/[①-⑳0-9０-９]/g, '').trim());
 }
+// ★【0.03.45】問題番号の表示（派生語の 1000.01 は「1000-1」、熟語の 1000.0001 は「1000」）
+function cardNoText(no) {
+  const n = Number(no); if (!Number.isFinite(n)) return '';
+  const i = Math.floor(n), k = Math.round((n - i) * 100);
+  return k > 0 ? `${i}-${k}` : String(i);
+}
 function parseStructuredAnswer(answerText) {
   if (!answerText) return null;
   const rawSegments = splitAnswerAlternatives(answerText, '/');
@@ -179,12 +185,17 @@ function parseStructuredAnswer(answerText) {
   for (const raw of rawSegments) {
     const m = raw.match(segTagRe);
     if (!m) return null; // タグの無いパートが1つでもあれば「通常の複数候補解答」として扱う
-    const rest = m[2].trim();
-    if (!rest) return null; // タグしかない壊れたパートは対象外
     const tagInnerRe = /\(([^()]*)\)/g;
-    let labels = [], tm;
-    while ((tm = tagInnerRe.exec(m[1])) !== null) { const t = tm[1].trim(); if (t !== '') labels.push(t); }
-    result.push({ label: labels.join(' '), text: rest });
+    let labels = [], tm, keep = '', all = [];
+    // ★【0.03.44】2つ目からのカッコは、品詞のタグのときだけタグにする（「(名詞①)(偶然の)事故」の (偶然の) は訳の一部）
+    while ((tm = tagInnerRe.exec(m[1])) !== null) {
+      const t = tm[1].trim(); if (t === '') continue;
+      all.push(t);
+      if (labels.length && !isKnownPosTag(t) || keep) keep += tm[0]; else labels.push(t);
+    }
+    const rest = (keep + m[2]).trim();
+    if (!rest) return null; // タグしかない壊れたパートは対象外
+    result.push({ label: labels.join(' '), text: rest, tagKey: all.join(' ') }); // tagKey：前の版のタグ（意味ごとの成績のキーに使う）
   }
   return result.length > 0 ? result : null;
 }
@@ -207,6 +218,8 @@ function normalizeStructuredToken(str) {
 function structuredTokenForms(str) {
   const base = String(str || '').replace(/\([^()]*\)|（[^（）]*）/g, '').trim();
   const forms = [normalizeStructuredToken(str), normalizeStructuredToken(String(str || '').replace(/[\[［][^\]］]*[\]］]/g, ''))]; // ［ ］の言い換え部分を省いた形も正解
+  // ★【0.03.44】カッコの中も書いた形（「(偶然の)事故」→「偶然の事故」）も正解
+  if (/[(（]/.test(String(str || ''))) forms.push(normalizeStructuredToken(String(str).replace(/[(（]([^()（）]*)[)）]/g, '$1')));
   const m = base.match(/^[～〜~]\s*[をにのとがへでやも]/);
   if (m) forms.push(normalizeStructuredToken(base.slice(m[0].length)));
   return forms.filter(f => f !== '');
@@ -223,6 +236,50 @@ function isStructuredSegmentCorrect(input, correctText) {
   // 区切った一つ一つがすべて正解の訳なら正解にする（以前は全体を1語として比べていたため不正解になっていた）
   const parts = String(input).split(/[\s\u3000、,，・／/]+/).map(normalizeStructuredToken).filter(x => x !== '');
   return parts.length > 1 && parts.every(p => forms.has(p));
+}
+
+// ★【0.03.21】答えに並べた意味を分ける（全角スペース・読点・カンマ区切り。日本語どうしの間の半角スペースも）
+// 「/」「|」は同じ意味の別の書き方として、1つの意味の中に残す。( ) ［ ］「」の中では区切らない
+function splitAnswerMeanings(text) {
+  const mk = maskRichBlocks(String(text == null ? '' : text));
+  const chars = [...mk.masked];
+  const out = []; let cur = '', depth = 0;
+  chars.forEach((ch, i) => {
+    if ('[［(（「'.includes(ch)) depth++;
+    else if (']］)）」'.includes(ch)) depth = Math.max(0, depth - 1);
+    const jpSpace = ch === ' ' && /[^\x00-\x7F]/.test(chars[i - 1] || '') && /[^\x00-\x7F]/.test(chars[i + 1] || '');
+    if (depth === 0 && (/[、，,\u3000]/.test(ch) || jpSpace)) { out.push(cur); cur = ''; return; }
+    cur += ch;
+  });
+  out.push(cur);
+  return out.map(s => mk.restore(s).trim()).filter(s => normalizeStructuredToken(s) !== '');
+}
+// 答えた言葉が、並べた意味のどれに当たるか（意味の番号の配列）。当たらない言葉が混じっていれば null
+function matchAnswerMeanings(input, meanings) {
+  const forms = meanings.map(m => new Set(splitAnswerAlternatives(m).flatMap(a => structuredTokenForms(a))));
+  const find = t => { const n = normalizeStructuredToken(t); return n ? forms.findIndex(f => f.has(n)) : -1; };
+  const whole = find(input);
+  if (whole >= 0) return [whole];
+  const parts = String(input || '').split(/[\s\u3000、,，・／/]+/).filter(p => normalizeStructuredToken(p) !== '');
+  if (!parts.length) return null;
+  const hit = parts.map(find);
+  if (hit.some(i => i < 0)) return null;
+  return [...new Set(hit)];
+}
+
+// ★【0.03.27】難易度（重要度）の星：0〜3。「★★」「2」「☆☆」などを数にする
+function parseStars(v) {
+  const s = String(v == null ? '' : v).trim();
+  if (!s) return 0;
+  const st = (s.match(/[★☆*＊]/g) || []).length;
+  const n = st || parseInt(s.replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)), 10) || 0;
+  return Math.max(0, Math.min(3, n));
+}
+function starsText(n) { n = Number(n) || 0; return n > 0 ? '★'.repeat(Math.min(3, n)) : ''; }
+// 問題の後ろに付いた「★★」を取り出す（単語帳の書き方。例：abandon ★★）
+function splitQuestionStars(q) {
+  const m = String(q || '').match(/^(.*?)\s*([★☆]{1,3})\s*$/);
+  return m && m[1].trim() ? { q: m[1].trim(), stars: m[2].length } : { q: String(q || ''), stars: 0 };
 }
 
 // 構造化解答を表示用HTML（ラベル：本文、を1行ずつ）に整形する。
@@ -249,35 +306,6 @@ function cleanOcrBlock(text) {
   return String(text || '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
 }
 
-// 「行頭の数字（見出し語番号）+ 英単語」を新しい単語エントリーの開始とみなし、
-// OCRテキストを単語ごとのブロックに分割する。派生語（completion等）は行頭に番号が
-// 無いのでエントリーとして分離されず、直前の見出し語のブロックに含まれる。
-// 戻り値: [{question: 見出し語, answer: 残りのブロック(未整形)}, ...]
-function splitOcrIntoEntries(rawText) {
-  const text = String(rawText || '');
-  const lines = text.split(/\r?\n/);
-  // 数字の直後に多少OCRノイズ（記号など）が挟まっても英単語を拾えるように寛容にする
-  const boundaryRe = /^\s*(\d{1,4})[^A-Za-z]{0,15}([A-Za-z][A-Za-z'\-]*(?:\s[A-Za-z][A-Za-z'\-]*){0,3})/;
-  const marks = [];
-  lines.forEach((line, i) => {
-    const m = line.match(boundaryRe);
-    if (m) marks.push({ lineIdx: i, headword: m[2].trim() });
-  });
-  if (marks.length === 0) return [];
-  const entries = [];
-  for (let i = 0; i < marks.length; i++) {
-    const startLine = marks[i].lineIdx;
-    const endLine = i + 1 < marks.length ? marks[i + 1].lineIdx : lines.length;
-    const blockLines = lines.slice(startLine, endLine);
-    const headword = marks[i].headword;
-    const firstLine = blockLines[0];
-    const afterIdx = firstLine.indexOf(headword);
-    const restOfFirstLine = afterIdx !== -1 ? firstLine.slice(afterIdx + headword.length) : '';
-    const restBlock = [restOfFirstLine, ...blockLines.slice(1)].join('\n');
-    entries.push({ question: headword, answer: cleanOcrBlock(restBlock) });
-  }
-  return entries.filter(e => e.question && e.answer);
-}
 
 // ================================================================
 // ★【0.03.01】📚 単語帳取込：テキスト → カード候補への変換
@@ -358,11 +386,23 @@ function parseDelimitedVocab(rawText) {
   String(rawText || '').split(/\r?\n/).forEach(line => {
     const l = line.trim();
     if (!l || /^```/.test(l)) return;
-    let idx = l.indexOf('\t');
-    if (idx === -1) idx = l.indexOf(',');
+    const unq = s => String(s || '').trim().replace(/^"|"$/g, '');
+    // ★【0.03.29】タブ区切りは「見出し語・答え・メモ・星」（メモ・星はなくてもよい）
+    if (l.includes('\t')) {
+      const cols = l.split('\t').map(unq);
+      const qs = splitQuestionStars(cols[0]);
+      const q = qs.q, a = cols[1] || '';
+      if (!q || !a || q === '問題' || q === '見出し語') return;
+      const e = { question: q, answer: a };
+      if (cols[2]) e.note = cols[2];
+      const st = cols[3] ? parseStars(cols[3]) : qs.stars;
+      if (st) e.stars = st;
+      entries.push(e);
+      return;
+    }
+    const idx = l.indexOf(',');
     if (idx === -1) return;
-    const q = l.slice(0, idx).trim().replace(/^"|"$/g, '');
-    const a = l.slice(idx + 1).trim().replace(/^"|"$/g, '');
+    const q = unq(l.slice(0, idx)), a = unq(l.slice(idx + 1));
     if (!q || !a || (q === '問題' || q === '見出し語')) return;
     entries.push({ question: q, answer: a });
   });
@@ -385,7 +425,8 @@ const VOCAB_AI_PROMPT = [
   '添付した単語帳のページを、暗記アプリ「すするanki」に取り込める形式に変換してください。',
   '',
   '【出力形式】',
-  '・1行に1語、「見出し語<TAB>答え」のタブ区切り。変換結果だけをコードブロックで出力してください。',
+  '・1行に1語、「見出し語<TAB>答え<TAB>メモ<TAB>星」のタブ区切り。メモ・星が無いときは空にする（タブは残してよい）。',
+  '・変換結果だけをコードブロックで出力し、説明や見出し・表は書かない。ページの全部の語を、ページに載っている順に出す（途中で省略しない）。',
   '',
   '【答えの書き方】',
   '・品詞ごとに「(品詞)訳語」と書く。品詞は 名詞／動詞／他動詞／自動詞／形容詞／副詞／前置詞／接続詞／熟語 のどれか。',
@@ -393,8 +434,73 @@ const VOCAB_AI_PROMPT = [
   '　例: reason<TAB>(名詞①)理由　根拠/(名詞②)理性/(自動詞)論理的に考える',
   '・同じ意味の言い換えは全角スペースで区切る。　例: rational<TAB>(形容詞)合理的な　理性的な',
   '・「（～を）」のような補足は全角カッコで書く。答えの中で半角「/」は区切り以外に使わない（必要なら全角「／」）。',
+  '・答えには訳語だけを書く。発音記号・例文・語源・解説は答えに入れない。',
   '・番号の無い派生語も1語として含める。◆の熟語・成句は、その英語表現を見出し語にして「(熟語)訳」で1行にする。',
-  '・例文（▶）、解説（★）、他ページ参照（→p.○○）の語、Check!、Review Test は含めない。'
+  '',
+  '【メモ（3列目）】',
+  '・覚えるのに役立つ短い補足だけ（80字以内）：語源、注意点、変化形（arise – arose – arisen）、派生語の関係など。',
+  '・同意語・反意語が載っていれば「= 同意語」「↔ 反意語」の形で書く（例：↔ implicit）。複数あれば「、」で区切る。',
+  '・メモの中でもタブ・改行は使わない。',
+  '',
+  '【星（4列目）】',
+  '・見出し語に重要度・頻出度の★が付いていれば、その数を半角数字で（★★ なら 2）。無ければ空。最大3。',
+  '',
+  '【含めないもの】',
+  '・例文（▶）、他ページ参照（→p.○○）の語、Check!、Review Test、章・グループの見出し。',
+  '・同意語・反意語として（= …）（↔ …）で挙がっているだけの語は、見出し語にしない（メモに書く）。',
+  '',
+  '【例】',
+  'emerge<TAB>(自動詞)現れる　出現する<TAB>水中・暗闇からぬっと出てくるイメージ。emergency（緊急事態）に注意<TAB>2',
+  'explicit<TAB>(形容詞)明白な　明確な<TAB>↔ implicit<TAB>1',
+  'derive<TAB>(自動詞)（～に）由来する/(他動詞)（…から）～を引き出す<TAB><TAB>3'
+].join('\n');
+
+// ★【0.03.50】テキスト版：AI にはページを「そのまま書き写す」だけを頼み、カードへの組み替えはアプリ（text-import.js の vtParse）がする。
+//  （1行1語のタブ区切りに直接変換させるより、読み落とし・取り違えが少ない。グループ・導入・例文・Check! も残せる）
+const VOCAB_TEXT_PROMPT = [
+  '添付した単語帳のページを、下の【書式の例】と同じ形のテキストに書き写してください。',
+  '訳・説明は単語帳の文言をそのまま写し、言い換え・要約・翻訳・省略はしないでください。ページに載っている順に、全部の語を出します。',
+  '書式の行の頭（■グループ：、[No.…]、意味：など）は必ずこのとおりに書き、それ以外の見出し・表・説明・コードブロックは書かないでください。',
+  '',
+  '【書式の例】',
+  '# SECTION #26「価値・基準」',
+  '■グループ：価値',
+  '（導入：物の「値打ち・価値」はvalueで表す。…）',
+  '[No.1000] value ★★',
+  '意味：名 ①価値 ②価値観　他 ～を重んじる',
+  '品詞属性：他動詞',
+  '補足：複数形（values）では主に「価値観」の意',
+  '表現：◆be worth A [doing]「Aの［～する］価値がある」／▶ This article is **worth** reading.「この記事は読む価値がある。」',
+  '関連語注記：leisure 名 余暇 → p.554',
+  '派生語：',
+  '  1000-1 valuable｜形 貴重な，価値のある',
+  '  1000-2 invaluable｜形 計り知れない（ほど貴重な）／★valueless「価値のない」と混同しないこと',
+  'Check!：',
+  '● invaluableの意味は？：1. 価値のない / 2. 価値のある → 2.',
+  '● standardのアクセント位置は？ → stándard',
+  '',
+  '【各行の説明】',
+  '・# SECTION：章（セクション）の番号と名前。無ければ単語帳の名前を書く。',
+  '・■グループ：小見出しごとに1行。小見出しが無い単語帳は「■グループ：単語」を1つだけ書く。',
+  '・（導入：…）：グループのはじめの説明文。そのまま写す（複数行でもよい）。無ければ書かない。',
+  '・[No.番号] 見出し語 ★：番号が無い単語帳は 1 からの連番。★は重要度の印があればその数だけ。',
+  '・補足・品詞属性・表現・関連語注記・派生語・Check! は、ページに無ければその行ごと書かない。',
+  '',
+  '【意味：の書き方】',
+  '・品詞は1文字で：名（名詞）他（他動詞）自（自動詞）形（形容詞）副（副詞）前（前置詞）接（接続詞）句（熟語・成句）動（動詞）。品詞の1文字のあとには必ず半角スペースを入れ（例：自 起こる）、品詞が変わるところは全角スペースで区切る。',
+  '・カッコは全角（ ）を使い、訳の中に余計なスペースを入れない。',
+  '・①②で分かれている意味は ①②…、①②が無く別の意味が並ぶときは「；」、同じ意味の言い換えは「，」。',
+  '・（＝treasure）（↔ implicit）のような類義語・反意語は、訳の後ろの全角カッコにそのまま書く。',
+  '',
+  '【表現：・派生語の書き方】',
+  '・◆の熟語・成句は ◆英語「訳」、▶の例文は ▶ 英文「和訳」。例文の中の太字（覚える語）は **語** で囲む。複数あるときは「／」で区切る。',
+  '・派生語（番号なしの語、□や・で始まる語）は「派生語：」の下に「親番号-連番 見出し語｜品詞 訳」で1行ずつ。注意書きは「／★…」、熟語は「／◆…」、例文は「／▶ …」で同じ行に続ける。',
+  '',
+  '【Check!・Review Test】',
+  '・ページの Check! や確認問題は「● 問題 → 答え」で1問1行。選択肢は「1. … / 2. …」、答えが番号なら「→ 2.」。アクセント問題の答えはアクセント記号（´）を付けた語。',
+  '',
+  '【書かないもの】',
+  '・ページ番号、柱、広告、→p.○○ だけの参照語（関連語注記に書く）。'
 ].join('\n');
 
 // テキストエリア/inputのカーソル位置に文字列を挿入する（品詞タグのワンタップ挿入用）

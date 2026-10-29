@@ -162,7 +162,143 @@ h2 { font-size: 1.4rem; font-weight: 700; margin-bottom: 20px; display: flex; al
 
 .combo-display { position: absolute; top: 30%; left: 50%; transform: translate(-50%, -50%) scale(0); font-size: 3rem; font-weight: 900; color: var(--warn); text-shadow: 0 4px 15px rgba(245,166,35,0.6); pointer-events: none; z-index: 50; opacity: 0; }
 .combo-display.pop { animation: comboPop 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
-.level-display { position: absolute; top: 56%; left: 50%; transform: translate(-50%, -50%); font-size: 1.7rem; font-weight: 900; white-space: nowrap; pointer-events: none; z-index: 50; opacity: 0; }
+.card-senses { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0 8px; }
+.sense-chip { font-size: 0.7rem; padding: 2px 8px; border-radius: 10px; background: var(--bg4); border: 1px solid var(--border); color: var(--text2); }
+.sense-chip.weak { border-color: rgba(255,79,106,0.5); color: var(--danger); }
+.sense-chip.grad { border-color: rgba(34,199,122,0.5); color: var(--success); }
+.drill-app { width: 100%; max-width: 560px; margin: 0 auto; }
+.drill-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.drill-word { font-size: 1.7rem; font-weight: 800; color: var(--text); word-break: break-word; }
+.drill-q { font-size: 1.05rem; color: var(--text); white-space: pre-wrap; }
+.drill-intro { margin-top: 8px; padding: 10px 12px; border-radius: 10px; background: var(--bg3); border-left: 3px solid var(--primary); line-height: 1.8; white-space: normal; }
+.drill-opt { display: block; width: 100%; text-align: left; justify-content: flex-start; margin: 6px 0; height: auto; white-space: normal; }
+.drill-btns { display: flex; gap: 8px; margin-top: 8px; }
+.drill-btns .btn { flex: 1; }
+.drill-ok { color: var(--success); font-size: 1.3rem; }
+.drill-ng { color: var(--danger); }
+b.drill-ng { font-size: 1.3rem; }
+.drill-ok-card { border-left: 4px solid var(--success); }
+.drill-ng-card { border-left: 4px solid var(--danger); }
+.drill-group { border-left: 4px solid var(--primary); }
+#drillApp input.form-control { margin-top: 6px; }
+.friend-req-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 1.4em; height: 1.4em; padding: 0 5px; border-radius: 999px; background: var(--danger); color: #fff; font-size: 0.75rem; font-weight: 800; margin-left: 6px; }
+.bnav-item { position: relative; }
+.bnav-badge { position: absolute; top: 2px; right: 14%; margin: 0; min-width: 1.2em; height: 1.2em; font-size: 0.65rem; }
+.app-toast { position: fixed; left: 50%; bottom: 84px; transform: translate(-50%, 20px); opacity: 0; transition: all .3s; z-index: 9999; max-width: 92vw; padding: 12px 16px; border-radius: 12px; background: var(--bg2); color: var(--text); border: 1px solid var(--primary); box-shadow: 0 6px 24px rgba(0,0,0,.35); font-size: 0.9rem; font-weight: 700; cursor: pointer; }
+.app-toast.show { opacity: 1; transform: translate(-50%, 0); }
+.card-stars { color: #f5b301; font-size: 0.75rem; margin-left: 4px; letter-spacing: -1px; }
+.drill-saved { margin-top: 10px; padding: 10px; border-radius: 10px; border: 1px solid var(--primary); background: rgba(79,124,255,0.08); }
+.update-bar { position: fixed; top: calc(8px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); z-index: 9998; width: min(560px, calc(100vw - 16px)); display: none; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; background: var(--bg2); color: var(--text); border: 1px solid var(--primary); box-shadow: 0 6px 24px rgba(0,0,0,.35); font-size: 0.85rem; }
+.plan-section + .plan-section { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); }
+.plan-head { display: flex; justify-content: space-between; align-items: center; font-weight: 800; font-size: 0.9rem; color: var(--text); }
+.plan-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.res-summary { text-align: center; }
+.res-score { font-size: 2.4rem; font-weight: 900; color: var(--text); }
+.res-score span { font-size: 0.95rem; font-weight: 700; color: var(--text2); margin-left: 6px; }
+.res-stats { display: flex; justify-content: space-around; margin: 10px 0 6px; }
+.res-stats div { display: flex; flex-direction: column; align-items: center; font-size: 1.1rem; }
+.res-stats span { font-size: 0.7rem; color: var(--text3); font-weight: 700; }
+.res-status { font-size: 0.8rem; color: var(--text2); line-height: 2; }
+.res-chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 0.72rem; font-weight: 800; color: var(--c); border: 1px solid var(--c); white-space: nowrap; }
+.res-filter { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+.res-row { display: flex; gap: 10px; align-items: center; padding: 10px; border-radius: 10px; background: var(--bg2); border: 1px solid var(--border); margin-bottom: 6px; }
+.res-row.ng { border-left: 4px solid var(--danger); }
+.res-row.ok { border-left: 4px solid var(--success); }
+.res-mark { font-size: 1.1rem; width: 1.6em; text-align: center; flex-shrink: 0; }
+.res-body { flex: 1; min-width: 0; }
+.res-q { font-weight: 800; color: var(--text); word-break: break-word; }
+.res-a { font-size: 0.82rem; color: var(--text2); word-break: break-word; }
+.res-label { font-size: 0.72rem; color: var(--primary); font-weight: 700; }
+.res-lv { text-align: right; font-size: 0.8rem; flex-shrink: 0; color: var(--text2); }
+.res-up { color: var(--success); } .res-down { color: var(--danger); } .res-same { color: var(--text3); }
+.bulkdel-card { width: min(560px, 96vw); max-height: 90vh; display: flex; flex-direction: column; }
+.bulkdel-bar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+.bulkdel-list { flex: 1; min-height: 120px; max-height: 52vh; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; }
+.bulkdel-row { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--border); cursor: pointer; }
+.bulkdel-row input { width: 20px; height: 20px; flex-shrink: 0; }
+.bulkdel-row.ro { opacity: .5; }
+.bulkdel-q { font-weight: 700; color: var(--text); word-break: break-word; font-size: 0.9rem; }
+.race-taunt { margin:6px 0 8px; padding:8px 10px; border-radius:10px; background:rgba(239,68,68,.12); border:1px dashed var(--danger); font-weight:700; font-size:0.88rem; }
+.race-row { display:grid; grid-template-columns:1fr auto; gap:4px 8px; align-items:center; padding:8px 10px; margin-top:6px; border:1px solid var(--border); border-radius:10px; background:var(--bg3); }
+.race-row.me { border-color:var(--primary); }
+.race-name { font-weight:700; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.race-score b { font-size:1.15rem; color:var(--warn); }
+.race-cks { grid-column:1 / -1; display:flex; flex-wrap:wrap; gap:4px; }
+.race-ck { font-size:0.72rem; padding:2px 6px; border-radius:8px; background:var(--bg4); color:var(--text3); }
+.race-ck.on { color:var(--text); }
+.race-hc { grid-column:1 / -1; font-size:0.75rem; padding:3px 6px; border-radius:8px; background:var(--bg4); color:var(--text); border:1px solid var(--border); justify-self:start; }
+/* ★【0.03.49】画面の整理 */
+.page-head { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:14px; }
+.page-head h2 { margin:0; }
+.page-head-btns { display:flex; gap:6px; flex-shrink:0; }
+.fp-btn { display:flex; align-items:center; gap:10px; width:100%; text-align:left; padding:12px 14px; border-radius:12px; border:1px solid var(--border); background:var(--bg3); color:var(--text); font-family:inherit; font-size:0.92rem; cursor:pointer; }
+.fp-btn:active { transform:scale(0.99); }
+.fp-btn-ico { font-size:1.2rem; flex-shrink:0; }
+.fp-btn-txt { flex:1; min-width:0; font-weight:700; line-height:1.4; word-break:break-word; }
+.fp-btn-sub { display:block; font-weight:500; font-size:0.75rem; color:var(--text3); margin-top:2px; }
+.fp-btn-chg { flex-shrink:0; font-size:0.75rem; color:var(--primary); font-weight:700; }
+.fp-sep { color:var(--text3); font-weight:400; margin:0 2px; }
+.fp-card { max-width:520px; width:calc(100vw - 24px); max-height:86vh; display:flex; flex-direction:column; }
+.fp-list { margin-top:8px; overflow-y:auto; flex:1; min-height:120px; max-height:56vh; border:1px solid var(--border); border-radius:10px; background:var(--bg); }
+.fp-row { display:flex; align-items:center; gap:4px; padding:4px 8px; border-bottom:1px solid var(--border); }
+.fp-row:last-child { border-bottom:none; }
+.fp-row.cur { background:rgba(79,124,255,.15); }
+.fp-row.off .fp-name { color:var(--text3); }
+.fp-tog { width:28px; height:30px; flex-shrink:0; border:none; background:none; color:var(--text2); font-size:0.9rem; cursor:pointer; }
+.fp-name { flex:1; min-width:0; text-align:left; border:none; background:none; color:var(--text); font-family:inherit; font-size:0.9rem; padding:8px 4px; cursor:pointer; word-break:break-word; }
+.fp-meta { flex-shrink:0; font-size:0.72rem; color:var(--text3); }
+.plan-step { display:flex; align-items:center; gap:8px; margin:14px 0 6px; font-weight:700; font-size:0.9rem; }
+.plan-step-no { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:50%; background:var(--primary); color:#fff; font-size:0.75rem; flex-shrink:0; }
+.plan-weeks { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
+.plan-week { font-size:0.72rem; padding:3px 8px; border-radius:10px; background:var(--bg4); color:var(--text2); }
+.plan-week.cur { background:var(--primary); color:#fff; }
+.plan-c-head { font-weight:700; font-size:0.85rem; margin:8px 0 2px; }
+.plan-c-row { display:flex; align-items:center; gap:8px; padding:8px 0; border-top:1px solid var(--border); }
+.plan-c-row.done { opacity:.6; }
+.plan-c-row.over .plan-c-t { color:var(--danger); }
+.plan-c-main { flex:1; min-width:0; }
+.plan-c-t { font-weight:700; font-size:0.88rem; }
+.plan-c-go { flex-shrink:0; }
+.sec-card { padding-top:14px; padding-bottom:14px; }
+.sec-head { font-size:0.95rem !important; color:var(--text) !important; text-transform:none !important; letter-spacing:0 !important; cursor:pointer; display:flex; align-items:center; justify-content:space-between; margin-bottom:0 !important; border-bottom:none !important; padding-bottom:0 !important; }
+.sec-head::after { content:'▸'; color:var(--text3); font-size:0.9rem; transition:transform .2s; }
+.sec-card.open .sec-head::after { transform:rotate(90deg); }
+.sec-card.open .sec-head { margin-bottom:12px !important; }
+.sec-card:not(.open) .sec-body { display:none; }
+.set-sub { font-size:0.75rem; font-weight:700; color:var(--primary); margin:12px 0 6px; }
+.set-help { margin-top:10px; }
+.set-help summary, .drill-howto summary { cursor:pointer; font-size:0.8rem; color:var(--text2); }
+.drill-warn { margin-top:8px; padding:8px 10px; border-radius:10px; background:rgba(245,158,11,.12); font-size:0.78rem; color:var(--text2); }
+.drill-sub { display:flex; gap:6px; flex-wrap:wrap; margin-top:10px; }
+.drill-howto { margin-top:10px; }
+.guide-toc { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; }
+.guide-sec { border:1px solid var(--border); border-radius:10px; padding:4px 12px; margin-bottom:8px; background:var(--bg3); }
+.guide-sec > summary { cursor:pointer; font-weight:700; font-size:1rem; padding:8px 0; color:var(--primary); }
+.guide-sec[open] > summary { border-bottom:1px solid var(--border); margin-bottom:8px; }
+.plan-alert { display:flex; align-items:center; gap:8px; justify-content:space-between; margin:-4px -4px 10px; padding:10px 12px; border-radius:10px; background:rgba(245,158,11,.15); border:1px solid var(--warn); color:var(--text); font-weight:700; font-size:0.88rem; cursor:pointer; }
+.plan-alert.over { background:rgba(239,68,68,.15); border-color:var(--danger); }
+.plan-alert-go { flex-shrink:0; font-size:0.8rem; color:var(--primary); }
+.plan-task { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-top: 8px; background: var(--bg3); }
+.plan-task.done { opacity: .65; }
+.plan-task.overdue { border-color: var(--danger); background: rgba(255,79,106,0.08); }
+.plan-task.upcoming { border-style: dashed; }
+.plan-task-title { font-weight: 800; color: var(--text); font-size: 0.95rem; }
+.plan-deadline { font-size: 0.8rem; font-weight: 700; color: var(--warn); margin-top: 2px; }
+.plan-deadline.over { color: var(--danger); }
+.plan-bar { height: 6px; border-radius: 4px; background: var(--border); overflow: hidden; margin-top: 6px; }
+.plan-bar > div { height: 100%; background: var(--primary); }
+.plan-btns { display: flex; gap: 8px; margin-top: 8px; }
+.plan-btns .btn { flex: 1; }
+.plan-streak { font-size: 0.75rem; color: var(--warn); font-weight: 800; }
+.focus-status { margin-top: 10px; padding: 6px 10px; border-radius: 8px; background: rgba(245,166,35,0.12); border: 1px solid rgba(245,166,35,0.4); color: var(--warn); font-size: 0.85rem; font-weight: 700; }
+.focus-status.multi { background: rgba(34,199,122,0.12); border-color: rgba(34,199,122,0.45); color: var(--success); }
+.quiz-hints .hint-focus { margin-top: 4px; color: var(--warn); font-weight: 700; }
+.ai-feedback { margin-top: 10px; padding: 8px 10px; border-radius: 8px; background: rgba(124,63,255,0.10); border: 1px solid rgba(124,63,255,0.35); text-align: left; font-size: 0.85rem; line-height: 1.6; color: var(--text); display: none; }
+.ai-feedback .ai-muted { color: var(--text3); font-size: 0.8rem; }
+.ai-feedback .ai-btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.quiz-hints .hint-ai { margin-top: 4px; color: var(--accent); }
+body.light-mode .quiz-hints .hint-ai { color: #5b2bd6; }
+.level-display { white-space: pre-line; text-align: center; position: absolute; top: 56%; left: 50%; transform: translate(-50%, -50%); font-size: 1.7rem; font-weight: 900; white-space: nowrap; pointer-events: none; z-index: 50; opacity: 0; }
 .level-display.up { color: var(--success); text-shadow: 0 3px 12px rgba(34,199,122,0.55); }
 .level-display.down { color: var(--danger); text-shadow: 0 3px 12px rgba(255,79,106,0.45); font-size: 1.4rem; }
 .level-display.pop { animation: levelPop 1.4s ease-out; }
@@ -387,7 +523,8 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
   </nav>
 
   <div id="pgHome" class="screen active">
-    <h2>🏠 クイズに挑戦</h2>
+    <!-- ★【0.03.49】ホームを整理：見出しの横にガイド・お知らせ → お知らせバナー → 学習状況 → 今週のプラン（短く）→ クイズ -->
+    <div class="page-head"><h2>🏠 ホーム</h2><div class="page-head-btns"><button class="chip" onclick="openPage('pgTutorial')">📖 ガイド</button><button class="chip" onclick="openPage('pgUpdates'); loadUpdates();">📢 お知らせ</button></div></div>
 
     <!-- ★【0.03.00】新しいお知らせのバナー（未読のときだけ表示） -->
     <div id="releaseBanner" class="release-banner" style="display:none;" onclick="openReleaseNotesFromBanner()">
@@ -407,14 +544,17 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
       <div class="home-summary-item" onclick="filterBoxByStatus('grad')"><div class="home-summary-num" id="homeSumGrad" style="color:var(--success);">0</div><div class="home-summary-label">🎓 卒業</div></div>
     </div>
 
-    <div class="card">
+    <div id="planHomeCard" class="card plan-card" style="display:none;"></div>
+
+    <div class="card quiz-card">
+      <div class="setting-box-title">🎯 クイズ</div>
       <div class="form-group" id="scopeGroup">
-        <label>🎯 出題範囲</label>
+        <label class="section-label" style="font-weight:500;">出題範囲</label>
         <select id="selScopeSubject" class="form-control" style="margin-bottom:8px; display:none;" onchange="onScopeSubjectChange(this.value)"></select>
         <div id="scopeSelectors" style="display:flex; flex-direction:column; gap:8px;"></div>
       </div>
       <div class="form-group" style="margin-bottom:0;">
-        <label>🗂️ 出題モード</label>
+        <label class="section-label" style="font-weight:500;">出題モード</label>
         <select id="selQuizMode" class="form-control">
           <option value="desc">📝 記述式入力モード</option>
           <option value="choice">🎴 4択択一モード</option>
@@ -423,16 +563,16 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
           <option value="self">🧠 自己申告モード (Anki風)</option>
         </select>
       </div>
-    </div>
-
-    <button class="btn btn-start" onclick="startQuiz('normal')">🚀 クイズスタート</button>
-    <div class="form-row" style="margin-bottom:15px;">
-      <button class="btn btn-accent home-sub-btn" style="flex:1;" onclick="startQuiz('tokkun')">🔥 集中特訓<span style="font-size:0.65rem; font-weight:500;">苦手・しっかりのみ</span></button>
-      <button class="btn btn-success home-sub-btn" style="flex:1;" onclick="startQuiz('review')">♻️ ランダム復習<span style="font-size:0.65rem; font-weight:500;">卒業済みから出題</span></button>
+      <button class="btn btn-start" style="margin:14px 0 10px;" onclick="startQuiz('normal')">🚀 クイズスタート</button>
+      <div class="form-row" style="margin:0;">
+        <button class="btn btn-accent home-sub-btn" style="flex:1;" onclick="startQuiz('tokkun')">🔥 集中特訓<span style="font-size:0.65rem; font-weight:500;">苦手・しっかりのみ</span></button>
+        <button class="btn btn-success home-sub-btn" style="flex:1;" onclick="startQuiz('review')">♻️ ランダム復習<span style="font-size:0.65rem; font-weight:500;">卒業済みから出題</span></button>
+      </div>
     </div>
 
     <details class="card" id="homeDetailSettings">
       <summary>⚙️ 詳細設定（難易度・出題数・オプション）</summary>
+      <div class="set-sub">基本</div>
       <div class="form-row" style="margin-bottom:12px;">
         <div style="flex:2;">
           <label class="section-label" style="font-weight:500;">⚡ 難易度</label>
@@ -456,7 +596,6 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
           <option value="off">オフ</option>
         </select>
       </div>
-      <div class="hint-small" style="margin:0 0 12px;">難易度は制限時間・ヒントの出る速さ・レベルの上がりやすさ（難しいほど早く上がり、下がりにくい）に反映されます。ヒントを見て正解すると、レベルは上がりにくくなります。</div>
       <div class="form-group" style="margin-bottom:12px;">
         <label class="section-label" style="font-weight:500;">🔢 出題順</label>
         <select id="selQuizOrder" class="form-control">
@@ -465,6 +604,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
           <option value="continue">⏭️ 問題番号順（前回の続きから）</option>
         </select>
       </div>
+      <div class="set-sub">時間・卒業</div>
       <div class="form-row" style="margin-bottom:6px;">
         <div style="flex:1;">
           <label class="section-label" style="font-weight:500;">⏱️ 制限時間(秒)</label>
@@ -479,19 +619,23 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
           <input type="number" id="numGradThreshold" class="form-control" min="1" max="30" placeholder="5">
         </div>
       </div>
-      <div class="hint-small" style="margin:0 0 12px;">制限時間：空欄＝難易度どおり、0＝無制限。自動進行：答えを表示してから次へ進むまでの秒数（0＝自動で進まない）。卒業正解数：レベル5になってから何回正解で卒業か（レベルの上がり下がりの回数もこれに比例します）。</div>
+      <div class="set-sub">オプション</div>
       <div class="toggle-grid">
         <label class="toggle-pill"><input type="checkbox" id="chkTTS">🗣️ 問題を読み上げ</label>
         <label class="toggle-pill"><input type="checkbox" id="chkTimeAttack">⏱️ タイムアタック</label>
         <label class="toggle-pill"><input type="checkbox" id="chkIncludeGrad">🎓 卒業済みも出題</label>
         <label class="toggle-pill"><input type="checkbox" id="chkSwapQA">🔄 問題と答えを入替</label>
+        <label class="toggle-pill" title="動詞は 自動詞の意味→他動詞の意味→自動詞？他動詞？→熟語 の順に続けて出します"><input type="checkbox" id="chkVerbAttr" checked>🔀 動詞は自動詞・他動詞も聞く</label>
+        <label class="toggle-pill"><input type="checkbox" id="chkFocusMode">🎯 重点モード</label>
       </div>
+      <details class="set-help"><summary>ℹ️ それぞれの設定の説明</summary>
+        <div class="hint-small">・難易度：制限時間・ヒントの出る速さ・レベルの上がりやすさ（難しいほど早く上がり、下がりにくい）に反映。ヒントを見て正解すると、レベルは上がりにくくなります<br>
+        ・制限時間：空欄＝難易度どおり、0＝無制限。自動進行：答えを表示してから次へ進むまでの秒数（0＝自動で進まない）<br>
+        ・卒業正解数：レベル5になってから何回正解で卒業か（レベルの上がり下がりの回数もこれに比例）<br>
+        ・🎯 重点モード：記述式・4択で、間違えた・足りなかった・答えられなかったときに、ヒントを見て答え直します（最大3回）。ヒントを1回見てからの正解は「ヒントを見た正解」、2回以上は不正解寄りとして記録<br>
+        ・🔀 動詞は自動詞・他動詞も聞く：自動詞の意味 → 他動詞の意味 → 自動詞？他動詞？ → 熟語 の順に続けて出します</div>
+      </details>
     </details>
-
-    <div class="form-row">
-      <button class="btn btn-secondary" style="flex:1;" onclick="openPage('pgTutorial')">📖 使い方ガイド</button>
-      <button class="btn btn-secondary" style="flex:1;" onclick="openPage('pgUpdates'); loadUpdates();">📢 お知らせ</button>
-    </div>
   </div>
 
   <div id="pgUpdates" class="screen">
@@ -554,7 +698,11 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
         <div class="question-display-box">
           <div id="lblQuizQuestion" class="q-text">Loading...</div>
           <div id="lblQuizHint" class="hint-text quiz-hints" style="display:none;"></div>
-          <button type="button" id="btnQuizHint" class="chip" style="display:none; margin-top:8px;" onclick="showNextHint()">💡 ヒント</button>
+          <div style="display:flex; gap:6px; justify-content:center; flex-wrap:wrap;">
+            <button type="button" id="btnQuizHint" class="chip" style="display:none; margin-top:8px;" onclick="showNextHint()">💡 ヒント</button>
+            <button type="button" id="btnQuizAiHint" class="chip" style="display:none; margin-top:8px;" onclick="showAiHint()">🤖 AIヒント</button>
+          </div>
+          <div id="lblFocusStatus" class="focus-status" style="display:none;"></div>
         </div>
 
         <div id="quizFeedback" class="feedback-area">
@@ -600,6 +748,23 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
     </div>
   </div>
 
+  <div id="pgDrill" class="screen">
+    <div id="drillApp" class="drill-app"></div>
+    <div id="drillPlanWrap" class="drill-app">
+      <div class="card plan-card">
+        <div class="setting-box-title">📅 週間プラン</div>
+        <div id="drillPlanBox"></div>
+        <details style="margin-top:6px;"><summary class="hint-small" style="cursor:pointer;">⚙️ 週間プランの設定</summary><div id="planSettings" style="margin-top:8px;"></div></details>
+      </div>
+      <div class="card race-card"><div class="setting-box-title">⚔️ フレンドとバトル <button class="chip" style="float:right;" onclick="renderRace()">🔄</button></div><div class="race-box"></div></div>
+    </div>
+  </div>
+
+  <div id="pgQuizResult" class="screen">
+    <h2>🏁 クイズの結果</h2>
+    <div id="quizResultBox"></div>
+  </div>
+
   <div id="pgStats" class="screen">
     <h2>📊 習熟実績と学習状況</h2>
     
@@ -610,6 +775,8 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 
     <div class="card">
       <div class="setting-box-title">🥧 ランク分布グラフ</div>
+      <select id="selStatsCategory" class="form-control" style="margin-bottom:6px;" onchange="setStatsCategory(this.value)"></select>
+      <div id="lblStatsScope" class="hint-small" style="margin-bottom:6px;"></div>
       <div style="width: 100%; max-width: 250px; margin: 0 auto;">
         <canvas id="rankPieChart"></canvas>
       </div>
@@ -643,8 +810,36 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
     </div>
 
     <div class="card">
+      <div class="setting-box-title">👥 フレンド・ランキング</div>
+      <button class="btn btn-accent" onclick="openPage('pgFriends'); loadAppFriends(); loadDailyRanking();">🏆 フレンド・ランキング・チャットを開く <span class="friend-req-badge" style="display:none;"></span></button>
+      <div style="margin-top:12px;">
+        <label class="section-label" style="font-weight:500;">あなたのUID</label>
+        <div class="form-row">
+          <input type="text" id="txtMyUid" class="form-control" readonly>
+          <button class="btn btn-secondary" style="width:auto; padding:0 14px; font-size:0.8rem;" onclick="copyMyUid()">📋 コピー</button>
+        </div>
+        <button class="btn btn-secondary" style="margin-top:8px;" onclick="shareFriendLink()">🔗 フレンド申請のURLを送る</button>
+        <label class="section-label" style="font-weight:500; margin-top:10px;">🏷️ 表示名（ランキング・フレンド・対戦で表示）</label>
+        <div class="form-row">
+          <input type="text" id="txtMyDisplayName" class="form-control" maxlength="20" placeholder="ログインすると変更できます">
+          <button class="btn btn-secondary" style="width:auto; padding:0 14px; font-size:0.8rem;" onclick="saveMyDisplayName()">💾 変更</button>
+        </div>
+      </div>
+      <label class="toggle-pill" style="margin-top:12px;"><input type="checkbox" id="chkShareStats" onchange="toggleShareStats()">📊 成績をフレンドと共有する</label>
+      <div class="hint-small" style="margin-top:6px;">有効にすると、カテゴリーごとの成績（正解数・成績率）がフレンドと共有され、ランキングにも表示されます。</div>
+      <button class="btn btn-secondary" style="margin-top:10px;" onclick="openPage('pgCompareStats')">📊 フレンドと成績を比較</button>
+    </div>
+
+    <div class="card">
+      <div class="setting-box-title">🤖 AI（意味で採点・ヒント・読み取り）</div>
+      <div id="aiSettings" class="hint-small">読み込み中...</div>
+    </div>
+
+    <div class="card">
       <div class="setting-box-title">📲 アプリ・通知</div>
       <div id="notifySettings" class="hint-small">読み込み中...</div>
+      <a class="btn btn-secondary" style="margin-top:10px; text-decoration:none; justify-content:center;" href="apk/susuruanki.apk" download>🤖 Android アプリ（APK）をダウンロード</a>
+      <div class="hint-small" style="margin-top:4px;">Android の端末で開いてインストールします（「提供元不明のアプリ」の許可が必要なことがあります）。中身はこのウェブ版と同じで、学習データも共通です。iPhone・パソコンは上の「アプリとしてインストール」を使ってください。</div>
     </div>
 
     <div class="card">
@@ -683,21 +878,6 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
     </div>
 
     <div class="card">
-      <div class="setting-box-title">👥 フレンド・ランキング</div>
-      <button class="btn btn-accent" onclick="openPage('pgFriends'); loadAppFriends(); loadDailyRanking();">🏆 ランキング・チャットを開く</button>
-      <div style="margin-top:12px;">
-        <label class="section-label" style="font-weight:500;">あなたのUID</label>
-        <div class="form-row">
-          <input type="text" id="txtMyUid" class="form-control" readonly>
-          <button class="btn btn-secondary" style="width:auto; padding:0 14px; font-size:0.8rem;" onclick="copyMyUid()">📋 コピー</button>
-        </div>
-      </div>
-      <label class="toggle-pill" style="margin-top:12px;"><input type="checkbox" id="chkShareStats" onchange="toggleShareStats()">📊 成績をフレンドと共有する</label>
-      <div class="hint-small" style="margin-top:6px;">有効にすると、カテゴリーごとの成績（正解数・成績率）がフレンドと共有され、ランキングにも表示されます。</div>
-      <button class="btn btn-secondary" style="margin-top:10px;" onclick="openPage('pgCompareStats')">📊 フレンドと成績を比較</button>
-    </div>
-
-    <div class="card">
       <div class="setting-box-title">💡 バグ報告・機能の要望</div>
       <textarea id="txtUserReport" class="form-control" style="height:80px; font-size:0.85rem; margin-bottom:10px;" placeholder="アプリのバグや「こんな機能が欲しい！」など、ご自由に送信してください。"></textarea>
       <button class="btn btn-secondary" onclick="submitUserReport()">送信する</button>
@@ -726,7 +906,10 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
       <button class="btn btn-accent" onclick="postUpdate()">🚀 お知らせを配信する</button>
       <hr style="border:0; border-top:1px solid var(--border); margin:15px 0;">
       <div class="setting-box-title" style="color: var(--accent);">📥 ユーザーからのバグ報告・要望一覧</div>
-      <button class="btn btn-secondary" style="margin-bottom:10px; padding:6px 12px; font-size:0.8rem; width:auto;" onclick="loadUserReports()">🔄 更新</button>
+      <div style="display:flex; gap:8px; margin-bottom:10px;">
+        <button class="btn btn-secondary" style="padding:6px 12px; font-size:0.8rem; width:auto;" onclick="loadUserReports()">🔄 更新</button>
+        <button class="btn btn-secondary" style="padding:6px 12px; font-size:0.8rem; width:auto;" onclick="copyAllUserReports()">📋 全部コピー</button>
+      </div>
       <div id="adminReportsList" style="display:flex; flex-direction:column; gap:10px; max-height:400px; overflow-y:auto; padding:5px;"></div>
       <hr style="border:0; border-top:1px solid var(--border); margin:15px 0;">
       <div class="setting-box-title" style="color: var(--accent);">📥 バグ報告・要望 CSVインポート</div>
@@ -745,16 +928,28 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
       
       <div class="card" style="margin-bottom:15px; border-color:var(--warn);">
         <div class="setting-box-title" style="color:var(--warn);">👑 今日の正解数ランキング</div>
+        <div style="display:flex; gap:6px; margin-bottom:8px;"><button class="chip active" data-rankmode="quiz" onclick="setRankingMode('quiz')">🎯 クイズ</button><button class="chip" data-rankmode="drill" onclick="setRankingMode('drill')">🧠 暗記テスト</button></div>
         <div id="rankingList" style="font-size:0.9rem; display:flex; flex-direction:column; gap:8px;">(読み込み中...)</div>
         <button class="btn btn-secondary" style="margin-top:10px; font-size:0.75rem; padding:6px;" onclick="loadDailyRanking()">🔄 更新</button>
       </div>
 
+      <div class="card race-card" style="margin-bottom:15px;">
+        <div class="setting-box-title">⚔️ 週間プランのバトル（例：鉄壁） <button class="chip" style="float:right;" onclick="renderRace()">🔄</button></div>
+        <div class="race-box"></div>
+      </div>
+
       <div class="card" style="margin-bottom:15px;">
-        <div class="setting-box-title">🤝 フレンド追加</div>
+        <div class="setting-box-title">📨 フレンド申請 <span class="friend-req-badge" style="display:none;"></span></div>
+        <div id="friendRequestsBox" class="hint-small">ログインすると表示されます。</div>
+      </div>
+
+      <div class="card" style="margin-bottom:15px;">
+        <div class="setting-box-title">🤝 フレンド申請を送る</div>
         <div class="form-row">
           <input type="text" id="txtAddFriendUid" class="form-control" placeholder="友達のUIDを入力">
-          <button class="btn btn-accent" style="width:auto; padding:0 15px;" onclick="addAppFriend()">追加</button>
+          <button class="btn btn-accent" style="width:auto; padding:0 15px;" onclick="addAppFriend()">申請</button>
         </div>
+        <div class="hint-small" style="margin-top:6px;">相手が承認するとフレンドになります（相手の「設定 → 👥 フレンド」の UID をもらってください）。オンライン対戦の履歴からも申請できます。</div>
       </div>
 
       <h3 style="font-size: 1.1rem; font-weight: 700; margin: 10px 0; color: var(--text);">📜 フレンド一覧</h3>
@@ -822,29 +1017,20 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 
   <div id="pgOnlineMatch" class="screen">
     <h2>⚔️ オンライン対戦</h2>
-    <p style="color:var(--text2); margin-bottom:15px; font-size:0.9rem;">他のユーザーとリアルタイムで対戦して、スコアを競い合います。</p>
+    <p class="hint-small" style="margin:-6px 0 12px;">ほかのユーザーとリアルタイムで同じ問題を解いて、スコアを競います。</p>
 
-    <div class="card" style="background:linear-gradient(135deg, var(--bg3) 0%, var(--bg4) 100%); border-color:var(--accent);">
-      <div style="display:flex; gap:10px; margin-bottom:15px;">
-        <button class="btn btn-accent" style="flex:1;" onclick="startOnlineMatching()">
-          <i style="margin-right:8px;">🎲</i>ランダムマッチ
-        </button>
-        <button class="btn btn-secondary" style="flex:1;" onclick="createQuickMatch()">
-          <i style="margin-right:8px;">🔑</i>合言葉で対戦
-        </button>
+    <!-- ★【0.03.49】①カテゴリー → ②設定 → ③対戦する の順に -->
+    <div class="card">
+      <div class="plan-step" style="margin-top:0;"><span class="plan-step-no">1</span>📋 出題するカテゴリー（共有カテゴリーから）</div>
+      <div id="onlineMatchCategorySelect">
+        <div id="onlineMatchScopeSelectors"></div>
+        <div id="onlineWaitingCountBadge" class="hint-small" style="min-height:1.2em; margin-top:6px;"></div>
       </div>
     </div>
 
-    <h3 style="margin:20px 0 10px 0; color:var(--text);">📋 カテゴリー選択</h3>
-    <div id="onlineMatchCategorySelect" style="margin-bottom:15px;">
-      <p style="color:var(--text2); font-size:0.85rem;">出題カテゴリー：</p>
-      <div id="onlineMatchScopeSelectors" style="display:flex; flex-direction:column; gap:10px; margin-bottom:8px;"></div>
-      <div id="onlineWaitingCountBadge" style="font-size:0.82rem; color:var(--text3); min-height:1.2em; padding:2px 0 8px 2px;"></div>
-    </div>
-
-    <h3 style="margin:20px 0 10px 0; color:var(--text);">⚙️ 対戦設定</h3>
-    <div class="form-group" style="margin-bottom:10px;">
-      <label style="font-size:0.8rem; color:var(--text2);">形式</label>
+    <div class="card">
+      <div class="plan-step" style="margin-top:0;"><span class="plan-step-no">2</span>⚙️ 対戦の設定</div>
+      <label class="section-label" style="font-weight:500;">形式</label>
       <select id="onlineMatchFormat" class="form-control">
         <option value="choice">🎴 4択択一モード</option>
         <option value="desc">📝 記述式入力モード</option>
@@ -852,35 +1038,26 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
         <option value="tap">👆 文字タップモード (Duolingo風)</option>
         <option value="self">🧠 自己申告モード (Anki風)</option>
       </select>
-    </div>
-    <div class="form-group" style="display:flex; gap:10px; flex-wrap:wrap;">
-      <div style="flex:1; min-width:150px;">
-        <label style="font-size:0.8rem; color:var(--text2);">問題数</label>
-        <input type="number" id="onlineMatchQuestionCount" class="form-control" value="10" min="5" max="50">
-      </div>
-      <div style="flex:1; min-width:150px;">
-        <label style="font-size:0.8rem; color:var(--text2);">制限時間（秒）</label>
-        <input type="number" id="onlineMatchTimeLimit" class="form-control" value="15" min="5" max="60">
+      <div class="form-row" style="margin-top:8px;">
+        <div style="flex:1;"><label class="section-label" style="font-weight:500;">問題数</label><input type="number" id="onlineMatchQuestionCount" class="form-control" value="10" min="5" max="50"></div>
+        <div style="flex:1;"><label class="section-label" style="font-weight:500;">制限時間（秒）</label><input type="number" id="onlineMatchTimeLimit" class="form-control" value="15" min="5" max="60"></div>
       </div>
     </div>
 
-    <div style="margin:20px 0; padding:15px; background:var(--bg3); border-radius:8px; border-left:4px solid var(--primary);">
-      <p style="color:var(--text); font-weight:500; margin-bottom:8px;">💡 対戦の流れ</p>
-      <ol style="color:var(--text2); font-size:0.85rem; padding-left:20px; line-height:1.6;">
-        <li>カテゴリーと設定を選択</li>
-        <li>「ランダム」か「合言葉」を選択</li>
-        <li>相手が見つかるまで待機</li>
-        <li>同時にクイズ開始（リアルタイム）</li>
-        <li>成績比較・ランキング更新</li>
-      </ol>
+    <div class="card" style="border-color:var(--accent);">
+      <div class="plan-step" style="margin-top:0;"><span class="plan-step-no">3</span>🎮 対戦する</div>
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-accent" style="flex:1;" onclick="startOnlineMatching()">🎲 ランダムマッチ</button>
+        <button class="btn btn-secondary" style="flex:1;" onclick="createQuickMatch()">🔑 合言葉で対戦</button>
+      </div>
+      <div class="hint-small" style="margin-top:6px;">ランダム：同じカテゴリーで待っている人と対戦／合言葉：友だちと同じ合言葉を入れて対戦</div>
     </div>
 
     <div id="onlineMatchInfo" style="display:none; margin-top:20px; padding:15px; background:var(--bg3); border-radius:8px; border-left:4px solid var(--success); color:var(--text);">
       <p id="onlineMatchInfoText"></p>
     </div>
 
-    <button class="btn btn-secondary" style="margin-top:12px; width:100%;" onclick="openPage('pgMatchHistory'); renderMatchHistory();">📋 対戦履歴を見る</button>
-    <button class="btn btn-secondary" style="margin-top:10px; width:100%;" onclick="openPage('pgStats')">戻る</button>
+    <button class="btn btn-secondary" style="margin-top:4px; width:100%;" onclick="openPage('pgMatchHistory'); renderMatchHistory();">📋 対戦履歴を見る</button>
   </div>
 
   <div id="pgMatchHistory" class="screen">
@@ -923,6 +1100,10 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
     
     <div class="card">
       <div style="font-size:0.85rem; color:var(--text2); margin-bottom:10px;">フレンドを選択してください</div>
+      <select id="selCompareMode" class="form-control" style="margin-bottom:10px;" onchange="renderCompareStats()">
+        <option value="quiz">🎯 通常のクイズの成績</option>
+        <option value="drill">🧠 暗記テストの成績</option>
+      </select>
       <select id="selCompareCategory" class="form-control" style="margin-bottom:10px;" onchange="renderCompareStats()">
         <option value="">🌐 全カテゴリー</option>
       </select>
@@ -942,8 +1123,9 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
     <button class="bnav-item" data-page="pgTree" onclick="openPage('pgTree')"><i>📁</i>フォルダー</button>
     <button class="bnav-item" data-page="pgBox" onclick="openPage('pgBox')"><i>📝</i>カード</button>
     <button class="bnav-item" data-page="pgOnlineMatch" onclick="openPage('pgOnlineMatch')"><i>⚔️</i>対戦</button>
+    <button class="bnav-item" data-page="pgDrill" onclick="openPage('pgDrill')"><i>🧠</i>暗記<span class="friend-req-badge bnav-badge drill-active-dot" style="display:none; background:var(--warn);">⏸</span></button>
     <button class="bnav-item" data-page="pgStats" onclick="openPage('pgStats')"><i>📊</i>実績</button>
-    <button class="bnav-item" data-page="pgBackup" onclick="openPage('pgBackup')"><i>⚙️</i>設定</button>
+    <button class="bnav-item" data-page="pgBackup" onclick="openPage('pgBackup')"><i>⚙️</i>設定<span class="friend-req-badge bnav-badge" style="display:none;"></span></button>
   </nav>
 </div>
 
@@ -1007,6 +1189,11 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
     <div class="form-group" style="margin-top:15px;">
       <label class="section-label">🔢 問題番号（フォルダー内の並び順・番号順の出題に使います）</label>
       <input type="number" id="numCardNo" class="form-control" min="1" placeholder="空欄なら最後の番号の次">
+    </div>
+
+    <div class="form-group" style="margin-top:15px;">
+      <label class="section-label">⭐ 難易度・重要度の星（週間プランの復習の対象を決めるのに使います）</label>
+      <select id="selCardStars" class="form-control"><option value="0">なし</option><option value="1">★</option><option value="2">★★</option><option value="3">★★★</option></select>
     </div>
 
     <div class="form-group" style="margin-top:15px;">
@@ -1156,7 +1343,8 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
         <div class="hint-small" style="line-height:1.7;">
           ① 下のボタンでプロンプトをコピー<br>
           ② Claude などのAIに、単語帳の写真やPDFと一緒にプロンプトを送る<br>
-          ③ 返ってきた結果を下の「テキスト」欄に貼り付けて「📑 カード候補を作る」
+          ③ 返ってきた結果を下の「テキスト」欄に貼り付けて「📑 カード候補を作る」<br>
+          （AIにはページをそのまま書き写してもらい、カードへの組み替えはアプリがします。グループ・例文・Check! も取り込めます）
         </div>
         <button class="btn btn-secondary" style="margin-top:8px; font-size:0.85rem; padding:9px;" onclick="copyVocabAiPrompt()">📋 変換用プロンプトをコピー</button>
       </details>
@@ -1165,7 +1353,11 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
         <summary>📷 写真・PDFを文字認識(OCR)する</summary>
         <div class="hint-small" style="margin-bottom:8px;">ブラウザ内で文字認識します。精度は写真の鮮明さで変わるので、認識結果を必ず確認してください。狭い範囲を撮るほど精度が上がります。</div>
         <input type="file" accept="image/*,application/pdf" multiple id="scanImportFileInput" class="form-control" style="padding:8px;">
-        <button class="btn" style="margin-top:10px;" id="btnRunScanOcr" onclick="runScanOcr()">🔍 文字認識を実行</button>
+        <div class="form-row" style="margin-top:10px;">
+          <button class="btn" id="btnRunScanAi" onclick="runScanAi()">🤖 AIで読み取る（おすすめ）</button>
+          <button class="btn btn-secondary" id="btnRunScanOcr" onclick="runScanOcr()">🔍 文字認識（OCR）</button>
+        </div>
+        <div class="hint-small" style="margin-top:4px;">AIで読み取る：⚙️ 設定の「🤖 AI」でキーを設定すると使えます（PDF は Gemini のキー）。単語帳の形に整えてカード候補にします。</div>
         <div id="scanImportProgress" style="display:none; font-size:0.8rem; color:var(--primary); margin-top:8px; text-align:center;"></div>
       </details>
 
@@ -1176,6 +1368,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
         <select id="selScanFormat" class="form-control" style="padding:8px; font-size:0.85rem;">
           <option value="auto">自動判定</option>
           <option value="delimited">1行1語（見出し語 タブ/カンマ 答え）</option>
+          <option value="text">テキスト版（■グループ・[No.]・意味：…。AIの読み取り結果）</option>
           <option value="teppeki">単語帳形式（番号＋見出し語・□派生語・品詞マーク）</option>
         </select>
       </div>
@@ -1238,6 +1431,12 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 <script src="safety.js"></script>
 <script src="notify-kv.js"></script>
 <script src="notify.js"></script>
+<script src="ai.js"></script>
+<script src="picker.js"></script>
+<script src="drill.js"></script>
+<script src="plan.js"></script>
+<script src="race.js"></script>
+<script src="text-import.js"></script>
 <script src="shared.js"></script>
 <script src="main.js"></script>
 
