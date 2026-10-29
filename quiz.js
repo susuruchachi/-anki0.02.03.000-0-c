@@ -906,6 +906,22 @@ function sideCharsPool(cur) {
   return db.map(q => choiceSideText(q, swapped).replace(RICH_BLOCK_RE, ''));
 }
 
+// 文字の種類（みんはや・文字タップのダミーをそろえる）
+function charClassOf(c) {
+  if (/[a-z]/.test(c)) return 'lower'; if (/[A-Z]/.test(c)) return 'upper'; if (/[0-9０-９]/.test(c)) return 'digit';
+  if (/[ぁ-ゖ]/.test(c)) return 'hira'; if (/[ァ-ヺー]/.test(c)) return 'kata'; if (/[一-鿿々〆]/.test(c)) return 'kanji';
+  return 'other';
+}
+const CHAR_FALLBACK = { lower: 'abcdefghijklmnopqrstuvwxyz', upper: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', digit: '0123456789', hira: 'あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん', kata: 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモラリルレロ', kanji: '日月火水木金土山川田人口目耳手足力学校年時間国語文字', other: '' };
+// 正解の文字 c と同じ種類のダミーを n 個（近いフォルダーの答え → ほかの答え → 決まった文字の順に探す）
+function pickSameClassChars(cur, c, exclude, n) {
+  const cls = charClassOf(c), out = [], ex = new Set(exclude || []);
+  const take = s => { for (const ch of [...String(s || '').replace(RICH_BLOCK_RE, '')].sort(() => Math.random() - 0.5)) { if (out.length >= n) return; if (ch !== c && !ex.has(ch) && !out.includes(ch) && charClassOf(ch) === cls) out.push(ch); } };
+  try { buildChoiceCandidates(cur, getPrimaryAnswer(cur.answer)).slice(0, 12).forEach(take); } catch (e) {}
+  if (out.length < n) sideCharsPool(cur).sort(() => Math.random() - 0.5).slice(0, 300).forEach(take);
+  if (out.length < n) take(CHAR_FALLBACK[cls] || CHAR_FALLBACK.hira);
+  return out.slice(0, n);
+}
 let minhayaTarget = ""; let minhayaPos = 0;
 // ★【0.03.03】みんはや：スペース・読点・スラッシュ・カッコなどの区切り文字は自動で埋めて飛ばす
 const MINHAYA_SKIP_RE = /[\s\u3000、，,・／/()（）～〜~\[\]［］【】…]/;
@@ -939,23 +955,10 @@ function renderMinhayaDisplay(cur) {
 
   // ★ みんはや重複防止の完全版
   const correctChar = minhayaTarget[minhayaPos];
-  let distChars = [];
   const targetChars = minhayaTarget.split('');
-  
-  // ★【0.03.00】構造式・漢文などの埋め込みブロックの記号を選択肢の文字に混ぜない
-  sideCharsPool(cur).forEach(t => t.split('').forEach(c => { 
-    if (!/[\s,、，。・/|]/.test(c) && !targetChars.includes(c)) distChars.push(c); 
-  }));
-  distChars = [...new Set(distChars)].sort(() => Math.random() - 0.5);
-  
+  // ★【0.03.59】ダミーの文字は正解の文字と同じ種類（英字・ひらがな・カタカナ・漢字・数字）から、4択と同じく近いフォルダーの答えを先に使う
   let choices = [correctChar];
-  for (let c of distChars) {
-      if (choices.length < 4 && !choices.includes(c)) choices.push(c);
-  }
-  const fallbacks = 'あいうえおかきくけこさしすせそ'.split('').sort(() => Math.random() - 0.5);
-  for (let c of fallbacks) {
-      if (choices.length < 4 && !targetChars.includes(c) && !choices.includes(c)) choices.push(c);
-  }
+  pickSameClassChars(cur, correctChar, targetChars, 3).forEach(c => { if (choices.length < 4 && !choices.includes(c)) choices.push(c); });
   choices.sort(() => Math.random() - 0.5);
 
   const choicesDiv = document.createElement('div'); choicesDiv.style.cssText = 'display:grid; grid-template-columns:1fr 1fr; gap:10px;';
@@ -983,10 +986,9 @@ function buildTapChoices(cur) {
   inArea.innerHTML = ''; chArea.innerHTML = '';
   
   let chars = currentTapTarget.split('');
-  const latinTarget = /[A-Za-z]/.test(currentTapTarget) && !JA_CHAR_RE.test(currentTapTarget);
-  let allChars = sideCharsPool(cur).join('').replace(latinTarget ? /[^A-Za-z]/g : /[、，／/ \u3000,\da-zA-Z|]/g, '').split('');
-  if(allChars.length===0) allChars=(latinTarget ? 'abcdefghijklmnopqrstuvwxyz' : 'あいうえおかきくけこ').split('');
-  for(let i=0;i<2;i++) chars.push(allChars[Math.floor(Math.random()*allChars.length)]);
+  // ★【0.03.59】ダミーは答えの中の文字と同じ種類から（英語なら英字、日本語なら同じかな・漢字）
+  const letters = chars.filter(c => charClassOf(c) !== 'other');
+  for (let i = 0; i < 2 && letters.length; i++) { const base = letters[Math.floor(Math.random() * letters.length)]; const d = pickSameClassChars(cur, base, chars, 1)[0]; if (d) chars.push(d); }
   chars.sort(() => Math.random() - 0.5);
   
   chars.forEach((c, idx) => {
@@ -994,28 +996,61 @@ function buildTapChoices(cur) {
     btn.onclick = () => {
       if (quizPhase !== 'q') return;
       currentTapInput.push({ char: c, id: btn.id }); btn.style.display = 'none'; renderTapInput();
-      if (currentTapInput.length === currentTapTarget.length) {
-        stopQuizTimer();
-        const inputStr = currentTapInput.map(x => x.char).join('');
-        evaluateRoundAnswer(inputStr === currentTapTarget, inputStr === currentTapTarget ? "🎉 正解！" : "❌ 不正解");
-      }
+      // ★【0.03.59】全部そろって正しければすぐ〇。違っていたら、ドラッグで並べ替えてから「確定する」
+      if (currentTapInput.length === currentTapTarget.length && currentTapInput.map(x => x.char).join('') === currentTapTarget) submitTapAnswer();
     };
     chArea.appendChild(btn);
   });
 }
+function submitTapAnswer() {
+  if (quizPhase !== 'q') return;
+  stopQuizTimer();
+  const inputStr = currentTapInput.map(x => x.char).join('');
+  const ok = inputStr === currentTapTarget;
+  evaluateRoundAnswer(ok, ok ? "🎉 正解！" : "❌ 不正解");
+}
 function renderTapInput() {
   const inArea = document.getElementById('tapInputArea'); inArea.innerHTML = '';
+  const full = currentTapInput.length === currentTapTarget.length;
+  const act = document.getElementById('btnQuizAction'); if (act && currentRoundMode === 'tap') act.style.display = full ? 'inline-flex' : 'none';
   if (currentTapInput.length === 0) { inArea.innerHTML = '<span style="color:var(--text3); font-size:0.85rem;">順番にタップしてください</span>'; return; }
   currentTapInput.forEach((item, index) => {
     const box = document.createElement('div');
-    box.style.cssText = 'background:var(--primary); color:#fff; width:36px; height:36px; border-radius:6px; display:flex; align-items:center; justify-content:center; font-size:1.2rem; font-weight:bold; cursor:pointer;';
+    box.className = 'tap-tile';
     box.innerText = item.char;
+    // ★【0.03.59】タップで取り消し、ドラッグで並べ替え（1文字飛ばしたときに、正しい位置へずらせる）
+    box.addEventListener('pointerdown', e => tapDragStart(e, index, box));
     box.onclick = (e) => {
-      e.stopPropagation(); if (quizPhase !== 'q') return;
+      e.stopPropagation(); if (quizPhase !== 'q' || box._dragged) return;
       const removed = currentTapInput.splice(index, 1)[0]; document.getElementById(removed.id).style.display = 'inline-flex'; renderTapInput();
     };
     inArea.appendChild(box);
   });
+  if (full) inArea.insertAdjacentHTML('beforeend', '<div class="hint-small" style="width:100%; text-align:center; margin-top:4px;">文字をドラッグして並べ替えられます。よければ「確定する」</div>');
+}
+// ドラッグ：指の位置にいちばん近い文字の場所へ移す
+function tapDragStart(e, index, box) {
+  if (quizPhase !== 'q') return;
+  const sx = e.clientX, sy = e.clientY; let moved = false, to = index;
+  const tiles = () => [...document.querySelectorAll('#tapInputArea .tap-tile')];
+  const move = ev => {
+    if (!moved && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 8) return;
+    moved = true; box._dragged = true; ev.preventDefault();
+    box.style.transform = `translate(${ev.clientX - sx}px, ${ev.clientY - sy}px)`; box.style.zIndex = 5; box.style.opacity = '.85';
+    let best = index, bd = Infinity;
+    tiles().forEach((t, i) => { const r = t.getBoundingClientRect(); const d = Math.hypot(ev.clientX - (r.left + r.width / 2), ev.clientY - (r.top + r.height / 2)); if (d < bd) { bd = d; best = i; } });
+    to = best;
+    tiles().forEach((t, i) => t.classList.toggle('tap-target', moved && i === to && i !== index));
+  };
+  const up = () => {
+    document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', up);
+    if (!moved) return;
+    window._tapDraggedAt = Date.now(); // ドラッグの直後のクリックで1文字消さないように
+    const [it] = currentTapInput.splice(index, 1); currentTapInput.splice(to, 0, it);
+    renderTapInput();
+    if (currentTapInput.length === currentTapTarget.length && currentTapInput.map(x => x.char).join('') === currentTapTarget) submitTapAnswer();
+  };
+  document.addEventListener('pointermove', move, { passive: false }); document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up);
 }
 
 function buildSelfMode(cur) { document.getElementById('btnShowAnswer').style.display = 'inline-flex'; document.getElementById('selfJudgeArea').style.display = 'none'; }
@@ -1084,6 +1119,7 @@ function submitQuizAction() {
   stopQuizTimer();
   const cur = quizPool[quizIndex];
   const mode = currentRoundMode;
+  if (mode === 'tap') { if (currentTapInput.length === currentTapTarget.length) submitTapAnswer(); return; }
   if (mode === 'choice') {
     if (!selectedChoiceIdx) return;
     const given = selectedChoiceIdx;
@@ -1692,6 +1728,7 @@ async function recordDailyLog(isCorrect, opts = {}) {
 // ★【0.03.02】文字タップモード：入力欄をタップすると最後の1文字を取り消す（以前は関数が無くエラーになっていた）
 function removeLastTap() {
   if (quizPhase !== 'q' || currentTapInput.length === 0) return;
+  if (Date.now() - (window._tapDraggedAt || 0) < 500) return;
   const removed = currentTapInput.pop();
   const btn = document.getElementById(removed.id);
   if (btn) btn.style.display = 'inline-flex';
