@@ -381,6 +381,7 @@ function normalizeAnswer(str, keepOrder) {
   // ★【0.03.06】［ ］・～・… などの記号は入力しなくてよい（中身だけ合っていれば正解）
   s = s.replace(ANSWER_SYMBOL_RE, ' ');
   s = s.replace(/[◯○〇⚪]/g, '○');
+  s = s.replace(/[①-⑨]/g, c => String(c.charCodeAt(0) - 0x245F)); // ★【0.03.72】①は「1」と書いても正解
   s = s.replace(/[、，＼＼ \u3000・]+/g, ',');
   const parts = s.split(',').map(x=>x.trim()).filter(x=>x!=='');
   return (keepOrder ? parts : parts.sort()).join(',');
@@ -635,7 +636,9 @@ function loadQuizQuestion() {
     speakText(spoilerSafeSpeech(qSpeech));
   }
   // ★【0.03.02】テスト形式で選択肢があるカードは、記述式でも選択肢を問題文の下に表示する
-  if (Array.isArray(cur.choices) && cur.choices.length && !cur._attrQ) {
+  // ★【0.03.72】長い問題文（例文を並べた選択問題など）は左寄せ・少し小さく。①②③… だけの選択肢は問題文の中にあるので下に並べない
+  qEl.classList.toggle('q-long', String(cur.question || '').length > 60 && /\n/.test(String(cur.question || '')));
+  if (Array.isArray(cur.choices) && cur.choices.length && !cur._attrQ && !cur.choices.every(o => /^\s*[①-⑳0-9０-９]\s*$/.test(o))) {
     const chDiv = document.createElement('div');
     chDiv.className = 'quiz-card-choices';
     chDiv.innerText = cur.choices.join(' ／ ');
@@ -942,7 +945,7 @@ function buildChoiceCandidates(cur, correctPrimary) {
     const t = info.t;
     if (!t) return;
     const n = info.n;
-    if (seen.has(n)) return; seen.add(n);
+    if (seen.has(n)) return; // 正解と同じ
     const sh = info.sh;
     let score = 0;
     if (sh.latin === want.latin) score += 8;           // 英語なら英語、日本語なら日本語
@@ -951,7 +954,10 @@ function buildChoiceCandidates(cur, correctPrimary) {
     if (Math.abs(sh.words - want.words) <= 1) score += 2;
     if (q.kind === cur.kind) score += 1;
     const tier = q.category === cat ? 0 : near.has(q.category) ? 1 : 2;
-    pool.push({ t, tier, score: score + (tier === 0 ? 3 : 0) + Math.random() * 1.5 });
+    // ★【0.03.72】同じ答えのカードがいくつもあるときは、近いフォルダーのものを使う（前は先に見つかった遠いフォルダーのものになり、近いフォルダーの選択肢が出なかった）
+    const it = { n, t, tier, score: score + (tier === 0 ? 3 : 0) + Math.random() * 1.5 };
+    const prev = pool.find(p => p.n === n);
+    if (!prev) pool.push(it); else if (it.tier < prev.tier || (it.tier === prev.tier && it.score > prev.score)) Object.assign(prev, it);
   });
   const nearPool = pool.filter(p => p.tier < 2).sort((a, b) => b.score - a.score);
   const far = pool.filter(p => p.tier === 2).sort((a, b) => b.score - a.score);
@@ -970,7 +976,8 @@ function buildFourChoices(cur) {
     options = [correctPrimary, ...buildChoiceCandidates(cur, correctPrimary).slice(0, 3)];
     while (options.length < 4) options.push(`選択肢_${Math.floor(Math.random()*1000)}`);
   }
-  if (!cur._attrQ) options.sort(() => Math.random() - 0.5); // 自動詞・他動詞は決まった順
+  // ★【0.03.72】①②③… だけの選択肢（問題文に並べた文を番号で選ぶ）も、決まった順のまま
+  if (!cur._attrQ && !options.every(o => /^\s*[①-⑳0-9０-９ア-ンa-zA-Z]\s*$/.test(o))) options.sort(() => Math.random() - 0.5); // 自動詞・他動詞は決まった順
   // ★【0.03.58】正解の選択肢は作ったときに覚えておく（選んだ文字を答えと比べ直すと、タグや記号の違いで×になることがあった）
   const nc = normalizeAnswer(correctPrimary);
   area._correctText = options.find(o => o === correctPrimary) || options.find(o => normalizeAnswer(o) === nc) || correctPrimary;

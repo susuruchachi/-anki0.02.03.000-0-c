@@ -146,7 +146,8 @@ function drillPartHits(v, sn) {
   const whole = normalizeStructuredToken(v);
   const parts = String(v).split(/[、,，\s　・／/]+/).filter(p => normalizeStructuredToken(p) !== '');
   if (!parts.length) return null;
-  const forms = sn.map(x => new Set([...String(x.t).split(/[，,]/).flatMap(w => structuredTokenForms(w)), ...structuredTokenForms(String(x.t).replace(/[，,]/g, '、'))]));
+  // ★【0.03.72】「仮定／婉曲」のように「／」で並べた訳は、どれか1つでもその意味に当たる（クイズと同じ）
+  const forms = sn.map(x => new Set([...String(x.t).split(/[，,]/).flatMap(w => [w, ...(/／/.test(w) ? w.split('／') : [])]).flatMap(w => structuredTokenForms(w)), ...structuredTokenForms(String(x.t).replace(/[，,]/g, '、'))]));
   const wi = forms.findIndex(f => f.has(whole)); // 区切りを含む訳（「現在の伝聞、婉曲」など）をそのまま書いたとき
   if (wi >= 0) return { hits: [wi], unknown: [] };
   const hits = [], unknown = [];

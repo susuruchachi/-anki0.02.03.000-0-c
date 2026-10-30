@@ -57,7 +57,7 @@ function vtParse(text) {
     if ((m = l.match(/^Check!?\s*[：:]\s*(.*)$/i))) { mode = 'check'; w = null; if (m[1]) pushCheck(m[1]); continue; }
     if ((m = l.match(/^\[No\.\s*([^\]]+)\]\s*(.+?)\s*(★*)$/))) {
       mode = 'item';
-      const no = m[1].trim(), nw = { no, w: m[2].trim(), stars: m[3].length, mean: '', attr: '', notes: [], exprs: [], related: [], derived: [] };
+      const no = m[1].trim(), nw = { no, w: m[2].trim(), stars: m[3].length, mean: '', attr: '', notes: [], exprs: [], related: [], derived: [], qx: [], choices: null };
       // 同じ番号がもう一度出てきたら（貼り付けの重なりなど）、前のものを置き換える（グループは前のまま）
       if (byNo[no]) { Object.keys(nw).forEach(k => { byNo[no][k] = nw[k]; }); w = byNo[no]; }
       else { byNo[no] = nw; g.items.push(nw); w = nw; }
@@ -65,9 +65,12 @@ function vtParse(text) {
     }
     if (mode === 'check') { if (/^[●・\-–]/.test(l)) pushCheck(l.replace(/^[●・\-–]\s*/, '')); else if (/→/.test(l)) pushCheck(l); continue; }
     if (!w) { out.skipped.push(l); continue; }
-    if ((m = l.match(/^(意味|品詞属性|補足|表現|関連語注記|派生語)\s*[：:]\s*(.*)$/))) {
+    if ((m = l.match(/^(意味|品詞属性|補足|表現|関連語注記|派生語|問題|選択肢)\s*[：:]\s*(.*)$/))) {
       mode = m[1]; const v = m[2].trim();
       if (mode === '意味') w.mean = v;
+      // ★【0.03.72】例題など：「問題：」の行（続く行も）は問題文に足す。「選択肢：①／②／③」は決まった選択肢
+      else if (mode === '問題') { if (v) w.qx.push(v); }
+      else if (mode === '選択肢') w.choices = vtSplitTop(v, '／/').filter(Boolean);
       else if (mode === '品詞属性') w.attr = v;
       else if (mode === '補足') { if (v) w.notes.push(v.replace(/^★\s*/, '')); }
       else if (mode === '表現') w.exprs.push(...vtSplitTop(v, '／'));
@@ -83,6 +86,7 @@ function vtParse(text) {
     }
     if (mode === '表現') { w.exprs.push(...vtSplitTop(l, '／')); continue; }
     if (mode === '補足') { w.notes.push(l); continue; }
+    if (mode === '問題') { w.qx.push(l); continue; }
     if (mode === '関連語注記') { w.related.push(l); continue; }
     out.skipped.push(l);
   }
@@ -211,7 +215,7 @@ function vtCards(parsed, section) {
       const base = parseInt(w.no, 10);
       if (Number.isFinite(base)) lastBase = base;
       const ans = vtMeaning(w.mean, w.w);
-      if (ans) add({ folder, q: w.w, a: ans, note: [...w.notes, ...w.related.map(r => '関連：' + r)].join('\n'), stars: w.stars, no: Number.isFinite(base) ? base : null, head: w.w, mean: w.mean });
+      if (ans) add({ folder, q: w.qx && w.qx.length ? [w.w, ...w.qx].join('\n') : w.w, a: w.choices ? w.mean.trim() : ans, choices: w.choices && w.choices.length >= 2 ? w.choices : null, note: [...w.notes, ...w.related.map(r => '関連：' + r)].join('\n'), stars: w.stars, no: Number.isFinite(base) ? base : null, head: w.w, mean: w.mean });
       // ★【0.03.55】番号の無い熟語・例文は、元の語の番号に続けて振る（1000 の表現は 1000-0-1, 1000-0-2 …、1000-1 の表現は 1000-1-1 …）
       const exprs = w.exprs.map(e => ({ e, head: w.w, mean: w.mean, k: 0 }));
       w.derived.forEach(d => {
@@ -260,6 +264,10 @@ function vtResolveTargets(cards, folders, parentCat, section, create) {
   }
   if (!sec) sec = create ? ensureCategoryPath(pre + section) : null;
   const map = {}, used = new Set();
+  // ★【0.03.72】前からあるフォルダーの名前の付け方（「SECTION-1 …」など）に合わせて、新しいフォルダーにも同じ頭を付ける
+  let oldCode = null;
+  const codeOf = f => { const m = String(f).match(/^(.+?)-\d+ /); return m ? m[1] : null; };
+  const rename = f => { const c = codeOf(f) || String(f).split(' ')[0]; return oldCode && c && f.startsWith(c) ? oldCode + f.slice(c.length) : f; };
   folders.forEach(f => {
     const own = cards.filter(c => c.folder === f), keys = keysOf(own);
     let t = sec && categories.includes(f) && getCategoryParent(f) === sec ? f : null;
@@ -268,15 +276,29 @@ function vtResolveTargets(cards, folders, parentCat, section, create) {
       getAllSubcategories(sec).filter(c => c !== sec && !used.has(c)).forEach(c => { const n = vtMatchCount(c, keys, false); if (n > bn) { bn = n; best = c; } });
       if (best && bn >= Math.max(1, keys.size * 0.3)) { t = best; if (best !== f) reused.push(best); }
     }
+    if (t && !oldCode && t !== f) { const a = codeOf(f), b = codeOf(t); if (a && b && f.slice(a.length) === t.slice(b.length)) oldCode = b; }
+    if (t) { map[f] = t; used.add(t); }
+  });
+  folders.forEach(f => {
+    if (map[f]) return;
+    let t = null;
+    const g = rename(f);
+    if (sec && g !== f && categories.includes(g) && getCategoryParent(g) === sec) t = g;
     if (!t && create) {
       // ほかの場所に同じ名前のフォルダーがあれば、名前を変えて作る（フォルダー名はアプリ全体で1つ）
-      let n = f;
+      let n = g;
       if (categories.includes(n) && getCategoryParent(n) !== sec) n = `${f}（${section}）`;
       t = ensureCategoryPath(getCategoryPath(sec).join('>') + '>' + n);
     }
     if (t) { map[f] = t; used.add(t); }
   });
   return { sec, map, reused };
+}
+// 作ってから書き換えていないか（カードIDの末尾は作った時刻）
+function vtUntouchedSinceCreate(card) {
+  const m = String(card.id || '').match(/([0-9a-z]{8})$/); if (!m) return false;
+  const created = parseInt(m[1], 36);
+  return created > 1.5e12 && (!card.updatedAt || card.updatedAt - created < 120000);
 }
 // 保存する（同じフォルダーに同じ問題・同じ形式のカードがあれば書き換える。成績はそのまま）
 function vtSave(parsed, parentCat, section) {
@@ -305,6 +327,7 @@ function vtSave(parsed, parentCat, section) {
         if (!cur.trim()) next = c.note;
         else if (cur.includes(c.note)) next = cur;
         else if (prev && cur.includes(prev)) next = cur.replace(prev, c.note);
+        else if (!prev && vtUntouchedSinceCreate(ex)) next = c.note; // 前の版で取り込んで、そのあと書き換えていないカード
         if (next !== cur) { ex.note = next; ch = true; }
         if (ex.vtNote !== c.note) { ex.vtNote = c.note; }
       }
