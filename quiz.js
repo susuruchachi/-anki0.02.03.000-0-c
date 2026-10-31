@@ -326,13 +326,19 @@ function sortCardsByNumber(arr) {
     naturalCompare(a.question, b.question));
 }
 function quizOrderKey(scope) { return 'susuru_anki_order_pos_' + (scope || 'all'); }
-function loadQuizOrderPosition(scope) { try { return localStorage.getItem(quizOrderKey(scope)); } catch (e) { return null; } }
+// ★【0.03.73】「前回の続きから」の位置は quizOrderPos（storage.js）に持ち、端末間で同期する
+function loadQuizOrderPosition(scope) {
+  const k = scope || 'all', e = (quizOrderPos || {})[k];
+  let legacy = null; try { legacy = localStorage.getItem(quizOrderKey(scope)); } catch (er) {}
+  if (legacy && !e) { quizOrderPos[k] = { pos: legacy, at: 1 }; try { localStorage.removeItem(quizOrderKey(scope)); } catch (er) {} return legacy; }
+  return e ? e.pos : legacy;
+}
 // 番号順（続きから）で解いた最後のカードを覚えておく
 function recordQuizOrderProgress(cur) {
   if (!currentQuizOrderScope || !cur || window.currentOnlineMatch) return;
   // ★【0.03.17】意味ごとの問題なら、どの意味まで解いたかも覚える（「カードID\u0001意味」）
   const pos = (cur._sourceId || cur.id) + (cur._senseKey ? '\u0001' + cur._senseKey : '');
-  try { localStorage.setItem(quizOrderKey(currentQuizOrderScope), pos); } catch (e) {}
+  quizOrderPos[currentQuizOrderScope || 'all'] = { pos, at: Date.now() }; // 保存は解答の保存（saveData）と一緒に
 }
 
 const QUIZ_PREF_KEY = 'susuru_anki_quiz_prefs';

@@ -199,13 +199,28 @@ function drillScopeCategory() {
 }
 function drillSetCategory(c) { try { localStorage.setItem(DRILL_CAT_KEY, c || ''); } catch (e) {} if (!_drillActive) drillHome(); }
 // ★【0.03.29】途中経過はフォルダーごとに保存する { フォルダー名（すべては ''）: 状態 }
+// ★【0.03.73】途中経過は storage.js の drillProgress に持ち、アカウントで同期する（前はこの端末の localStorage だけ）
 function drillLoadAll() {
-  let all = {};
-  try { all = JSON.parse(localStorage.getItem(DRILL_KEY + '_v2') || '{}') || {}; } catch (e) {}
-  try { const old = JSON.parse(localStorage.getItem(DRILL_KEY)); if (old && !all[old.cat || '']) { all[old.cat || ''] = old; localStorage.setItem(DRILL_KEY + '_v2', JSON.stringify(all)); } localStorage.removeItem(DRILL_KEY); } catch (e) {}
+  // 前の版の保存（この端末だけ）を一度だけ移す
+  try {
+    let legacy = JSON.parse(localStorage.getItem(DRILL_KEY + '_v2') || 'null');
+    const old = JSON.parse(localStorage.getItem(DRILL_KEY) || 'null'); if (old) { legacy = legacy || {}; if (!legacy[old.cat || '']) legacy[old.cat || ''] = old; }
+    if (legacy) {
+      Object.entries(legacy).forEach(([k, v]) => { if (v && (!drillProgress[k] || (drillProgress[k].at || 0) < (v.at || 0))) drillProgress[k] = Object.assign({ dev: DEVICE_ID }, v); });
+      localStorage.removeItem(DRILL_KEY + '_v2'); localStorage.removeItem(DRILL_KEY);
+      try { saveData(); } catch (e) {}
+    }
+  } catch (e) {}
+  const all = {};
+  Object.entries(drillProgress || {}).forEach(([k, v]) => { if (v && !v.deleted) all[k] = v; });
   return all;
 }
-function drillStoreAll(all) { try { localStorage.setItem(DRILL_KEY + '_v2', JSON.stringify(all)); } catch (e) {} }
+function drillStoreAll(all) {
+  const now = Date.now();
+  Object.keys(drillProgress || {}).forEach(k => { if (!all[k] && drillProgress[k] && !drillProgress[k].deleted) drillProgress[k] = { deleted: true, at: now, dev: DEVICE_ID }; });
+  Object.entries(all).forEach(([k, v]) => { drillProgress[k] = v; });
+  try { saveData(); } catch (e) {}
+}
 // ★【0.03.27】暗記テストは専用のタブ。ほかの画面に行っても（一時離脱）、タブに戻るとその問題から続く
 let _drillActive = false;
 function openDrill() { openPage('pgDrill'); }
@@ -291,7 +306,7 @@ function drillStartNow() {
   const cat = drillScopeCategory();
   const all = drillLoadAll();
   if (all[cat] && !confirm('このフォルダーの途中経過を消して、最初から始めますか？')) return;
-  DS = { cat, r: 1, gi: 0, miss: new Map(), gm: [], rv: false, hdr: null, ct: {}, sp: {}, rec: {} };
+  DS = { savedAt: Date.now(), cat, r: 1, gi: 0, miss: new Map(), gm: [], rv: false, hdr: null, ct: {}, sp: {}, rec: {} };
   DQ = []; DH = []; dView = null; drillHistStore(); drillSetActive(true); drillPop();
 }
 function drillSer(s) { return s.t === 'q' ? { t: 'q', id: s.it.id, retry: s.retry } : s.t === 'c' ? { t: 'c', key: s.ck.key, retry: s.retry } : s.t === 'msg' ? { t: 'msg', h: s.h } : { t: s.t, g: DG.indexOf(s.g) }; }
@@ -303,8 +318,15 @@ function drillDe(o) {
 }
 function drillSave() {
   if (!DS || DS.r === undefined) return;
+  // ★【0.03.73】ほかの端末でこのフォルダーが先に進んでいたら、そちらに切り替えるか聞く（黙って上書きしない）
+  const key = DS.cat || '', other = (drillProgress || {})[key];
+  if (other && !other.deleted && other.dev && other.dev !== DEVICE_ID && (other.at || 0) > (DS.savedAt || 0) && !DS.askedOther) {
+    DS.askedOther = true;
+    if (confirm('このフォルダーの暗記テストは、ほかの端末で先に進んでいます。\n\nOK：ほかの端末の続きにする\nキャンセル：この端末の続きのまま（ほかの端末の分は上書き）')) { setTimeout(() => drillResumeNow(key), 0); return; }
+  }
   const all = drillLoadAll();
-  all[DS.cat || ''] = { cat: DS.cat, r: DS.r, gi: DS.gi, rv: DS.rv, gm: DS.gm.map(x => x.id), miss: [...DS.miss.values()].map(drillSer), ct: DS.ct, rec: DS.rec, Q: [dst.ph === 9 ? null : dcur, ...DQ].filter(Boolean).map(drillSer), hg: DS.hdr ? DG.indexOf(DS.hdr) : -1, at: Date.now() };
+  DS.savedAt = Date.now();
+  all[key] = { cat: DS.cat, r: DS.r, gi: DS.gi, rv: DS.rv, gm: DS.gm.map(x => x.id), miss: [...DS.miss.values()].map(drillSer), ct: DS.ct, rec: DS.rec, Q: [dst.ph === 9 ? null : dcur, ...DQ].filter(Boolean).map(drillSer), hg: DS.hdr ? DG.indexOf(DS.hdr) : -1, at: DS.savedAt, dev: DEVICE_ID };
   drillStoreAll(all);
 }
 function drillResume(cat) { drillBuild(cat && categories.includes(cat) ? cat : ''); drillOfflineGate(() => drillResumeNow(cat)); }
@@ -313,7 +335,7 @@ function drillResumeNow(cat) {
     const d = drillLoadAll()[cat || ''];
     if (!d) return drillHome();
     drillBuild(d.cat && categories.includes(d.cat) ? d.cat : '');
-    DS = { cat: d.cat || '', r: d.r, gi: d.gi, rv: d.rv, miss: new Map(), gm: (d.gm || []).map(i => DI[i]).filter(Boolean), hdr: d.hg >= 0 ? DG[d.hg] : null, ct: d.ct || {}, sp: {}, rec: d.rec || {} };
+    DS = { savedAt: d.at || 0, cat: d.cat || '', r: d.r, gi: d.gi, rv: d.rv, miss: new Map(), gm: (d.gm || []).map(i => DI[i]).filter(Boolean), hdr: d.hg >= 0 ? DG[d.hg] : null, ct: d.ct || {}, sp: {}, rec: d.rec || {} };
     (d.miss || []).map(drillDe).filter(Boolean).forEach(x => DS.miss.set(dKey(x), x));
     DQ = (d.Q || []).map(drillDe).filter(Boolean); DH = drillHistLoad(DS.cat); dView = null;
     drillSetActive(true); drillPop();

@@ -11,8 +11,10 @@ let _streakSaveDay = null;
 function markStudyDay() {
   const t = getTodayStr();
   if (!studyDays || typeof studyDays !== 'object') studyDays = {};
-  const first = !studyDays[t];
-  studyDays[t] = (studyDays[t] || 0) + 1;
+  const first = !studyDayCount(studyDays[t]);
+  // ★【0.03.73】端末ごとに数える（同期で端末ごとに多い方を残し、合計を表示する）
+  const v = studyDays[t], o = typeof v === 'number' ? (v > 0 ? { _: v } : {}) : Object.assign({}, v || {});
+  o[DEVICE_ID] = (o[DEVICE_ID] || 0) + 1; studyDays[t] = o;
   // 今日はじめての1問はすぐ保存（同期）。それ以降はほかの保存についでに乗る
   if (first && _streakSaveDay !== t) { _streakSaveDay = t; try { saveData(); } catch (e) {} }
   else { try { if (!_localWriteTimer) _localWriteTimer = setTimeout(writeLocal, 400); } catch (e) {} }
@@ -20,7 +22,7 @@ function markStudyDay() {
 }
 
 function getStreakInfo() {
-  const days = studyDays || {};
+  const days = {}; Object.entries(studyDays || {}).forEach(([k, v]) => { days[k] = studyDayCount(v); });
   const today = getTodayStr();
   const doneToday = (days[today] || 0) > 0;
   let cur = 0, d = doneToday ? today : streakShift(today, -1);
@@ -40,7 +42,7 @@ function renderStreakCard() {
   const today = getTodayStr(), wd = ['日', '月', '火', '水', '木', '金', '土'];
   let dots = '';
   for (let i = 6; i >= 0; i--) {
-    const k = streakShift(today, -i), on = ((studyDays || {})[k] || 0) > 0;
+    const k = streakShift(today, -i), on = studyDayCount((studyDays || {})[k]) > 0;
     dots += `<div class="streak-day${on ? ' on' : ''}${i === 0 ? ' today' : ''}"><div class="streak-dot">${on ? '🔥' : ''}</div><div class="streak-wd">${wd[new Date(k + 'T12:00:00').getDay()]}</div></div>`;
   }
   const msg = s.doneToday ? `今日は ${s.todayCount}問 解きました` : (s.cur > 0 ? `⚠️ 今日1問解かないと ${s.cur}日の記録が途切れます` : '今日1問解いて記録をはじめよう');
@@ -54,7 +56,7 @@ function renderStreakCard() {
 // 学習ヒートマップ（実績ページ・過去12週）
 function renderStudyHeatmap() {
   const hc = document.getElementById('heatmapContainer'); if (!hc) return;
-  const today = getTodayStr(), days = studyDays || {};
+  const today = getTodayStr(), days = {}; Object.entries(studyDays || {}).forEach(([k, v]) => { days[k] = studyDayCount(v); });
   const weeks = 12;
   // 今週の土曜日まで並べる（列＝週、行＝曜日）
   const endOffset = 6 - new Date(today + 'T12:00:00').getDay();
@@ -101,7 +103,8 @@ async function streakBackfill() {
   } catch (e) { return; } // オフラインなど：次の起動でもう一度
   if (!studyDays || typeof studyDays !== 'object') studyDays = {};
   let changed = false;
-  Object.entries(found).forEach(([d, n]) => { if ((studyDays[d] || 0) < n) { studyDays[d] = n; changed = true; } });
+  // ログはアカウント全体の数。記録がまったく無い日（今日を除く）にだけ「_log」として入れる（端末ごとの数と二重に数えないように）
+  Object.entries(found).forEach(([d, n]) => { if (d !== today && !studyDayCount(studyDays[d])) { studyDays[d] = { _log: n }; changed = true; } });
   try { localStorage.setItem(key, '1'); } catch (e) {}
   if (changed) { try { saveData(); } catch (e) {} }
   renderStreakCard(); updateAppBadge();

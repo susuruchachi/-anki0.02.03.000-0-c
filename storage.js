@@ -25,7 +25,24 @@ function getQuizSubcategories(cat, result = []) {
   return result;
 }
 // ★【0.03.62】連続記録：学習した日 { 'YYYY-MM-DD': その日に答えた数 }（同期では両方を残し、多い方の数）
-let studyDays = {};
+let studyDays = {}; // ★【0.03.73】値は { 端末ID: その端末で答えた数 }（前の版は数だけ）。端末ごとに多い方を残して、合計を表示する
+// ★【0.03.73】暗記テストの途中経過 { フォルダー: 途中の状態（at: 保存時刻, dev: 端末）| { deleted: true, at } } と、
+// クイズの「番号順（前回の続きから）」の位置 { 出題範囲: { pos, at } } も同期する
+let drillProgress = {};
+let quizOrderPos = {};
+function studyDayCount(v) { return typeof v === 'number' ? v : v && typeof v === 'object' ? Object.values(v).reduce((a, n) => a + (Number(n) || 0), 0) : 0; }
+function mergeStudyDays(a, b) {
+  const asObj = v => typeof v === 'number' ? (v > 0 ? { _: v } : {}) : Object.assign({}, v || {});
+  const o = {};
+  [a || {}, b || {}].forEach(m => Object.entries(m).forEach(([d, v]) => { const x = asObj(v), cur = o[d] || {}; Object.entries(x).forEach(([k, n]) => { cur[k] = Math.max(cur[k] || 0, Number(n) || 0); }); o[d] = cur; }));
+  return o;
+}
+function mergeStampedMap(a, b, keepDays) {
+  const o = {}, limit = Date.now() - (keepDays || 60) * 86400000;
+  [a || {}, b || {}].forEach(m => Object.entries(m).forEach(([k, v]) => { if (!v) return; if (!o[k] || (v.at || 0) > (o[k].at || 0)) o[k] = v; }));
+  Object.keys(o).forEach(k => { if (o[k].deleted && (o[k].at || 0) < limit) delete o[k]; });
+  return o;
+}
 let studyPlan = null; // ★【0.03.27】週間プラン（plan.js）。設定は新しく変えた方、達成の記録は両方を残す
 // ★【0.03.33】週間プランは複数持てる：studyPlan = { v: 2, plans: { id: プラン } }（解除したプランは { deleted: true, planAt }）
 function normalizeStudyPlans(x) {
@@ -208,6 +225,8 @@ function loadData() {
       if(p.catSkip) catSkip=p.catSkip;
       if(p.studyPlan) studyPlan=p.studyPlan;
       if(p.studyDays) studyDays=p.studyDays;
+      if(p.drillProgress) drillProgress=p.drillProgress;
+      if(p.quizOrderPos) quizOrderPos=p.quizOrderPos;
       if(p.deletedCardsAt) deletedCardsAt=p.deletedCardsAt;
       if(p.docStamps) docStamps=p.docStamps;
       if(p.structAt) structAt=p.structAt;
@@ -287,7 +306,7 @@ function updateStructStamp() {
 }
 
 function buildSyncPayload() {
-  return { db, categories, categoryTree, subscribedDocs, ownedDocs, deletedCards, deletedCardsAt, deletedCats, catStamps, docStamps, structAt, catSubjects, catSkip, studyPlan, studyDays };
+  return { db, categories, categoryTree, subscribedDocs, ownedDocs, deletedCards, deletedCardsAt, deletedCats, catStamps, docStamps, structAt, catSubjects, catSkip, studyPlan, studyDays, drillProgress, quizOrderPos };
 }
 
 let _quotaWarned = false;
@@ -355,8 +374,12 @@ function encodeCloudBody(payload) {
     const gz = pako.gzip(dbJson);
     delete body.db;
     body.dbFormat = 'gzip-json-v1';
-    size = gz.length + utf8Bytes(JSON.stringify(body)) + 2000; // 圧縮データ以外の部分＋圧縮データの大きさ
+    // ★【0.03.73】暗記テストの途中経過も圧縮して入れる
+    let dp = null;
+    if (body.drillProgress && Object.keys(body.drillProgress).length) { dp = pako.gzip(JSON.stringify(body.drillProgress)); delete body.drillProgress; }
+    size = gz.length + (dp ? dp.length : 0) + utf8Bytes(JSON.stringify(body)) + 2000; // 圧縮データ以外の部分＋圧縮データの大きさ
     body.dbGz = firebase.firestore.Blob.fromUint8Array(gz);
+    if (dp) body.dpGz = firebase.firestore.Blob.fromUint8Array(dp);
   } else {
     body.db = JSON.parse(dbJson);
     size = utf8Bytes(JSON.stringify(body)) + 2000;
@@ -375,6 +398,7 @@ function decodeCloudDoc(r) {
     const out = Object.assign({}, r);
     out.db = JSON.parse(pako.ungzip(bytes, { to: 'string' }));
     delete out.dbGz;
+    if (r.dpGz) { try { const b2 = typeof r.dpGz.toUint8Array === 'function' ? r.dpGz.toUint8Array() : r.dpGz; out.drillProgress = JSON.parse(pako.ungzip(b2, { to: 'string' })); } catch (e) { console.warn(e); } delete out.dpGz; }
     return out;
   }
   return r;
@@ -537,7 +561,9 @@ function mergeSyncStates(L, C) {
     catSkip: (() => { const o = Object.assign({}, older.catSkip || {}, newer.catSkip || {}); Object.keys(o).forEach(k => { if (!aliveSet.has(k)) delete o[k]; }); return o; })(),
     structAt: Math.max(L.structAt || 0, C.structAt || 0),
     studyPlan: mergeStudyPlans(L.studyPlan, C.studyPlan),
-    studyDays: (() => { const o = Object.assign({}, L.studyDays || {}); Object.entries(C.studyDays || {}).forEach(([k, v]) => { o[k] = Math.max(o[k] || 0, v || 0); }); return o; })(),
+    studyDays: mergeStudyDays(L.studyDays, C.studyDays),
+    drillProgress: mergeStampedMap(L.drillProgress, C.drillProgress, 30),
+    quizOrderPos: mergeStampedMap(L.quizOrderPos, C.quizOrderPos, 365),
     subscribedDocs: subs, ownedDocs: owned
   };
 }
@@ -547,7 +573,7 @@ function mergeIntoLocal(r) {
   const merged = mergeSyncStates(buildSyncPayload(), r);
   db = merged.db; categories = merged.categories; categoryTree = merged.categoryTree;
   deletedCards = merged.deletedCards; deletedCardsAt = merged.deletedCardsAt; deletedCats = merged.deletedCats;
-  catStamps = merged.catStamps; docStamps = merged.docStamps; structAt = merged.structAt; catSubjects = merged.catSubjects || {}; catSkip = merged.catSkip || {}; studyPlan = merged.studyPlan || null; studyDays = merged.studyDays || {};
+  catStamps = merged.catStamps; docStamps = merged.docStamps; structAt = merged.structAt; catSubjects = merged.catSubjects || {}; catSkip = merged.catSkip || {}; studyPlan = merged.studyPlan || null; studyDays = merged.studyDays || {}; drillProgress = merged.drillProgress || {}; quizOrderPos = merged.quizOrderPos || {};
   subscribedDocs = merged.subscribedDocs; ownedDocs = merged.ownedDocs;
   ensureSystemSanity();
   autoMerge(true);
@@ -577,7 +603,7 @@ function syncFingerprint(p) {
   return stableStringify({
     db: dbSorted, categories: [...(p.categories || [])].sort(), categoryTree: p.categoryTree || {},
     deletedCards: [...(p.deletedCards || [])].sort(), deletedCardsAt: p.deletedCardsAt || {}, deletedCats: [...(p.deletedCats || [])].sort(),
-    catStamps: p.catStamps || {}, docStamps: p.docStamps || {}, structAt: p.structAt || 0, catSubjects: p.catSubjects || {}, catSkip: p.catSkip || {}, studyPlan: p.studyPlan || null, studyDays: p.studyDays || {},
+    catStamps: p.catStamps || {}, docStamps: p.docStamps || {}, structAt: p.structAt || 0, catSubjects: p.catSubjects || {}, catSkip: p.catSkip || {}, studyPlan: p.studyPlan || null, studyDays: p.studyDays || {}, drillProgress: p.drillProgress || {}, quizOrderPos: p.quizOrderPos || {},
     subscribedDocs: [...(p.subscribedDocs || [])].sort(), ownedDocs: [...(p.ownedDocs || [])].sort()
   });
 }
@@ -591,6 +617,7 @@ function refreshVisibleViews(contentChanged = true) {
       if (isActive('pgHome')) { if (typeof buildQuizScopeDropdown === 'function') buildQuizScopeDropdown(); if (typeof renderPlanHome === 'function') renderPlanHome(); }
     }
     if (typeof updateHomeSummary === 'function') updateHomeSummary();
+    if (isActive('pgDrill') && typeof _drillActive !== 'undefined' && !_drillActive && typeof drillHome === 'function') drillHome(); // ほかの端末の途中経過
   } catch (e) { console.warn(e); }
 }
 
@@ -731,7 +758,7 @@ function resolveAccountSwitch() {
     if (!merge) {
       takeSnapshot('アカウント変更（置き換え）');
       db = []; categories = ['未分類']; categoryTree = {}; subscribedDocs = []; ownedDocs = [];
-      deletedCards = []; deletedCardsAt = {}; deletedCats = []; catStamps = {}; docStamps = {}; structAt = 0; catSubjects = {}; catSkip = {}; studyPlan = null; studyDays = {};
+      deletedCards = []; deletedCardsAt = {}; deletedCats = []; catStamps = {}; docStamps = {}; structAt = 0; catSubjects = {}; catSkip = {}; studyPlan = null; studyDays = {}; drillProgress = {}; quizOrderPos = {};
       sharedDocPermissions = {};
       _structHash = structFingerprint(); writeLocal();
     } else {
