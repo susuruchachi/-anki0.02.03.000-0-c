@@ -32,6 +32,25 @@ let drillProgress = {};
 let quizOrderPos = {};
 // ★【0.03.82】読み上げの読み方の辞書 { 書き方: { r: 読み方, at } | { deleted: true, at } }（端末間で同期）
 let ttsDict = {};
+// ★【0.03.91】暗記テストで AI にした質問 { カードID: [{ q, a, at, model } | { at, del: true }] }（端末間で同期。前はこの端末だけ）
+let drillQa = {};
+function mergeDrillQa(a, b) {
+  const o = {}, limit = Date.now() - 60 * 86400e3;
+  [a || {}, b || {}].forEach(m => Object.entries(m).forEach(([id, list]) => {
+    const cur = o[id] = o[id] || {};
+    (list || []).forEach(x => { if (!x || !x.at) return; const k = String(x.at); if (x.del) cur[k] = { at: x.at, del: true, dt: Math.max(x.dt || 0, (cur[k] && cur[k].dt) || 0) || undefined }; else if (!cur[k] || !cur[k].del) cur[k] = x; });
+  }));
+  const out = {};
+  Object.entries(o).forEach(([id, map]) => {
+    const all = Object.values(map).sort((x, y) => x.at - y.at);
+    const live = all.filter(x => !x.del).slice(-10), dead = all.filter(x => x.del && (x.dt || x.at) > limit); // 消した記録は、消した時刻から60日とっておく
+    if (live.length || dead.length) out[id] = [...dead, ...live].sort((x, y) => x.at - y.at);
+  });
+  // 新しく使ったカードから150枚まで
+  const ids = Object.keys(out).sort((x, y) => Math.max(...out[y].map(z => z.at)) - Math.max(...out[x].map(z => z.at)));
+  ids.slice(150).forEach(id => delete out[id]);
+  return out;
+}
 function studyDayCount(v) { return typeof v === 'number' ? v : v && typeof v === 'object' ? Object.values(v).reduce((a, n) => a + (Number(n) || 0), 0) : 0; }
 function mergeStudyDays(a, b) {
   const asObj = v => typeof v === 'number' ? (v > 0 ? { _: v } : {}) : Object.assign({}, v || {});
@@ -230,6 +249,7 @@ function loadData() {
       if(p.drillProgress) drillProgress=p.drillProgress;
       if(p.quizOrderPos) quizOrderPos=p.quizOrderPos;
       if(p.ttsDict) ttsDict=p.ttsDict;
+      if(p.drillQa) drillQa=p.drillQa;
       if(p.deletedCardsAt) deletedCardsAt=p.deletedCardsAt;
       if(p.docStamps) docStamps=p.docStamps;
       if(p.structAt) structAt=p.structAt;
@@ -309,7 +329,7 @@ function updateStructStamp() {
 }
 
 function buildSyncPayload() {
-  return { db, categories, categoryTree, subscribedDocs, ownedDocs, deletedCards, deletedCardsAt, deletedCats, catStamps, docStamps, structAt, catSubjects, catSkip, studyPlan, studyDays, drillProgress, quizOrderPos, ttsDict };
+  return { db, categories, categoryTree, subscribedDocs, ownedDocs, deletedCards, deletedCardsAt, deletedCats, catStamps, docStamps, structAt, catSubjects, catSkip, studyPlan, studyDays, drillProgress, quizOrderPos, ttsDict, drillQa };
 }
 
 let _quotaWarned = false;
@@ -380,9 +400,12 @@ function encodeCloudBody(payload) {
     // ★【0.03.73】暗記テストの途中経過も圧縮して入れる
     let dp = null;
     if (body.drillProgress && Object.keys(body.drillProgress).length) { dp = pako.gzip(JSON.stringify(body.drillProgress)); delete body.drillProgress; }
-    size = gz.length + (dp ? dp.length : 0) + utf8Bytes(JSON.stringify(body)) + 2000; // 圧縮データ以外の部分＋圧縮データの大きさ
+    let qa = null; // ★【0.03.91】暗記テストの質問も縮めて入れる
+    if (body.drillQa && Object.keys(body.drillQa).length) { qa = pako.gzip(JSON.stringify(body.drillQa)); delete body.drillQa; }
+    size = gz.length + (dp ? dp.length : 0) + (qa ? qa.length : 0) + utf8Bytes(JSON.stringify(body)) + 2000; // 圧縮データ以外の部分＋圧縮データの大きさ
     body.dbGz = firebase.firestore.Blob.fromUint8Array(gz);
     if (dp) body.dpGz = firebase.firestore.Blob.fromUint8Array(dp);
+    if (qa) body.qaGz = firebase.firestore.Blob.fromUint8Array(qa);
   } else {
     body.db = JSON.parse(dbJson);
     size = utf8Bytes(JSON.stringify(body)) + 2000;
@@ -401,6 +424,7 @@ function decodeCloudDoc(r) {
     const out = Object.assign({}, r);
     out.db = JSON.parse(pako.ungzip(bytes, { to: 'string' }));
     delete out.dbGz;
+    if (r.qaGz) { try { const b3 = typeof r.qaGz.toUint8Array === 'function' ? r.qaGz.toUint8Array() : r.qaGz; out.drillQa = JSON.parse(pako.ungzip(b3, { to: 'string' })); } catch (e) { console.warn(e); } delete out.qaGz; }
     if (r.dpGz) { try { const b2 = typeof r.dpGz.toUint8Array === 'function' ? r.dpGz.toUint8Array() : r.dpGz; out.drillProgress = JSON.parse(pako.ungzip(b2, { to: 'string' })); } catch (e) { console.warn(e); } delete out.dpGz; }
     return out;
   }
@@ -568,6 +592,7 @@ function mergeSyncStates(L, C) {
     drillProgress: mergeStampedMap(L.drillProgress, C.drillProgress, 30),
     quizOrderPos: mergeStampedMap(L.quizOrderPos, C.quizOrderPos, 365),
     ttsDict: mergeStampedMap(L.ttsDict, C.ttsDict, 365),
+    drillQa: mergeDrillQa(L.drillQa, C.drillQa),
     subscribedDocs: subs, ownedDocs: owned
   };
 }
@@ -577,7 +602,7 @@ function mergeIntoLocal(r) {
   const merged = mergeSyncStates(buildSyncPayload(), r);
   db = merged.db; categories = merged.categories; categoryTree = merged.categoryTree;
   deletedCards = merged.deletedCards; deletedCardsAt = merged.deletedCardsAt; deletedCats = merged.deletedCats;
-  catStamps = merged.catStamps; docStamps = merged.docStamps; structAt = merged.structAt; catSubjects = merged.catSubjects || {}; catSkip = merged.catSkip || {}; studyPlan = merged.studyPlan || null; studyDays = merged.studyDays || {}; drillProgress = merged.drillProgress || {}; quizOrderPos = merged.quizOrderPos || {}; ttsDict = merged.ttsDict || {};
+  catStamps = merged.catStamps; docStamps = merged.docStamps; structAt = merged.structAt; catSubjects = merged.catSubjects || {}; catSkip = merged.catSkip || {}; studyPlan = merged.studyPlan || null; studyDays = merged.studyDays || {}; drillProgress = merged.drillProgress || {}; quizOrderPos = merged.quizOrderPos || {}; ttsDict = merged.ttsDict || {}; drillQa = merged.drillQa || {};
   subscribedDocs = merged.subscribedDocs; ownedDocs = merged.ownedDocs;
   ensureSystemSanity();
   autoMerge(true);
@@ -607,7 +632,7 @@ function syncFingerprint(p) {
   return stableStringify({
     db: dbSorted, categories: [...(p.categories || [])].sort(), categoryTree: p.categoryTree || {},
     deletedCards: [...(p.deletedCards || [])].sort(), deletedCardsAt: p.deletedCardsAt || {}, deletedCats: [...(p.deletedCats || [])].sort(),
-    catStamps: p.catStamps || {}, docStamps: p.docStamps || {}, structAt: p.structAt || 0, catSubjects: p.catSubjects || {}, catSkip: p.catSkip || {}, studyPlan: p.studyPlan || null, studyDays: p.studyDays || {}, drillProgress: p.drillProgress || {}, quizOrderPos: p.quizOrderPos || {}, ttsDict: p.ttsDict || {},
+    catStamps: p.catStamps || {}, docStamps: p.docStamps || {}, structAt: p.structAt || 0, catSubjects: p.catSubjects || {}, catSkip: p.catSkip || {}, studyPlan: p.studyPlan || null, studyDays: p.studyDays || {}, drillProgress: p.drillProgress || {}, quizOrderPos: p.quizOrderPos || {}, ttsDict: p.ttsDict || {}, drillQa: p.drillQa || {},
     subscribedDocs: [...(p.subscribedDocs || [])].sort(), ownedDocs: [...(p.ownedDocs || [])].sort()
   });
 }
@@ -762,7 +787,7 @@ function resolveAccountSwitch() {
     if (!merge) {
       takeSnapshot('アカウント変更（置き換え）');
       db = []; categories = ['未分類']; categoryTree = {}; subscribedDocs = []; ownedDocs = [];
-      deletedCards = []; deletedCardsAt = {}; deletedCats = []; catStamps = {}; docStamps = {}; structAt = 0; catSubjects = {}; catSkip = {}; studyPlan = null; studyDays = {}; drillProgress = {}; quizOrderPos = {}; ttsDict = {};
+      deletedCards = []; deletedCardsAt = {}; deletedCats = []; catStamps = {}; docStamps = {}; structAt = 0; catSubjects = {}; catSkip = {}; studyPlan = null; studyDays = {}; drillProgress = {}; quizOrderPos = {}; ttsDict = {}; drillQa = {};
       sharedDocPermissions = {};
       _structHash = structFingerprint(); writeLocal();
     } else {
