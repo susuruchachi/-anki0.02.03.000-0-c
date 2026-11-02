@@ -40,7 +40,7 @@ function speechLetters(text, kana) {
   });
 }
 function cleanTextForSpeech(text, opts = {}) {
-  return speechLetters(String(text || ''), !!opts.kana)
+  return (opts.noLetters ? String(text || '') : speechLetters(String(text || ''), !!opts.kana))
     .replace(/[\[\]［］]/g, ' ')
     .replace(/\(\s*\)|（\s*）|\(　+\)|（　+）|_{2,}|＿{2,}/g, (m, off, all) => /[\u3040-\u30ff\u4e00-\u9fff]/.test(all.slice(Math.max(0, off - 2), off) + all.slice(off + m.length, off + m.length + 2)) ? '、空欄、' : ' blank ') // ★【0.03.69】日本語の文の空欄は「空欄」と読む
     .replace(/[～〜~]/g, ' ')

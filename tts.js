@@ -19,9 +19,34 @@ function ttsUseAi() {
 }
 // 読み上げる文（いつもの読み上げと同じ整え方）
 function ttsPlainText(text) {
+  return ttsSegments(text).map(s => s.t).join(' ');
+}
+// ★【0.03.80】英語と日本語が混ざった文は、英語の部分と日本語の部分に分けて、それぞれ声を作る
+// （まとめて作ると、日本語の声が英語をカタカナ語のように読んでしまう）。
+// 1文字だけの大文字（A、B）は、日本語の部分としてカタカナの名前（エー、ビー）で読む
+function ttsSegments(text) {
   const div = document.createElement('div');
   div.innerHTML = typeof richTextToSpeech === 'function' ? richTextToSpeech(text) : escapeHtml(String(text || ''));
-  return cleanTextForSpeech(div.textContent || div.innerText || '', { kana: true });
+  const raw = cleanTextForSpeech(div.textContent || div.innerText || '', { noLetters: true });
+  if (!raw) return [];
+  let segs = isEnglishText(raw) ? [{ ja: false, t: raw }] : splitSpeechSegments(raw);
+  segs = segs.map(s => {
+    // 英語の部分が「A」「A, B」のような1文字の大文字だけなら、日本語の部分にする
+    if (!s.ja && /^[\sA-Z.,、・/&+-]*$/.test(s.t) && !/[A-Z]{2}/.test(s.t)) return { ja: true, t: speechLetters(s.t, true) };
+    return s.ja ? { ja: true, t: speechLetters(s.t, true) } : { ja: false, t: s.t };
+  });
+  const out = [];
+  let carry = ''; // 開きかっこだけの部分は、次の部分の頭に付ける
+  segs.forEach(s => {
+    let t = s.t.trim();
+    if (!t || !/[A-Za-z0-9\u3040-\u30ff\u4e00-\u9fff]/.test(t)) { const open = (t.match(/[「『（(【［\[]+$/) || [''])[0]; const rest = t.slice(0, t.length - open.length); if (out.length && rest) out[out.length - 1].t += rest; carry += open; return; }
+    // 英語の部分の終わりに付いた開きかっこも次へ
+    const tail = !s.ja ? (t.match(/[「『（【［]+$/) || [''])[0] : '';
+    if (tail) t = t.slice(0, -tail.length).trim();
+    t = carry + t; carry = tail;
+    if (out.length && out[out.length - 1].ja === s.ja) out[out.length - 1].t += (s.ja ? '' : ' ') + t; else out.push({ ja: s.ja, t });
+  });
+  return out;
 }
 
 // ---------------- 保存（IndexedDB） ----------------
@@ -73,12 +98,11 @@ async function ttsCacheClearAll() {
 // 読み間違えていた文の声を消して、作り直す（次は別のモデルから試す）
 async function ttsForget(texts) {
   const d = await ttsDb();
-  (texts || []).forEach(t => {
-    const plain = ttsPlainText(t); if (!plain) return;
-    const key = TTS_CACHE_VER + TTS_AI_VOICE + '|' + plain;
+  (texts || []).forEach(t => ttsSegments(t).forEach(s => {
+    const key = TTS_CACHE_VER + TTS_AI_VOICE + '|' + s.t;
     _ttsMem.delete(key);
     if (d) { try { d.transaction('a', 'readwrite').objectStore('a').delete(key); } catch (e) {} }
-  });
+  }));
   _ttsRotate = (_ttsRotate + 1) % TTS_AI_MODELS.length;
 }
 let _ttsRotate = 0;
@@ -124,7 +148,7 @@ async function ttsGenerate(plain) {
 }
 // 声を用意する（保存があればそれ。同じ文を同時に頼まない）
 function ttsAudioFor(plain) {
-  const key = TTS_CACHE_VER + TTS_AI_VOICE + '|' + plain; // v2：文字の名前をカタカナにした版（前の版で作った声は使わない）
+  const key = TTS_CACHE_VER + TTS_AI_VOICE + '|' + plain; // plain は部分（英語だけ・日本語だけ）。v2：文字の名前をカタカナにした版（前の版で作った声は使わない）
   if (_ttsPending.has(key)) return _ttsPending.get(key);
   const p = (async () => {
     const hit = await ttsCacheGet(key);
@@ -140,7 +164,7 @@ function ttsAudioFor(plain) {
 // 先に作っておく（次の問題・答えなど）
 function ttsPrefetch(texts) {
   if (!ttsUseAi()) return;
-  (texts || []).forEach(t => { const p = ttsPlainText(t); if (p) ttsAudioFor(p).catch(() => {}); });
+  (texts || []).forEach(t => ttsSegments(t).forEach(s => ttsAudioFor(s.t).catch(() => {})));
 }
 
 // ---------------- 鳴らす ----------------
@@ -161,16 +185,25 @@ function ttsSpeaking() { return !!_ttsSrc || ('speechSynthesis' in window && spe
 
 // AI の声で読む。終わったら（止めたときも）resolve。使えなければ reject（呼ぶ側でいつもの読み上げにする）
 async function ttsSpeakAi(text, opts = {}) {
-  const plain = ttsPlainText(text);
-  if (!plain) return;
+  const segs = ttsSegments(text);
+  if (!segs.length) return;
   ttsStopAll();
   const my = ++_ttsSeq;
   const ctx = ttsContext(); if (!ctx) throw new Error('no audio context');
-  const raw = await ttsAudioFor(plain);
-  if (my !== _ttsSeq) return; // 待っているあいだに止められた・次の読み上げが来た
-  const buf = await ctx.decodeAudioData(raw.slice(0));
-  if (my !== _ttsSeq) return;
-  await new Promise(res => {
+  // 部分ごとの声を一緒に頼んでおき、順に鳴らす
+  const raws = segs.map(s => ttsAudioFor(s.t));
+  raws.forEach(p => p.catch(() => {}));
+  for (let k = 0; k < segs.length; k++) {
+    const raw = await raws[k];
+    if (my !== _ttsSeq) return; // 待っているあいだに止められた・次の読み上げが来た
+    const buf = await ctx.decodeAudioData(raw.slice(0));
+    if (my !== _ttsSeq) return;
+    await ttsPlayBuffer(ctx, buf, opts, my);
+    if (my !== _ttsSeq) return;
+  }
+}
+function ttsPlayBuffer(ctx, buf, opts, my) {
+  return new Promise(res => {
     const src = ctx.createBufferSource(); src.buffer = buf;
     if (opts.rate && opts.rate !== 1) src.playbackRate.value = Math.max(0.5, Math.min(2, opts.rate));
     src.connect(ctx.destination);
