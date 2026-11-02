@@ -226,7 +226,8 @@ function vtCards(parsed, section) {
       const seq = {};
       exprs.forEach(({ e, head, mean, k }) => {
         const x = vtExpr(e, head); if (!x) return;
-        const j = seq[k] = (seq[k] || 0) + 1;
+        // ★【0.03.83】熟語（◆・チャンツ）と例文（▶）は別々に数える（前は一緒に数えていたので、熟語のある語の例文が 1001-2-2 や 1001-0-2 になっていた）
+        const sk = x.type + '|' + k, j = seq[sk] = (seq[sk] || 0) + 1;
         const no = Number.isFinite(base) ? base + k / 100 + j / 10000 : null;
         if (x.type === 'phrase') {
           const key = x.q.toLowerCase(); if (seenPhrase.has(key)) return; seenPhrase.add(key);
