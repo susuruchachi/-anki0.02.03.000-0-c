@@ -15,7 +15,12 @@ const AI_FAMILY_COL = 'susuru_anki_ai_family';
 
 let _aiFamilyKeys = [];   // [{ owner, ownerName, keys: { gemini: [], openrouter: [] } }]
 let _aiFamilyDoc = null;  // 自分が家族に共有している設定 { members: [], share: bool }
-const _aiCooldown = {};   // { key: 再開できる時刻 }（上限に達したキーをしばらく休ませる）
+// { key: 再開できる時刻 }（上限に達したキーをしばらく休ませる）。★【0.03.90】再読み込みしても覚えておく（読み込み直すたびに上限のモデルに頼み直して、Too Many Requests が増えていた）
+const AI_COOL_KEY = 'susuru_anki_ai_cool';
+const _aiCooldown = (() => { try { const o = JSON.parse(localStorage.getItem(AI_COOL_KEY) || '{}') || {}; Object.keys(o).forEach(k => { if (!(o[k] > Date.now())) delete o[k]; }); return o; } catch (e) { return {}; } })();
+function aiSaveCooldown() { try { Object.keys(_aiCooldown).forEach(k => { if (!(_aiCooldown[k] > Date.now())) delete _aiCooldown[k]; }); localStorage.setItem(AI_COOL_KEY, JSON.stringify(_aiCooldown)); } catch (e) {} }
+// Gemini の1日の無料回数は、太平洋時間の0時（日本時間の16〜17時）に戻る
+function aiNextGeminiReset() { const d = new Date(); d.setUTCHours(8, 5, 0, 0); if (d.getTime() <= Date.now()) d.setUTCDate(d.getUTCDate() + 1); return d.getTime(); }
 let _aiLastModel = '', _aiLastAt = 0;
 // ★【0.03.79】答えたモデルの表示：t0 より後に AI が答えていれば（保存していたものを使ったときは出さない）、そのモデル名
 function aiModelSince(t0) { return _aiLastAt >= (t0 || 0) && _aiLastModel ? _aiLastModel : ''; }
@@ -209,6 +214,7 @@ async function aiRequest(system, parts, opts = {}) {
         else if (e.status === 402) { _aiCooldown[key] = Date.now() + 3600e3; orCool(orKeyId(key), 3600e3); }
         else if (e.status === 404 || e.status === 400) { orCool('m|' + model, 86400e3); _orMissing++; if (_orMissing >= 3) { _orMissing = 0; openrouterRefreshList(); } }
         else orCool('m|' + model, e.empty ? 30 * 60e3 : 10 * 60e3); // 混雑・空の答え
+        aiSaveCooldown();
         return null;
       }
       if (e.status === 401 || e.status === 403 || (e.status === 400 && /API_KEY_INVALID|API key not valid/i.test(d))) _aiCooldown[key] = Date.now() + 3600 * 1000; // キーが使えない
@@ -218,10 +224,11 @@ async function aiRequest(system, parts, opts = {}) {
         const perDay = /PerDay|per-day|per day|daily/i.test(d);
         const rd = Number((d.match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/) || [])[1]) || 0;
         if (perDay && /^OpenRouter/.test(label)) _aiCooldown[key] = Date.now() + 3600 * 1000;
-        else _aiCooldown[key + '|' + model] = Date.now() + (perDay ? 3600 * 1000 : Math.min(120, Math.max(5, rd || 60)) * 1000);
+        else _aiCooldown[key + '|' + model] = perDay ? aiNextGeminiReset() : Date.now() + Math.min(300, Math.max(10, rd || 60)) * 1000;
       }
       else if (e.status === 503 || e.status === 500) _aiCooldown[key + '|' + model] = Date.now() + 30 * 1000; // 混んでいる
       else if (e.status === 404 || e.status === 400) _aiCooldown[key + '|' + model] = Date.now() + 3600 * 1000; // そのモデルは使えない
+      aiSaveCooldown();
       return null;
     }
   };
@@ -259,7 +266,9 @@ async function aiRequest(system, parts, opts = {}) {
     const models = (await geminiModels(key)).slice(0, 5);
     models.forEach(m => gem.push({ key, model: m, label: `Gemini ${m}`, run: signal => callGemini(key, m, system, parts, Object.assign({}, opts, { signal })) }));
   }
-  let t = gem.length ? await race(gem, hasFile ? AI_HEDGE_FILE_MS : AI_HEDGE_MS) : null;
+  // ★【0.03.90】裏でする頼みごと（読み仮名・聞き取り）は、ほかのモデルに同時に頼まない（回数を使いすぎないように）
+  const hedge = opts.noHedge ? 1e9 : null;
+  let t = gem.length ? await race(gem, hedge || (hasFile ? AI_HEDGE_FILE_MS : AI_HEDGE_MS)) : null;
   if (t) return t;
   if (!opts.needPdf && Date.now() - started < limit) {
     const or = [];
@@ -269,7 +278,7 @@ async function aiRequest(system, parts, opts = {}) {
       const models = (await openrouterModels(hasFile)).slice(0, 12);
       models.forEach(m => or.push({ key, model: m, label: `OpenRouter ${m.replace(/:free$/, '')}`, run: signal => callOpenRouter(key, m, system, parts, Object.assign({}, opts, { signal })) }));
     }
-    t = or.length ? await race(or, hasFile ? AI_HEDGE_FILE_MS : AI_HEDGE_MS * 2) : null;
+    t = or.length ? await race(or, hedge || (hasFile ? AI_HEDGE_FILE_MS : AI_HEDGE_MS * 2)) : null;
     if (t) return t;
   }
   const orDayOut = keys.openrouter.length && keys.openrouter.every(k => orCooling(orKeyId(k)));

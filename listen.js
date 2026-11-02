@@ -158,8 +158,17 @@ async function listenPrebuild() {
     if (typeof ttsSetShareCard === 'function') ttsSetShareCard(list[i]);
     const texts = listenCardTexts(list[i]).concat(Array.isArray(list[i].choices) && list[i].choices.length >= 2 && !listenIsCloze(list[i]) ? list[i].choices.map((c, k) => `${k + 1}、${c}`) : []);
     for (const t of texts) {
-      try { const r = await ttsBuildText(t); made += r.made; have += r.have; }
-      catch (e) { fail++; if (typeof _ttsQuotaHit !== 'undefined' && _ttsQuotaHit) { _lpb.stop = true; break; } }
+      for (let tryN = 0; tryN < 3 && !_lpb.stop; tryN++) {
+        try { const r = await ttsBuildText(t); made += r.made; have += r.have; break; }
+        catch (e) {
+          if (typeof _ttsQuotaHit !== 'undefined' && _ttsQuotaHit) { fail++; _lpb.stop = true; break; }
+          // ★【0.03.90】1分あたりの上限：使えるようになるまで待ってから続ける（すぐ頼み直さない）
+          const w = typeof ttsNextReadyIn === 'function' ? ttsNextReadyIn() : 0;
+          if (w > 0 && w <= 5 * 60e3) { const el = st(); if (el) el.innerHTML = `⏳ 1分あたりの回数の上限です。${Math.ceil(w / 1000)}秒待ってから続けます…　<button class="chip" onclick="listenPrebuild()">止める</button>`; await new Promise(r => setTimeout(r, w + 1000)); continue; }
+          fail++; break;
+        }
+      }
+      if (_lpb.stop) break;
     }
     const el = st(); if (el) el.innerHTML = `📥 ${i + 1} / ${list.length}枚 ・ 作った声 ${made} ・ 作ってあった声 ${have}${fail ? ` ・ 作れなかった ${fail}` : ''}　<button class="chip" onclick="listenPrebuild()">止める</button>`;
   }

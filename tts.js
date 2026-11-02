@@ -13,7 +13,15 @@ function ttsVoice() { try { const v = localStorage.getItem('susuru_anki_tts_voic
 // まとめて作る（イントネーションが自然・回数が少ない）／英語と日本語を分けて作る（英語の発音がはっきり）
 function ttsModeWhole() { try { return localStorage.getItem('susuru_anki_tts_mode') !== 'split'; } catch (e) { return true; } }
 let _ttsCtx = null, _ttsSrc = null, _ttsSeq = 0, _ttsFailNoticed = false, _ttsLastModel = '', _ttsQuotaHit = false;
-const _ttsCooldown = {}, _ttsPending = new Map(), _ttsMem = new Map();
+const _ttsPending = new Map(), _ttsMem = new Map();
+// ★【0.03.90】休ませているモデルは再読み込みしても覚えておく（Too Many Requests を減らす）
+const TTS_COOL_KEY = 'susuru_anki_tts_cool';
+const _ttsCooldown = (() => { try { const o = JSON.parse(localStorage.getItem(TTS_COOL_KEY) || '{}') || {}; Object.keys(o).forEach(k => { if (!(o[k] > Date.now())) delete o[k]; }); return o; } catch (e) { return {}; } })();
+function ttsSaveCooldown() { try { Object.keys(_ttsCooldown).forEach(k => { if (!(_ttsCooldown[k] > Date.now())) delete _ttsCooldown[k]; }); localStorage.setItem(TTS_COOL_KEY, JSON.stringify(_ttsCooldown)); } catch (e) {} }
+// 今すぐ使えるモデルがあるか（無ければ頼まない）
+// どのモデルも休んでいるとき、いちばん早く使えるまでの時間（ms）。使えるモデルがあれば 0
+function ttsNextReadyIn() { try { const keys = allAiKeys().gemini, now = Date.now(); let best = Infinity; TTS_AI_MODELS.forEach(m => keys.forEach(k => { best = Math.min(best, Math.max(0, (_ttsCooldown[k + '|' + m] || 0) - now)); })); return best === Infinity ? 0 : best; } catch (e) { return 0; } }
+function ttsAnyModelReady() { try { const keys = allAiKeys().gemini; return TTS_AI_MODELS.some(m => keys.some(k => !((_ttsCooldown[k + '|' + m] || 0) > Date.now()))); } catch (e) { return false; } }
 
 // 使うか：iPhone・iPad（audioSession がある Safari）で、「音楽を止める」以外を選んでいて、Gemini のキーがあるとき
 function ttsUseAi() {
@@ -146,9 +154,15 @@ async function ttsGenerate(plain, offset) {
       // ★【0.03.84】「の～」「とは？」のような短い部分を、読む文ではなく指示だと思って断ることがある（400）。読む文だと分かる形で頼み直す
       if (res.status === 400) { const t = await res.text().catch(() => ''); if (/generate text|only be used for TTS/i.test(t)) res = await call(`Say: ${plain}`); else res = { ok: false, status: 400 }; }
       if (!res.ok) {
-        // 回数の上限は1時間、使えないモデルは1日、混雑は30秒休ませる（400 は1時間）
-        _ttsCooldown[ck] = Date.now() + (res.status === 429 ? 3600e3 : res.status === 404 || res.status === 403 ? 86400e3 : res.status === 400 ? 3600e3 : 30e3);
-        if (res.status === 429) _ttsQuotaHit = true;
+        // 1日の上限は次に戻る時刻まで、1分の上限は言われた秒数だけ、使えないモデルは1日、混雑は30秒休ませる（400 は1時間）
+        let wait = res.status === 404 || res.status === 403 ? 86400e3 : res.status === 400 ? 3600e3 : 30e3;
+        if (res.status === 429) {
+          const t = typeof res.text === 'function' ? await res.text().catch(() => '') : '';
+          const rd = Number((t.match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/) || [])[1]) || 0;
+          const perDay = /PerDay|per day|daily/i.test(t) || !t;
+          wait = perDay ? (typeof aiNextGeminiReset === 'function' ? aiNextGeminiReset() - Date.now() : 6 * 3600e3) : Math.min(300, Math.max(15, rd || 60)) * 1000;
+        }
+        _ttsCooldown[ck] = Date.now() + wait; ttsSaveCooldown();
         lastErr = new Error('TTS ' + res.status); continue;
       }
       const j = await res.json();
@@ -159,11 +173,13 @@ async function ttsGenerate(plain, offset) {
       return ttsToWav(inl.data, inl.mimeType);
     } catch (e) { lastErr = e; _ttsCooldown[ck] = Date.now() + 30e3; }
   }
+  // どのモデルも休ませている：1日の上限なら「使い切った」
+  _ttsQuotaHit = ttsNextReadyIn() > 10 * 60e3;
   throw lastErr || new Error('TTS unavailable');
 }
 // 声を用意する（保存があればそれ。同じ文を同時に頼まない）
 // ★【0.03.82】expect：その声で聞こえるはずの読み（ひらがな）。作ったあと裏で聞き取って比べ、違えば消して次は別のモデルで作り直す
-function ttsAudioFor(plain, expect, share) {
+function ttsAudioFor(plain, expect, share, low) {
   const key = TTS_CACHE_VER + ttsVoice() + '|' + plain; // plain は部分（英語だけ・日本語だけ）。v2：文字の名前をカタカナにした版（前の版で作った声は使わない）
   if (_ttsPending.has(key)) return _ttsPending.get(key);
   const p = (async () => {
@@ -173,7 +189,7 @@ function ttsAudioFor(plain, expect, share) {
     if (share) { const got = await ttsCloudGetAudio(plain); if (got) { await ttsCachePut(key, got, { ok: true, shared: true }); return got; } }
     const old = await ttsKvGet(key); // 前に聞き取りで作り直しになったもの（tries）
     const tries = (old && old.tries) || 0;
-    const buf = await ttsGenerate(plain, tries);
+    const buf = await ttsQueue(() => ttsGenerate(plain, tries), !!low);
     const model = _ttsLastModel;
     await ttsCachePut(key, buf, { tries, model });
     if (expect && ttsVerifyOn() && tries < 2) setTimeout(() => ttsVerify(key, buf, expect, tries, model, share ? plain : null).catch(() => {}), 300);
@@ -184,11 +200,25 @@ function ttsAudioFor(plain, expect, share) {
   p.finally(() => _ttsPending.delete(key)).catch(() => {});
   return p;
 }
-// 先に作っておく（次の問題・答えなど）
+// ★【0.03.90】声を作る頼みは1つずつ（同時にいくつも頼むと、1分の上限ですぐ Too Many Requests になっていた）。
+// 読むための頼みを先に、先に作っておく頼み（low）は後に
+const _ttsQ = { hi: [], lo: [], busy: false };
+function ttsQueue(fn, low) {
+  return new Promise((res, rej) => { (low ? _ttsQ.lo : _ttsQ.hi).push({ fn, res, rej }); ttsQueueRun(); });
+}
+async function ttsQueueRun() {
+  if (_ttsQ.busy) return;
+  const job = _ttsQ.hi.shift() || _ttsQ.lo.shift(); if (!job) return;
+  _ttsQ.busy = true;
+  try { job.res(await job.fn()); } catch (e) { job.rej(e); }
+  _ttsQ.busy = false;
+  setTimeout(ttsQueueRun, 400); // 少し間をあける
+}
+// 先に作っておく（次の問題・答えなど）。使えるモデルが無いときや、ほかの頼みが混んでいるときはしない
 function ttsPrefetch(texts) {
-  if (!ttsUseAi()) return;
+  if (!ttsUseAi() || !ttsAnyModelReady() || _ttsQ.hi.length + _ttsQ.lo.length > 2) return;
   const share = _ttsShareCtx;
-  (texts || []).forEach(t => { const segs = ttsSegments(t); ttsSpokenParts(segs, share).then(parts => parts.forEach(x => ttsAudioFor(x.spoken, x.expect, share).catch(() => {}))).catch(() => {}); });
+  (texts || []).forEach(t => { const segs = ttsSegments(t); ttsSpokenParts(segs, share).then(parts => parts.forEach(x => ttsAudioFor(x.spoken, x.expect, share, true).catch(() => {}))).catch(() => {}); });
 }
 
 // ---------------- 鳴らす ----------------
@@ -262,7 +292,7 @@ async function ttsBuildText(text) {
   for (const x of parts) {
     const key = TTS_CACHE_VER + ttsVoice() + '|' + x.spoken;
     if (await ttsCacheGet(key)) { have++; continue; }
-    await ttsAudioFor(x.spoken, x.expect, share); made++;
+    await ttsAudioFor(x.spoken, x.expect, share, true); made++;
   }
   return { made, have };
 }
@@ -354,7 +384,7 @@ async function ttsReadings(texts, share) {
   if (ask.length && ttsReadingOn() && typeof aiRequest === 'function') {
     try {
       const prompt = `次の日本語（単語帳・問題集の文）を、AI の読み上げ用に整える。それぞれ2つを返す。\n- t：読み上げに渡す文。読み間違えやすい漢字（いくつも読み方がある語・難しい読みの語・人名や地名・古文の語）だけをひらがなにし、ふつうの語は漢字のまま。古文・歴史的仮名づかいは今の発音のかなにする（例：思ひ→思い、けふ→きょう、あはれ→あわれ）。句読点・記号・カタカナ語・数字はそのまま。内容は変えない・足さない\n- k：文全体の正しい読みを、すべてひらがなで（文脈に合った読み。例：「一日」は文脈で ついたち／いちにち）。助詞の「は」「へ」はそのまま書く\n入力（JSON配列）：${JSON.stringify(ask)}\nJSONのみ：{"r":[{"t":"…","k":"…"}, ...]}（入力と同じ順番・同じ数）`;
-      const txt = await aiRequest('あなたは日本語の読み仮名をつける係です。指示どおりJSONだけを出力します。', [{ text: prompt }], { json: true, maxTokens: 1200, timeout: 10000, totalTimeout: 12000 });
+      const txt = await aiRequest('あなたは日本語の読み仮名をつける係です。指示どおりJSONだけを出力します。', [{ text: prompt }], { json: true, maxTokens: 1200, timeout: 10000, totalTimeout: 12000, noHedge: true });
       const r = (parseAiJson(txt) || {}).r || [];
       ask.forEach((t, i) => {
         const o = r[i] || {}, k = String(o.k || '').trim(), tt = String(o.t || '').trim() || t;
@@ -389,7 +419,7 @@ async function ttsVerify(key, buf, expect, tries, model, sharePlain) {
   if (String(expect).startsWith('#mix|')) {
     // ★【0.03.89】英語と日本語が混ざった文：聞き取って、読まずに話していたら、その文は次から分けて作る
     const orig = expect.slice(5);
-    const heard = await aiRequest('あなたは音声の書き起こし係です。', [{ text: '音声で話している内容を、聞こえたとおりに書き起こす（英語は英語、日本語は日本語で）。書き起こしだけを出力。' }, { mime: 'audio/wav', data: ttsB64(buf) }], { needPdf: true, maxTokens: 400, timeout: 15000, totalTimeout: 20000 });
+    const heard = await aiRequest('あなたは音声の書き起こし係です。', [{ text: '音声で話している内容を、聞こえたとおりに書き起こす（英語は英語、日本語は日本語で）。書き起こしだけを出力。' }, { mime: 'audio/wav', data: ttsB64(buf) }], { needPdf: true, maxTokens: 400, timeout: 15000, totalTimeout: 20000, noHedge: true });
     const h = String(heard || '');
     const bad = TTS_REFUSAL_RE.test(h) && !TTS_REFUSAL_RE.test(orig);
     if (!bad) { await ttsKvPut(key, { buf, tries, model, ok: true }); if (sharePlain) ttsCloudPutAudio(sharePlain, buf, model); return; }
@@ -398,7 +428,7 @@ async function ttsVerify(key, buf, expect, tries, model, sharePlain) {
     return;
   }
   if (!ttsKana(expect)) return;
-  const txt = await aiRequest('あなたは音声の書き起こし係です。', [{ text: '音声で読み上げている日本語を、聞こえたとおりにすべてひらがなで書き起こす（漢字・カタカナは使わない。句読点は不要）。書き起こしだけを出力。' }, { mime: 'audio/wav', data: ttsB64(buf) }], { needPdf: true, maxTokens: 400, timeout: 15000, totalTimeout: 20000 });
+  const txt = await aiRequest('あなたは音声の書き起こし係です。', [{ text: '音声で読み上げている日本語を、聞こえたとおりにすべてひらがなで書き起こす（漢字・カタカナは使わない。句読点は不要）。書き起こしだけを出力。' }, { mime: 'audio/wav', data: ttsB64(buf) }], { needPdf: true, maxTokens: 400, timeout: 15000, totalTimeout: 20000, noHedge: true });
   const sim = ttsSimilarity(txt, expect);
   if (sim >= 0.8) { await ttsKvPut(key, { buf, tries, model, ok: true }); if (sharePlain) ttsCloudPutAudio(sharePlain, buf, model); return; }
   // 読み間違い：声を消して、作り直す回数を進める（同じ声を保存したままにしない）
