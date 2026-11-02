@@ -328,7 +328,7 @@ function drillSave() {
   }
   const all = drillLoadAll();
   DS.savedAt = Date.now();
-  all[key] = { cat: DS.cat, r: DS.r, gi: DS.gi, rv: DS.rv, gm: DS.gm.map(x => x.id), miss: [...DS.miss.values()].map(drillSer), ct: DS.ct, rec: DS.rec, Q: [dst.ph === 9 ? null : dcur, ...DQ].filter(Boolean).map(drillSer), hg: DS.hdr ? DG.indexOf(DS.hdr) : -1, at: DS.savedAt, dev: DEVICE_ID };
+  all[key] = { cat: DS.cat, r: DS.r, gi: DS.gi, rv: DS.rv, gm: DS.gm.map(x => x.id), miss: [...DS.miss.values()].map(drillSer), ct: DS.ct, rec: DS.rec, hard: DS.hard || {}, Q: [dst.ph === 9 ? null : dcur, ...DQ].filter(Boolean).map(drillSer), hg: DS.hdr ? DG.indexOf(DS.hdr) : -1, at: DS.savedAt, dev: DEVICE_ID };
   drillStoreAll(all);
 }
 function drillResume(cat) { drillBuild(cat && categories.includes(cat) ? cat : ''); drillOfflineGate(() => drillResumeNow(cat)); }
@@ -337,7 +337,7 @@ function drillResumeNow(cat) {
     const d = drillLoadAll()[cat || ''];
     if (!d) return drillHome();
     drillBuild(d.cat && categories.includes(d.cat) ? d.cat : '');
-    DS = { savedAt: d.at || 0, cat: d.cat || '', r: d.r, gi: d.gi, rv: d.rv, miss: new Map(), gm: (d.gm || []).map(i => DI[i]).filter(Boolean), hdr: d.hg >= 0 ? DG[d.hg] : null, ct: d.ct || {}, sp: {}, rec: d.rec || {} };
+    DS = { savedAt: d.at || 0, cat: d.cat || '', r: d.r, gi: d.gi, rv: d.rv, miss: new Map(), gm: (d.gm || []).map(i => DI[i]).filter(Boolean), hdr: d.hg >= 0 ? DG[d.hg] : null, ct: d.ct || {}, sp: {}, rec: d.rec || {}, hard: d.hard || {} };
     (d.miss || []).map(drillDe).filter(Boolean).forEach(x => DS.miss.set(dKey(x), x));
     DQ = (d.Q || []).map(drillDe).filter(Boolean); DH = drillHistLoad(DS.cat); dView = null;
     drillSetActive(true); drillPop();
@@ -368,6 +368,25 @@ function drillRefill() {
   DQ = [{ t: 'intro', g }, ...g.items.map(it => ({ t: 'q', it })), { t: 'gend', g }];
   drillPop();
 }
+// 周回で残った問題のカードを「苦手」（Lv0）・「しっかり」（Lv-1）にする（意味ごとの成績も）。今より良い評価のときだけ下げる
+function drillMarkHard(list, round) {
+  const target = round >= 6 ? -1 : round >= 3 ? 0 : null;
+  if (target === null) return 0;
+  DS.hard = DS.hard || {};
+  let n = 0;
+  list.forEach(x => {
+    const card = x.it ? x.it.card : x.ck ? x.ck.card : null; if (!card) return;
+    const m = db.find(q => q.id === card.id); if (!m) return;
+    if (DS.hard[m.id] !== undefined && DS.hard[m.id] <= target) return; // もうその評価にした
+    const lower = t => { if (!t) return false; if (t.level === -1 && target === 0) return false; if (target === -1) { if (t.level === -1) return false; t.level = -1; t.shikkariStreak = 0; } else { if (t.level <= 0 && !(isGraduated(t))) { if ((t.correct || 0) + (t.incorrect || 0) > 0) return false; } t.level = 0; } t.level5Correct = 0; t.streak = 0; t.incorrect = Math.max(1, t.incorrect || 0); return true; };
+    let ch = lower(m);
+    if (m.senses && typeof m.senses === 'object') Object.values(m.senses).forEach(sn => { if (lower(sn)) ch = true; });
+    DS.hard[m.id] = target;
+    if (ch) { touchStats(m); n++; }
+  });
+  if (n) { try { saveData(); } catch (e) {} }
+  return n;
+}
 function drillEndRound() {
   const L = [...DS.miss.values()].sort((a, b) => dOrd(a) - dOrd(b));
   const A = document.getElementById('drillApp');
@@ -380,6 +399,8 @@ function drillEndRound() {
     return;
   }
   const p = DS.r; DS.r++; DS.miss = new Map();
+  // ★【0.03.92】何周しても間違える問題は、いつもの成績（ランク）にも出す：3周目にも出る問題は「苦手」、5周してもまだ間違える（6周目に出る）問題は「しっかり」
+  const marked = drillMarkHard(L, DS.r);
   // ★【0.03.44】2周目は、グループの切れ目ごとに導入の文（AI があればその文からの4択 → 読む）
   const seq = []; let lastG = -1;
   L.forEach(s => {
@@ -388,7 +409,7 @@ function drillEndRound() {
     lastG = gi;
     seq.push(s.it ? { t: 'q', it: s.it } : { t: 'c', ck: s.ck });
   });
-  DQ = [{ t: 'msg', h: `【${DS.r}周目開始】${p}周目で間違えた${L.length}問の復習に入ります。` }, ...seq];
+  DQ = [{ t: 'msg', h: `【${DS.r}周目開始】${p}周目で間違えた${L.length}問の復習に入ります。${marked ? ` （${DS.r >= 6 ? '5周しても覚えられなかった' : '3周目まで残った'}${marked}問を「${DS.r >= 6 ? '🧱 しっかり' : '⚠️ 苦手'}」にしました）` : ''}` }, ...seq];
   drillPop();
 }
 
