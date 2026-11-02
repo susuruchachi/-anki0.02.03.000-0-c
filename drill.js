@@ -387,7 +387,32 @@ function drillMarkHard(list, round) {
   if (n) { try { saveData(); } catch (e) {} }
   return n;
 }
+// ★【0.03.93】周の終わりに、その周で答えた問題のランクを決める
+//  1周目に一発で正解：得意に入りやすい「普通」（Lv2。もっと上ならそのまま）
+//  1周目はまちがえたが2周目で正解：「普通」（Lv1。得意・卒業だったものも普通にする）
+function drillRateRound(round) {
+  if (round > 2) return 0;
+  const missIds = new Set([...DS.miss.values()].map(x => (x.it ? x.it.card : x.ck.card).id));
+  const ids = Object.keys(DS.rec || {}).filter(k => k.startsWith(round + ':')).map(k => k.slice(String(round).length + 1)).filter(id => !missIds.has(id));
+  let n = 0;
+  const set = (t, lv) => {
+    if (!t) return false;
+    if (round === 1) { if (t.level >= 2 || isGraduated(t)) return false; t.level = 2; t.shikkariStreak = 0; t.wrongStreak = 0; return true; }
+    if (t.level === 1 || (t.level === 2 && !isGraduated(t))) return false;
+    t.level = 1; t.level5Correct = 0; t.shikkariStreak = 0; t.wrongStreak = 0; return true;
+  };
+  ids.forEach(id => {
+    const m = db.find(q => q.id === id); if (!m) return;
+    if (DS.hard && DS.hard[id] !== undefined) return;
+    let ch = set(m);
+    if (m.senses && typeof m.senses === 'object') Object.values(m.senses).forEach(sn => { if (set(sn)) ch = true; });
+    if (ch) { touchStats(m); n++; }
+  });
+  if (n) { try { saveData(); } catch (e) {} }
+  return n;
+}
 function drillEndRound() {
+  drillRateRound(DS.r);
   const L = [...DS.miss.values()].sort((a, b) => dOrd(a) - dOrd(b));
   const A = document.getElementById('drillApp');
   if (!L.length) {
