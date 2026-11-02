@@ -932,6 +932,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
       </select>
       <div class="hint-small" style="margin-top:6px;">iPhone・iPad のいつもの読み上げは、音楽を止めてしまいます。「小さくして」「重ねて」を選ぶと、iPhone・iPad では AI（Gemini）で作った声を、ゲームの効果音と同じしくみで鳴らして、音楽を止めずに読み上げます（設定 → 🤖 AI で Gemini のキーが必要。作った声はこの端末に保存して、同じ文は作り直しません。初めての文は声ができるまで1〜3秒かかります）。キーが無い・回数の上限・オフラインのときは、いつもの読み上げになります。この端末だけの設定です。</div>
       <div id="lblTtsMixNote" class="hint-small" style="margin-top:4px; color:var(--warn);"></div>
+      <button class="btn btn-secondary" style="margin-top:8px;" onclick="ttsCacheClearAll()">🗑️ 保存した AI の声をすべて消す（読み間違いがあったときに）</button>
     </div>
 
     <div class="card">

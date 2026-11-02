@@ -37,16 +37,51 @@ function ttsDb() {
   });
   return _ttsDbP;
 }
+// ★【0.03.77】保存した声は { buf, at }。前の版の声（読み間違いがあったもの）・30日より古い声は消す（そのうち作り直す）
+const TTS_CACHE_VER = 'v2|', TTS_CACHE_DAYS = 30;
 async function ttsCacheGet(key) {
   if (_ttsMem.has(key)) return _ttsMem.get(key);
   const d = await ttsDb(); if (!d) return null;
-  return new Promise(res => { try { const rq = d.transaction('a').objectStore('a').get(key); rq.onsuccess = () => res(rq.result || null); rq.onerror = () => res(null); } catch (e) { res(null); } });
+  const v = await new Promise(res => { try { const rq = d.transaction('a').objectStore('a').get(key); rq.onsuccess = () => res(rq.result || null); rq.onerror = () => res(null); } catch (e) { res(null); } });
+  if (!v) return null;
+  if (v instanceof ArrayBuffer) return null; // 前の版の形
+  if (Date.now() - (v.at || 0) > TTS_CACHE_DAYS * 86400e3) return null;
+  return v.buf || null;
 }
 async function ttsCachePut(key, buf) {
   _ttsMem.set(key, buf); if (_ttsMem.size > 60) _ttsMem.delete(_ttsMem.keys().next().value);
   const d = await ttsDb(); if (!d) return;
-  try { d.transaction('a', 'readwrite').objectStore('a').put(buf, key); } catch (e) {}
+  try { d.transaction('a', 'readwrite').objectStore('a').put({ buf, at: Date.now() }, key); } catch (e) {}
 }
+// 前の版の声・古い声を消す（起動のたびに少しずつ）
+async function ttsCacheCleanup() {
+  const d = await ttsDb(); if (!d) return;
+  try {
+    const st = d.transaction('a', 'readwrite').objectStore('a'), limit = Date.now() - TTS_CACHE_DAYS * 86400e3;
+    const rq = st.openCursor();
+    rq.onsuccess = () => { const c = rq.result; if (!c) return; const v = c.value; if (!String(c.key).startsWith(TTS_CACHE_VER) || v instanceof ArrayBuffer || !v || (v.at || 0) < limit) c.delete(); c.continue(); };
+  } catch (e) {}
+}
+setTimeout(ttsCacheCleanup, 5000);
+// 保存した声をすべて消す（設定のボタン）
+async function ttsCacheClearAll() {
+  _ttsMem.clear();
+  const d = await ttsDb();
+  if (d) { try { d.transaction('a', 'readwrite').objectStore('a').clear(); } catch (e) {} }
+  if (typeof showAppToast === 'function') showAppToast('🗑️ 保存した AI の声を消しました（次に読むときに作り直します）');
+}
+// 読み間違えていた文の声を消して、作り直す（次は別のモデルから試す）
+async function ttsForget(texts) {
+  const d = await ttsDb();
+  (texts || []).forEach(t => {
+    const plain = ttsPlainText(t); if (!plain) return;
+    const key = TTS_CACHE_VER + TTS_AI_VOICE + '|' + plain;
+    _ttsMem.delete(key);
+    if (d) { try { d.transaction('a', 'readwrite').objectStore('a').delete(key); } catch (e) {} }
+  });
+  _ttsRotate = (_ttsRotate + 1) % TTS_AI_MODELS.length;
+}
+let _ttsRotate = 0;
 
 // ---------------- 声を作る ----------------
 // PCM（audio/L16）なら WAV の頭を付けて、どちらも WAV の ArrayBuffer にする
@@ -64,7 +99,8 @@ function ttsToWav(b64, mime) {
 async function ttsGenerate(plain) {
   const keys = allAiKeys().gemini;
   let lastErr = null;
-  for (const model of TTS_AI_MODELS) for (const key of keys) {
+  const models = TTS_AI_MODELS.slice(_ttsRotate).concat(TTS_AI_MODELS.slice(0, _ttsRotate)); // 作り直すときは別のモデルから
+  for (const model of models) for (const key of keys) {
     const ck = key + '|' + model;
     if ((_ttsCooldown[ck] || 0) > Date.now()) continue;
     try {
@@ -88,7 +124,7 @@ async function ttsGenerate(plain) {
 }
 // 声を用意する（保存があればそれ。同じ文を同時に頼まない）
 function ttsAudioFor(plain) {
-  const key = 'v2|' + TTS_AI_VOICE + '|' + plain; // v2：文字の名前をカタカナにした版（前の版で作った声は使わない）
+  const key = TTS_CACHE_VER + TTS_AI_VOICE + '|' + plain; // v2：文字の名前をカタカナにした版（前の版で作った声は使わない）
   if (_ttsPending.has(key)) return _ttsPending.get(key);
   const p = (async () => {
     const hit = await ttsCacheGet(key);

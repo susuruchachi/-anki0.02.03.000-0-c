@@ -29,8 +29,16 @@ function planList() {
 function planUse(p) { CP = p || null; return CP; }
 function planById(id) { return planList().find(p => p.id === id) || null; }
 
+// ★【0.03.77】週の区切り：単語を始める日〜期限が週をまたぐ（水曜開始・火曜期限など）ときは、始める日から1週にする
+// （前は月曜で次の週に進んでいた）。記録のキー（planWeekKey）はその週が始まる日の週の月曜のまま
+function planPos(dow) { return (dow + 6) % 7; } // 月曜=0
+function planWeekOffsetFor(from, due) { const f = planPos(from ?? 2), d = planPos(due ?? 4); return d < f ? f : 0; }
+function planWeekOffset() { return CP ? planWeekOffsetFor(CP.wordsFrom, CP.wordsDue) : 0; }
+function planShift(d, days) { const x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); x.setDate(x.getDate() + days); return x; }
 // その日が何週目か（0 始まり。範囲より前なら負）
-function planWeekIndex(now = new Date()) { return Math.round((planMonday(now) - planParseDate(CP.start)) / (7 * DAY_MS)); }
+function planWeekIndex(now = new Date()) { return Math.round((planMonday(planShift(now, -planWeekOffset())) - planParseDate(CP.start)) / (7 * DAY_MS)); }
+// その週が始まる日（0:00）
+function planWeekBegin(i) { const d = planParseDate(planWeekKey(i)); d.setDate(d.getDate() + planWeekOffset()); return d; }
 function planWeekFolder(i) { const w = CP.weeks; return i >= 0 && i < w.length && categories.includes(w[i]) ? w[i] : null; }
 function planWeekKey(i) { const d = planParseDate(CP.start); d.setDate(d.getDate() + i * 7); return planDateStr(d); }
 function planLog(i) { CP.log = CP.log || {}; return CP.log[planWeekKey(i)] || {}; }
@@ -41,7 +49,7 @@ function planSetLog(i, field, value) {
   saveData();
 }
 // 単語の期限（その週の期限の曜日の 23:59）
-function planWordsDeadline(i) { const d = planParseDate(planWeekKey(i)); d.setDate(d.getDate() + ((CP.wordsDue ?? 4) + 6) % 7); d.setHours(23, 59, 59, 999); return d; }
+function planWordsDeadline(i) { const d = planWeekBegin(i), W = planWeekOffset(); d.setDate(d.getDate() + (planPos(CP.wordsDue ?? 4) - W + 7) % 7); d.setHours(23, 59, 59, 999); return d; }
 
 // 範囲のカード
 function planCards(cat) { if (!cat) return []; const set = new Set(getAllSubcategories(cat)); return db.filter(q => set.has(q.category)); }
@@ -85,10 +93,12 @@ function planTasks(now = new Date()) {
   if (!planOk()) return [];
   const i = planWeekIndex(now), dow = now.getDay();
   const cur = planWeekFolder(i), prev = planWeekFolder(i - 1), month = planWeekFolder(i - 4);
-  const L = planLog(i), weekStart = planParseDate(planWeekKey(i)).getTime();
+  const L = planLog(i), weekStart = planWeekBegin(i).getTime();
   const from = CP.wordsFrom ?? 2, due = CP.wordsDue ?? 4;
   const tasks = [];
-  const dayPos = (dow + 6) % 7, fromPos = (from + 6) % 7, duePos = (due + 6) % 7;
+  // 週の始まりからの日数で比べる（週をまたぐプランでも）
+  const W = planWeekOffset(), rel = x => (planPos(x) - W + 7) % 7;
+  const dayPos = rel(dow), fromPos = rel(from), duePos = rel(due);
   if (cur) {
     const words = planWordCards(cur);
     const deadline = planWordsDeadline(i);
@@ -404,7 +414,9 @@ function saveStudyPlan() {
   const weeks = planUnitFolders(root, unit);
   if (!weeks.length) return alert('フォルダーを選んでください。');
   const idx = Number(document.getElementById('planCurrent').value) || 0;
-  const mon = planMonday(new Date()); mon.setDate(mon.getDate() - idx * 7);
+  // 「今週」はプランの週の区切りで数える（週をまたぐプランは、始める日の前なら先週のまま）
+  const W = planWeekOffsetFor(Number(document.getElementById('planFrom').value), Number(document.getElementById('planDue').value));
+  const mon = planMonday(planShift(new Date(), -W)); mon.setDate(mon.getDate() - idx * 7);
   const m = document.getElementById('planMonthly').value;
   const old = _planEditId && _planEditId !== 'new' ? planById(_planEditId) : null;
   if (!old && planList().some(p => p.root === root) && !confirm(`「${root}」のプランはもうあります。もう1つ登録しますか？`)) return;
@@ -453,7 +465,7 @@ function planSyncNotice() {
     planUse(p);
     const i = planWeekIndex(), cur = planWeekFolder(i);
     if (!cur) return;
-    const from = planParseDate(planWeekKey(i)); from.setDate(from.getDate() + ((CP.wordsFrom ?? 2) + 6) % 7);
+    const from = planWeekBegin(i); from.setDate(from.getDate() + (planPos(CP.wordsFrom ?? 2) - planWeekOffset() + 7) % 7);
     const L = planLog(i), ex = planExampleCards(cur), ch = planChantCards(cur);
     infos.push({ chants: ch.length > 0, chantsDone: !!L.chants, planId: p.id, prevCat: planWeekFolder(i - 1) || '', cat: cur, week: planWeekKey(i), from: from.getTime(), due: planWordsDeadline(i).getTime(), wordsDone: !!L.words,
       examples: ex.length > 0, examplesDone: !!L.examples, sunday: CP.sunday !== 'off' && !!planWeekFolder(i - 1), sundayDone: !!L.sunday, reviewDay: CP.reviewDay ?? 0 });

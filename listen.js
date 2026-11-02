@@ -136,6 +136,14 @@ function listenPause() {
   _ls.playing = false; _ls.token++;
   if (typeof ttsStopAll === 'function') ttsStopAll(); else speechSynthesis.cancel(); listenWakeLock(false); listenDraw();
 }
+// ★【0.03.77】AI の声が読み間違えていたら、そのカードの声を消して作り直す（保存したままにしない）
+function listenRedoVoice() {
+  if (!_ls || typeof ttsForget !== 'function') return;
+  const q = _ls.list[_ls.i]; if (!q) return;
+  ttsForget(listenIsCloze(q) ? listenClozeText(q) : [String(q.question || '').replace(/\n/g, '。'), Array.isArray(q.choices) && q.choices.length >= 2 ? `答え、${getPrimaryAnswer(q.answer)}` : listenAnswerSpeech(q.answer), q.note ? String(q.note).replace(/\n/g, '。') : ''].concat(Array.isArray(q.choices) ? q.choices.map((c, k) => `${k + 1}、${c}`) : []));
+  if (typeof showAppToast === 'function') showAppToast('🔁 このカードの声を作り直します');
+  listenPlay();
+}
 function listenToggle() { if (_ls && _ls.playing) listenPause(); else listenPlay(); }
 function listenSkip(d) {
   if (!_ls) return;
@@ -217,6 +225,7 @@ function listenDraw() {
         <button class="btn btn-primary listen-play" onclick="listenToggle()">${_ls.playing ? '⏸ 一時停止' : '▶️ 再生'}</button>
         <button class="chip" onclick="listenSkip(1)" title="次へ">⏭</button>
       </div>
+      ${typeof ttsUseAi === 'function' && ttsUseAi() ? '<button class="chip" style="margin-top:8px;" onclick="listenRedoVoice()">🔁 読み間違い：このカードの声を作り直す</button>' : ''}
       <button class="btn btn-secondary" style="margin-top:8px;" onclick="listenStop()">⏹ やめる</button>
     </div>`;
 }
