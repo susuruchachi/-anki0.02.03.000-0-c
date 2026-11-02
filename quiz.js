@@ -76,8 +76,25 @@ function spoilerSafeSpeech(text) {
   if (!/[\u3040-\u30ff\u4e00-\u9fff]/.test(t)) return '';
   return t.replace(/[（(][^）)]*[A-Za-z][^）)]*[）)]/g, '').replace(/[A-Za-z\u00c0-\u024f][A-Za-z\u00c0-\u024f\u0300-\u036f'’\-]*(?:[ \t]+[A-Za-z\u00c0-\u024f][A-Za-z\u00c0-\u024f\u0300-\u036f'’\-]*)*/g, 'この語');
 }
+// ★【0.03.74】iPhone・iPad で、読み上げと音楽（Spotify・YouTube など）を同時に流す。
+// Safari の navigator.audioSession（iOS 17 / iPadOS 17 以降）で、音の扱いを「ゲームの効果音」と同じ種類にする。
+//  duck：音楽を少し小さくして読む（transient） / mix：音楽にそのまま重ねる（ambient。マナーモードでは鳴らない） / stop：音楽を止める（前と同じ）
+const TTS_MIX_KEY = 'susuru_anki_tts_mix';
+function ttsMixPref() { try { return localStorage.getItem(TTS_MIX_KEY) || 'duck'; } catch (e) { return 'duck'; } }
+function applyTtsAudioSession() {
+  try { if (navigator.audioSession) navigator.audioSession.type = { duck: 'transient', mix: 'ambient', stop: 'playback' }[ttsMixPref()] || 'transient'; } catch (e) {}
+}
+function setTtsMixPref(v) { try { localStorage.setItem(TTS_MIX_KEY, v); } catch (e) {} applyTtsAudioSession(); renderTtsMixSetting(); }
+function renderTtsMixSetting() {
+  const sel = document.getElementById('selTtsMix'); if (!sel) return;
+  sel.value = ttsMixPref();
+  const note = document.getElementById('lblTtsMixNote');
+  if (note) note.textContent = navigator.audioSession ? '' : '⚠️ このブラウザはこの設定に対応していません（iPhone・iPad の iOS 17 以降の Safari・ホーム画面アプリで使えます。Android は設定しなくても音楽と一緒に流れることが多いです）';
+}
+applyTtsAudioSession();
 function speakText(text, options = {}) {
   if (!('speechSynthesis' in window) || localStorage.getItem('muteTTS') === 'true') return;
+  applyTtsAudioSession();
   window.speechSynthesis.cancel();
   if (!text || text.trim() === "") return;
 

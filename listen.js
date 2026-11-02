@@ -30,6 +30,7 @@ function listenCards() {
 
 // ---------------- 読み上げ（終わるまで待てる） ----------------
 function listenSpeak(text, token) {
+  if (typeof applyTtsAudioSession === 'function') applyTtsAudioSession();
   return new Promise(resolve => {
     if (!('speechSynthesis' in window) || !text || !_ls || _ls.token !== token) return resolve();
     const div = document.createElement('div');

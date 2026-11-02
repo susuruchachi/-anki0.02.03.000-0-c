@@ -923,6 +923,18 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
     </div>
 
     <div class="card">
+      <div class="setting-box-title">🔊 読み上げと音楽</div>
+      <label class="section-label" style="font-weight:500;">Spotify・YouTube などの音楽を流しているとき</label>
+      <select id="selTtsMix" class="form-control" onchange="setTtsMixPref(this.value)">
+        <option value="duck">🎵 音楽を少し小さくして読み上げる（おすすめ）</option>
+        <option value="mix">🎶 音楽にそのまま重ねて読み上げる（マナーモードでは鳴りません）</option>
+        <option value="stop">⏹ 音楽を止めて読み上げる（前と同じ）</option>
+      </select>
+      <div class="hint-small" style="margin-top:6px;">iPhone・iPad で、読み上げのたびに音楽が止まってしまうときに。この端末だけの設定です。</div>
+      <div id="lblTtsMixNote" class="hint-small" style="margin-top:4px; color:var(--warn);"></div>
+    </div>
+
+    <div class="card">
       <div class="setting-box-title">🔗 共有・公開カテゴリーの管理</div>
       <div id="mySharedDocsList" class="hint-small">読み込み中...</div>
       <div class="form-row" style="margin-top:10px;">
