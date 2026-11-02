@@ -519,6 +519,7 @@ function drillSubmit() {
   if (dlock) return;
   const el = document.getElementById('drillInput'); const v = el ? el.value.trim() : ''; if (!v) return;
   if (/^(わから(な|ん)い|分から(な|ん)い|不明|知らない|しらない|パス|pass)$/i.test(v)) return drillDk();
+  (dst.given = dst.given || []).push(v); // ★【0.03.88】自分の答えを結果に出す
   if (dcur.t === 'c') return drillChk(v);
   dst.ans.push(v); return drillJudge(v);
 }
@@ -580,12 +581,13 @@ async function drillExpl(it) {
 }
 function drillDk() {
   if (dlock) return;
+  (dst.given = dst.given || []).push('（わからない）');
   if (dcur.t === 'c') drillFin(false, dcur.ck.ans, '');
   else { dst.tip = '「わからない」のため×です。'; drillFin(false); }
 }
 
 // ---------------- Check!（Review Test） ----------------
-function drillPick(i) { if (dlock) return; drillFin(isAnswerCorrect(dst.op[i], dcur.ck.ans), dcur.ck.ans, ''); }
+function drillPick(i) { if (dlock) return; (dst.given = dst.given || []).push(dst.op[i]); drillFin(isAnswerCorrect(dst.op[i], dcur.ck.ans), dcur.ck.ans, ''); }
 async function drillChk(v) {
   // ★【0.03.51】空白・「、」「,」「／」などで区切って並べた答えは、順番を問わない（日本語は空白も区切り。英語は語句の中の空白は区切りにしない）
   const k = dcur.ck, n = x => x.toLowerCase().replace(/[\s.．。、,，\/／・]/g, '');
@@ -603,6 +605,7 @@ async function drillChk(v) {
 // ---------------- 自動詞・他動詞 ----------------
 function drillAt(n) {
   if (dlock) return;
+  (dst.given = dst.given || []).push('自他：' + ['', '自動詞', '他動詞', '自動詞・他動詞の両方'][n]);
   const a = drillAttr(dcur.it), j = /自動詞/.test(a), t = /他動詞/.test(a), ex = j && t ? 3 : j ? 1 : 2;
   if (n !== ex) { dst.tip = '自動詞・他動詞の属性が違います。'; return drillFin(false); }
   const m = new Map();
@@ -613,6 +616,7 @@ function drillAt(n) {
 function drillAt2(n) {
   if (dlock) return;
   const x = dst.vk[dst.vi];
+  (dst.given = dst.given || []).push(`「${x.t.join('，')}」：${n === 1 ? '自動詞' : '他動詞'}`);
   if (n !== (x.p === '自' ? 1 : 2)) { dst.tip = `「${x.t.join('，')}」の意味のときは${x.p}動詞です。`; return drillFin(false); }
   dst.vi++; dst.vi < dst.vk.length ? drillDraw() : drillQuiz();
 }
@@ -698,7 +702,7 @@ async function drillNq() {
     dst.z = z; dst.op = dShuffle([z.a, ...wrong.slice(0, 3)]); dst.ci = dst.op.indexOf(z.a); dst.ph = 2; drillDraw();
   } catch (e) { dlock = false; dst.qi = 99; drillFin(true); }
 }
-function drillCh(i) { if (dlock) return; i === dst.ci ? (dst.qi++, drillNq()) : drillFin(false, `${dst.z.k}：${dst.z.a}`); }
+function drillCh(i) { if (dlock) return; (dst.given = dst.given || []).push(`${dst.z.k}：${dst.op[i]}`); i === dst.ci ? (dst.qi++, drillNq()) : drillFin(false, `${dst.z.k}：${dst.z.a}`); }
 
 // ---------------- 結果 ----------------
 // 各周の1回目の答えだけ、いつものレベルに反映する
@@ -741,6 +745,7 @@ async function drillFin(ok, ans, tip) {
   if (drillTtsOn()) drillSpeakA();
   const core = `${c.it ? `<div class="drill-word">${dE(c.it.w)}</div>` : `<p class="drill-q">${dE(c.ck.q)}</p>`}
     <p>【判定】 <b class="${ok ? 'drill-ok' : 'drill-ng'}">${ok ? '〇' : '×'}</b>${!ok ? '<span class="hint-small">（あとでもう一度出ます）</span>' : ''}${drillStatsText(c)}</p>
+    ${dst.given && dst.given.length ? `<div class="drill-given">【あなたの答え】 ${dst.given.map(dE).join(' ／ ')}</div>` : ''}
     <div>【公式の答え】 <button class="chip" onclick="drillSpeakA()" title="答えを読み上げる">🔊</button> ${official}</div>
     ${ns.length ? `<p>【解説・注意点】<br>${ns.map(dE).join('<br>')}</p>` : ''}
     ${dst.aiModels && dst.aiModels.length ? `<div>${dst.aiModels.map(aiModelTag).join(' ')}</div>` : ''}`;
