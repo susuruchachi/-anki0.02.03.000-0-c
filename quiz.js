@@ -108,15 +108,15 @@ function speakText(text, options = {}) {
   if (localStorage.getItem('muteTTS') === 'true') return;
   // ★【0.03.75】iPhone・iPad で音楽と一緒に流す設定なら、AI の声で（tts.js）。使えなければいつもの読み上げ
   if (typeof ttsUseAi === 'function' && ttsUseAi() && text && String(text).trim()) {
-    ttsSpeakAi(text, options).catch(() => { if (typeof ttsNoticeFallback === 'function') ttsNoticeFallback(); speakTextNative(text, options); });
+    ttsSpeakAi(text, options).catch(() => { if (typeof ttsNoticeFallback === 'function') ttsNoticeFallback(); speakTextNative(text, Object.assign({}, options, { fallback: true })); });
     return;
   }
   speakTextNative(text, options);
 }
 function speakTextNative(text, options = {}) {
   if (!('speechSynthesis' in window)) return;
-  applyTtsAudioSession();
-  window.speechSynthesis.cancel();
+  if (options.fallback && typeof ttsPrepareNative === 'function') ttsPrepareNative(); // AI の声がだめだったとき：ふつうの再生にしてから
+  else { applyTtsAudioSession(); window.speechSynthesis.cancel(); }
   if (!text || text.trim() === "") return;
 
   const div = document.createElement('div');

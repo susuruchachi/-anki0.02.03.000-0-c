@@ -34,7 +34,7 @@ function listenSpeak(text, token) {
   // ★【0.03.75】iPhone・iPad で音楽と一緒に流す設定なら AI の声で（使えなければいつもの読み上げ）
   if (text && typeof ttsUseAi === 'function' && ttsUseAi()) {
     if (!_ls || _ls.token !== token) return Promise.resolve();
-    return ttsSpeakAi(text, { rate: listenPrefs().rate || 1 }).catch(() => { if (typeof ttsNoticeFallback === 'function') ttsNoticeFallback(); return listenSpeakNative(text, token); });
+    return ttsSpeakAi(text, { rate: listenPrefs().rate || 1 }).catch(() => { if (typeof ttsNoticeFallback === 'function') ttsNoticeFallback(); if (typeof ttsPrepareNative === 'function') ttsPrepareNative(); return listenSpeakNative(text, token); });
   }
   return listenSpeakNative(text, token);
 }
@@ -146,6 +146,24 @@ function listenRedoVoice() {
 }
 function listenCardTexts(q) { return listenIsCloze(q) ? listenClozeText(q) : [String(q.question || '').replace(/\n/g, '。'), Array.isArray(q.choices) && q.choices.length >= 2 ? `答え、${getPrimaryAnswer(q.answer)}` : listenAnswerSpeech(q.answer), q.note && listenPrefs().note ? String(q.note).replace(/\n/g, '。') : ''].filter(Boolean); }
 function listenFixReading() { if (!_ls) return; const q = _ls.list[_ls.i]; if (!q) return; listenPause(); if (typeof ttsOpenFixDialog === 'function') ttsOpenFixDialog(listenCardTexts(q)); }
+// ★【0.03.85】範囲のカードの AI の声を、先に作っておく（1つずつ。無料回数がなくなったら止める）
+let _lpb = null;
+async function listenPrebuild() {
+  if (_lpb) { _lpb.stop = true; return; }
+  const st = () => document.getElementById('listenPrebuildStatus');
+  const list = listenCards(); _lpb = { stop: false };
+  let made = 0, have = 0, fail = 0;
+  for (let i = 0; i < list.length && !_lpb.stop; i++) {
+    const texts = listenCardTexts(list[i]).concat(Array.isArray(list[i].choices) && list[i].choices.length >= 2 && !listenIsCloze(list[i]) ? list[i].choices.map((c, k) => `${k + 1}、${c}`) : []);
+    for (const t of texts) {
+      try { const r = await ttsBuildText(t); made += r.made; have += r.have; }
+      catch (e) { fail++; if (typeof _ttsQuotaHit !== 'undefined' && _ttsQuotaHit) { _lpb.stop = true; break; } }
+    }
+    const el = st(); if (el) el.innerHTML = `📥 ${i + 1} / ${list.length}枚 ・ 作った声 ${made} ・ 作ってあった声 ${have}${fail ? ` ・ 作れなかった ${fail}` : ''}　<button class="chip" onclick="listenPrebuild()">止める</button>`;
+  }
+  const el = st(); if (el) el.innerHTML += typeof _ttsQuotaHit !== 'undefined' && _ttsQuotaHit ? '<br>⚠️ 今日の AI の声の回数を使い切りました。続きは明日また押してください（作った分はとってあります）' : '<br>✅ 終わりました';
+  _lpb = null;
+}
 function listenToggle() { if (_ls && _ls.playing) listenPause(); else listenPlay(); }
 function listenSkip(d) {
   if (!_ls) return;
@@ -207,6 +225,7 @@ function renderListenPage() {
         <label class="toggle-pill"><input type="checkbox" ${p.grad ? 'checked' : ''} onchange="listenSetPref('grad', this.checked)">🎓 卒業済みも読む</label>
       </div>
       <button class="btn btn-start" style="margin-top:12px;" onclick="listenStart()" ${n ? '' : 'disabled'}>▶️ 聞き流しを始める</button>
+      ${typeof ttsUseAi === 'function' && ttsUseAi() && n ? `<button class="btn btn-secondary" style="margin-top:8px;" onclick="listenPrebuild()">📥 この範囲の AI の声を先に作っておく</button><div id="listenPrebuildStatus" class="hint-small" style="margin-top:4px;">AI の声は1日に作れる数が少ないので、回数のある日に先に作っておくと、あとは回数を使わずに音楽と一緒に流せます（作ってある声は1年とっておきます）</div>` : ''}
       <details class="drill-howto"><summary>ℹ️ 読み方</summary><div class="hint-small">・ふつうの問題：問題 →（間）→ 答え（解説ありならメモも）<br>・選択肢つきの問題：問題 → 選択肢 →（間）→ 答えだけ<br>・例文・空欄補充：空欄に答えを入れた文と訳を、そのまま流します<br>・成績は動きません。画面は消えないようにします（端末によっては、画面を消すと止まります）</div></details>
     </div>`;
   const ns = box.querySelectorAll('select')[3]; if (ns) ns.value = p.note ? '1' : '';

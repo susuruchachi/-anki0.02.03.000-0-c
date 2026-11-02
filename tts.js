@@ -63,7 +63,7 @@ function ttsDb() {
   return _ttsDbP;
 }
 // ★【0.03.77】保存した声は { buf, at }。前の版の声（読み間違いがあったもの）・30日より古い声は消す（そのうち作り直す）
-const TTS_CACHE_VER = 'v2|', TTS_CACHE_DAYS = 30;
+const TTS_CACHE_VER = 'v2|', TTS_CACHE_DAYS = 365; // ★【0.03.85】無料回数が少ないので、作った声は1年とっておく（読み間違いは聞き取りや「読み方を直す」で作り直す）
 async function ttsKvGet(key) {
   const d = await ttsDb(); if (!d) return null;
   const v = await new Promise(res => { try { const rq = d.transaction('a').objectStore('a').get(key); rq.onsuccess = () => res(rq.result || null); rq.onerror = () => res(null); } catch (e) { res(null); } });
@@ -191,8 +191,23 @@ function ttsContext() {
   return _ttsCtx;
 }
 // 画面を触ったときに音を出せるようにしておく（iPhone・iPad は、触ったときでないと音を出せない）
-document.addEventListener('touchend', () => { if (ttsUseAi()) ttsContext(); }, { passive: true });
-document.addEventListener('click', () => { if (ttsUseAi()) ttsContext(); });
+// ★【0.03.85】いつもの読み上げも、画面を触ったときに一度鳴らしておく（iPhone・iPad は、触ったときに一度も鳴らしていない読み上げを、
+// あとから鳴らそうとしても無音になる。AI の声がだめで、いつもの読み上げにしたときに何も読まなかった）
+let _ttsSpeechUnlocked = false;
+function ttsUnlockSpeech() {
+  if (_ttsSpeechUnlocked || !('speechSynthesis' in window)) return;
+  _ttsSpeechUnlocked = true;
+  try { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; u.rate = 2; speechSynthesis.speak(u); } catch (e) {}
+}
+const ttsOnGesture = () => { if (ttsUseAi()) { ttsContext(); ttsUnlockSpeech(); } };
+document.addEventListener('touchend', ttsOnGesture, { passive: true });
+document.addEventListener('click', ttsOnGesture);
+// いつもの読み上げに切り替える前に、AI の声の音（Web Audio）を止めて、音の扱いを「ふつうの再生」にする
+function ttsPrepareNative() {
+  try { if (_ttsCtx && _ttsCtx.state === 'running') _ttsCtx.suspend().catch(() => {}); } catch (e) {}
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
+  try { speechSynthesis.cancel(); speechSynthesis.resume(); } catch (e) {}
+}
 
 function ttsStopAi() { _ttsSeq++; if (_ttsSrc) { try { _ttsSrc.onended = null; _ttsSrc.stop(); } catch (e) {} _ttsSrc = null; } }
 // 読み上げを止める（AI の声・いつもの読み上げのどちらも）
@@ -230,16 +245,27 @@ async function ttsSpeakAi(text, opts = {}) {
     if (my !== _ttsSeq) return;
   }
 }
+// ★【0.03.85】鳴らさずに声だけ作る（聞き流しの「先に作っておく」）。{ made: 作った数, have: 作ってあった数 }
+async function ttsBuildText(text) {
+  const parts = await ttsSpokenParts(ttsSegments(text));
+  let made = 0, have = 0;
+  for (const x of parts) {
+    const key = TTS_CACHE_VER + TTS_AI_VOICE + '|' + x.spoken;
+    if (await ttsCacheGet(key)) { have++; continue; }
+    await ttsAudioFor(x.spoken, x.expect); made++;
+  }
+  return { made, have };
+}
 // いつもの読み上げで1つの部分を読み、終わるまで待つ（iPhone・iPad では音楽が止まる）
 function ttsNativeSay(text, ja, opts = {}) {
   return new Promise(res => {
     if (!('speechSynthesis' in window) || !text) return res();
-    try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
+    ttsPrepareNative();
     const u = new SpeechSynthesisUtterance(text);
     const v = typeof getBestVoice === 'function' ? getBestVoice(ja ? 'ja' : 'en') : null;
     if (v) { u.voice = v; u.lang = v.lang; } else u.lang = ja ? 'ja-JP' : 'en-US';
     u.rate = opts.rate || 1;
-    const done = () => { clearTimeout(g); try { if (typeof applyTtsAudioSession === 'function') applyTtsAudioSession(); } catch (e) {} res(); };
+    const done = () => { clearTimeout(g); try { if (typeof applyTtsAudioSession === 'function') applyTtsAudioSession(); if (_ttsCtx) _ttsCtx.resume().catch(() => {}); } catch (e) {} res(); };
     const g = setTimeout(done, text.length * 250 + 4000);
     u.onend = u.onerror = done;
     speechSynthesis.speak(u);
