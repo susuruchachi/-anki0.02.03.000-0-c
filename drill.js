@@ -182,7 +182,9 @@ function drillSplitJoined(n, forms) {
 // ---------------- AI ----------------
 function drillAiOk() { return typeof aiAvailable === 'function' && aiAvailable() && navigator.onLine !== false; }
 async function drillAi(p) {
+  const t0 = Date.now();
   const text = await aiRequest('あなたは英単語・暗記テストの採点と出題の係です。指示どおりに、JSONだけを出力します。', [{ text: p }], { json: true, maxTokens: 700, timeout: 15000, totalTimeout: 30000 });
+  if (dst) { const m = aiModelSince(t0); if (m) dst.aiModels = [...new Set([...(dst.aiModels || []), m])]; } // ★【0.03.79】この問題で答えたモデル
   return parseAiJson(text);
 }
 function drillBusy() { dlock = true; const a = document.getElementById('drillApp'); if (a) a.insertAdjacentHTML('beforeend', '<p class="hint-small drill-busy">🤖 AI処理中…</p>'); }
@@ -739,7 +741,8 @@ async function drillFin(ok, ans, tip) {
   const core = `${c.it ? `<div class="drill-word">${dE(c.it.w)}</div>` : `<p class="drill-q">${dE(c.ck.q)}</p>`}
     <p>【判定】 <b class="${ok ? 'drill-ok' : 'drill-ng'}">${ok ? '〇' : '×'}</b>${!ok ? '<span class="hint-small">（あとでもう一度出ます）</span>' : ''}${drillStatsText(c)}</p>
     <div>【公式の答え】 <button class="chip" onclick="drillSpeakA()" title="答えを読み上げる">🔊</button> ${official}</div>
-    ${ns.length ? `<p>【解説・注意点】<br>${ns.map(dE).join('<br>')}</p>` : ''}`;
+    ${ns.length ? `<p>【解説・注意点】<br>${ns.map(dE).join('<br>')}</p>` : ''}
+    ${dst.aiModels && dst.aiModels.length ? `<div>${dst.aiModels.map(aiModelTag).join(' ')}</div>` : ''}`;
   // ★【0.03.64】解説の履歴（「◀ 前の解説」で見返す。最大100問）
   DH.push({ html: `<div class="card ${ok ? 'drill-ok-card' : 'drill-ng-card'}">${core}</div>`, a: drillAText(c), w: drillQText(c), ok: !!ok, no: c.it && showsCardNo(c.it.card) ? cardNoText(c.it.card.no) : '' });
   if (DH.length > DRILL_HIST_MAX) DH.splice(0, DH.length - DRILL_HIST_MAX);
@@ -775,7 +778,7 @@ function drillQaDelete(i) {
 }
 function drillQaHTML() {
   const list = drillQaList(dcur), n0 = dst.qaStart ?? list.length; // この画面より前の質問はたたむ
-  const one = (x, i) => `<div class="card drill-qa"><div class="hint-small">Q：${dE(x.q)}${x.at ? `　<span style="opacity:.7">${new Date(x.at).toLocaleDateString('ja-JP')}</span>` : ''}<button class="chip" style="float:right; padding:2px 8px;" onclick="drillQaDelete(${i})" title="消す">🗑️</button></div>${dE(x.a).replace(/\n/g, '<br>')}</div>`;
+  const one = (x, i) => `<div class="card drill-qa"><div class="hint-small">Q：${dE(x.q)}${x.at ? `　<span style="opacity:.7">${new Date(x.at).toLocaleDateString('ja-JP')}</span>` : ''}<button class="chip" style="float:right; padding:2px 8px;" onclick="drillQaDelete(${i})" title="消す">🗑️</button></div>${dE(x.a).replace(/\n/g, '<br>')}${x.model ? `<div>${aiModelTag(x.model)}</div>` : ''}</div>`;
   const old = list.slice(0, n0), cur = list.slice(n0);
   return (old.length ? `<details class="card drill-qa-old"${dst.qo ? ' open' : ''}><summary class="hint-small">💬 この${dcur.it ? '単語' : '問題'}の前の質問（${old.length}件）</summary>${old.map((x, i) => one(x, i)).join('')}</details>` : '') +
     cur.map((x, i) => one(x, n0 + i)).join('') +
@@ -794,9 +797,10 @@ async function drillAsk() {
   const hist = dst.qaNew ? [] : drillQaList(c).slice(-6);
   const histText = hist.length ? `\nこれまでのやりとり（この続きとして答える）:\n${hist.map((x, i) => `Q${i + 1}:${x.q}\nA${i + 1}:${String(x.a).slice(0, 400)}`).join('\n')}\n` : '';
   try {
+    const t0 = Date.now();
     const a = await aiRequest('あなたは英単語の家庭教師です。', [{ text: `${ctx}${histText}\n生徒の${hist.length ? '続けての' : ''}質問:${q.trim()}\n簡潔に（200字程度）日本語で答える。` }], { maxTokens: 600, timeout: 20000, totalTimeout: 30000 });
     if (dst.qaStart === undefined) dst.qaStart = drillQaList(c).length;
-    drillQaSave(c, { q: q.trim(), a: cleanAiHintText(String(a).replace(/\*\*|`/g, '')), at: Date.now() });
+    drillQaSave(c, { q: q.trim(), a: cleanAiHintText(String(a).replace(/\*\*|`/g, '')), at: Date.now(), model: aiModelSince(t0) });
     dst.qo = true; dlock = false; drillDraw(); // 続けて質問できるように入力欄は開いたまま
   } catch (e) { drillErr(e); }
 }

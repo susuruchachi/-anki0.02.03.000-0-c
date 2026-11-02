@@ -146,13 +146,14 @@ async function runScanAi() {
   btn.disabled = true;
   try {
     let combined = document.getElementById('txtScanRaw').value;
+    const t0 = Date.now();
     for (let i = 0; i < files.length; i++) {
       const text = await aiReadVocabFile(files[i], msg => { progressEl.innerText = `(${i + 1}/${files.length}) ` + msg; });
       combined += (combined.trim() ? '\n' : '') + text;
     }
     document.getElementById('txtScanRaw').value = combined.trim();
     const sel = document.getElementById('selScanFormat'); if (sel) sel.value = isVocabTextFormat(combined) ? 'text' : 'delimited';
-    progressEl.innerText = '✅ AIで読み取りました。内容を確認して「📑 カード候補を作る」を押してください。';
+    progressEl.innerHTML = '✅ AIで読み取りました。内容を確認して「📑 カード候補を作る」を押してください。 ' + (typeof aiModelTag === 'function' ? aiModelTag(aiModelSince(t0)) : '');
   } catch (e) {
     console.error('AI read error', e);
     progressEl.innerText = '⚠️ ' + e.message;

@@ -16,7 +16,10 @@ const AI_FAMILY_COL = 'susuru_anki_ai_family';
 let _aiFamilyKeys = [];   // [{ owner, ownerName, keys: { gemini: [], openrouter: [] } }]
 let _aiFamilyDoc = null;  // 自分が家族に共有している設定 { members: [], share: bool }
 const _aiCooldown = {};   // { key: 再開できる時刻 }（上限に達したキーをしばらく休ませる）
-let _aiLastModel = '';
+let _aiLastModel = '', _aiLastAt = 0;
+// ★【0.03.79】答えたモデルの表示：t0 より後に AI が答えていれば（保存していたものを使ったときは出さない）、そのモデル名
+function aiModelSince(t0) { return _aiLastAt >= (t0 || 0) && _aiLastModel ? _aiLastModel : ''; }
+function aiModelTag(model) { return model ? `<span class="ai-model">🤖 ${escapeHtml(String(model).replace(/^Gemini /, 'Gemini：').replace(/^OpenRouter /, 'OpenRouter：'))}</span>` : ''; }
 
 function cleanAiKey(k) { return String(k || '').replace(/[\s　 ﻿]/g, ''); }
 function parseKeyList(v) { return [...new Set((Array.isArray(v) ? v : String(v || '').split(/[\n,]+/)).map(cleanAiKey).filter(k => k.length >= 10))]; }
@@ -192,7 +195,7 @@ async function aiRequest(system, parts, opts = {}) {
   const tryOne = async (fn, key, model, label, signal) => {
     try {
       const t = await fn();
-      _aiLastModel = label;
+      _aiLastModel = label; _aiLastAt = Date.now();
       countAiUsage();
       return t;
     } catch (e) {

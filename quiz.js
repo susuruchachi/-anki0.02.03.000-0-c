@@ -1446,6 +1446,7 @@ async function startFocusRetry(cur, info) {
   const kind = info.kind || 'wrong', given = info.given || '';
   let hint = typeof recallAiHint === 'function' ? recallAiHint(cur, kind, given) : null; // 前に同じ状況で出したヒント
   if (!hint && info.hint) { hint = typeof maskAnswerInText === 'function' ? maskAnswerInText(info.hint, cur.answer) : info.hint; rememberAiHint(cur, kind, given, info.hint); }
+  const t0 = Date.now();
   if (!hint && typeof aiAvailable === 'function' && aiAvailable() && navigator.onLine !== false) {
     try { hint = await aiRetryHint(cur, kind, given); if (hint) rememberAiHint(cur, kind, given, hint); } catch (e) { console.warn(e); }
   }
@@ -1457,6 +1458,7 @@ async function startFocusRetry(cur, info) {
   const already = hint && [...hb.querySelectorAll('.hint-focus, .hint-ai')].some(el => el.textContent.replace(/^\S+\s/, '') === hint);
   if (hint && !already) {
     const line = document.createElement('div'); line.className = 'hint-focus'; line.textContent = `🎯 ${hint}`;
+    if (typeof aiModelSince === 'function' && aiModelSince(t0)) line.insertAdjacentHTML('beforeend', ' ' + aiModelTag(aiModelSince(t0)));
     hb.appendChild(line); hb.style.display = 'block';
   } else {
     // AI が使えないときは、いつものヒントを1段階（ヒントをオフにしていても、重点モードでは出す）
@@ -1538,7 +1540,7 @@ function renderAiFeedbackBox(cur, isCorrect, opts) {
   const parts = [];
   if (ai && ai.results && ai.results.length) {
     const reasons = ai.results.map(r => r.reason).filter(Boolean);
-    if (reasons.length) parts.push(`<div>🤖 ${escapeHtml(reasons.join(' ／ '))}</div>`);
+    if (reasons.length) parts.push(`<div>🤖 ${escapeHtml(reasons.join(' ／ '))} ${typeof aiModelTag === 'function' ? aiModelTag(ai.model) : ''}</div>`);
   } else if (ai && ai.error) parts.push(`<div class="ai-muted">🤖 AI の判定は使えませんでした（${escapeHtml(ai.error)}）</div>`);
   if (!isCorrect && ai && ai.tip) { parts.push(`<div>💡 ${escapeHtml(ai.tip)}</div>`); _aiExplainHold = true; }
   // ★【0.03.18】足りない・違うときの手がかり（次に同じ問題で迷ったときにも出す）
@@ -1565,7 +1567,7 @@ async function showAiExplanation() {
     // ★【0.03.18】次に同じ問題で迷ったときのヒントとして覚えておく
     if (r.hint && typeof rememberAiHint === 'function') rememberAiHint(cur, String(given || '').trim() ? 'wrong' : 'blank', given, r.hint);
     if (quizPool[quizIndex] !== cur) return;
-    area.innerHTML = (r.explain ? `<div>🤖 ${escapeHtml(r.explain)}</div>` : '') + (r.tip ? `<div>💡 ${escapeHtml(r.tip)}</div>` : '');
+    area.innerHTML = (r.explain ? `<div>🤖 ${escapeHtml(r.explain)}</div>` : '') + (r.tip ? `<div>💡 ${escapeHtml(r.tip)}</div>` : '') + aiModelTag(r.model);
   } catch (e) { area.innerHTML = `<div class="ai-muted">⚠️ ${escapeHtml(e.message)}</div>`; }
 }
 // 解いている途中の AI ヒント
@@ -1575,11 +1577,13 @@ async function showAiHint() {
   if (btn) { btn.disabled = true; btn.innerText = '🤖 考え中...'; }
   try {
     let h = typeof recallAiHint === 'function' ? recallAiHint(cur, 'hint', '') : null;
+    const t0 = Date.now();
     if (!h) { h = await aiHintFor({ id: (cur._swapped ? 'swap:' : '') + (cur._sourceId || cur.id) + (cur._senseLabel ? ':' + cur._senseLabel : ''), question: cur.question + (cur._senseLabel ? `（${cur._senseLabel}）` : ''), answer: getPrimaryAnswer(cur.answer), note: cur.note }); rememberAiHint(cur, 'hint', '', h); }
     if (quizPool[quizIndex] !== cur || quizPhase !== 'q') return;
     quizHintState.aiUsed = true; // ヒントを見たのでレベルは上がりにくくなる
     const hb = document.getElementById('lblQuizHint');
     const line = document.createElement('div'); line.className = 'hint-ai'; line.textContent = '🤖 ' + h;
+    if (aiModelSince(t0)) line.insertAdjacentHTML('beforeend', ' ' + aiModelTag(aiModelSince(t0)));
     hb.appendChild(line); hb.style.display = 'block';
     if (btn) btn.style.display = 'none';
   } catch (e) {

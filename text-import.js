@@ -380,11 +380,12 @@ async function vtAiRead(files) {
   if (typeof aiAvailable !== 'function' || !aiAvailable()) { st.innerHTML = '<span class="drill-ng">AI のキーが設定されていません（⚙️ 設定 →「🤖 AI」。PDF は Gemini のキー）</span>'; return; }
   const ta = document.getElementById('vtText');
   try {
+    const t0 = Date.now();
     for (let i = 0; i < files.length; i++) {
       const t = await aiReadVocabFile(files[i], msg => { st.textContent = `(${i + 1}/${files.length}) ${msg}`; });
       ta.value = (ta.value.trim() ? ta.value.trim() + '\n\n' : '') + t;
     }
-    st.textContent = '✅ 読み取りました。下の結果を確かめてから保存してください（テキストは直せます。直したら「🔍 読み取る」）';
+    st.innerHTML = '✅ 読み取りました。下の結果を確かめてから保存してください（テキストは直せます。直したら「🔍 読み取る」） ' + aiModelTag(aiModelSince(t0));
     vtPreview();
   } catch (e) { st.innerHTML = `<span class="drill-ng">⚠️ ${dE(e.message || '読み取りに失敗しました')}</span>`; }
 }
