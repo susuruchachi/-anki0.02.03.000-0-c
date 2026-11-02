@@ -172,6 +172,21 @@ service cloud.firestore {
       allow delete: if isAuthenticated() && uid() == ownerId;
     }
 
+    // 🔊 共有・公開カテゴリーの AI の声と読み仮名（文のハッシュが ID。ID を知っている人だけ読める＝一覧は出せない）
+    //  作った人だけが直せる（読み間違いの作り直し）。大きさは 900KB まで
+    match /susuru_anki_tts/{id} {
+      allow get: if isAuthenticated();
+      allow list: if false;
+      allow create: if isAuthenticated() && request.resource.data.by == uid()
+        && request.resource.data.keys().hasOnly(['a', 'r', 'v', 'by', 'at', 'm'])
+        && (!('a' in request.resource.data) || (request.resource.data.a is bytes && request.resource.data.a.size() < 900000))
+        && (!('r' in request.resource.data) || (request.resource.data.r is string && request.resource.data.r.size() < 2000));
+      allow update: if isAuthenticated() && resource.data.by == uid() && request.resource.data.by == uid()
+        && request.resource.data.keys().hasOnly(['a', 'r', 'v', 'by', 'at', 'm'])
+        && (!('a' in request.resource.data) || (request.resource.data.a is bytes && request.resource.data.a.size() < 900000));
+      allow delete: if false;
+    }
+
     // ここに書いていないコレクションは、読み書きできない
   }
 }

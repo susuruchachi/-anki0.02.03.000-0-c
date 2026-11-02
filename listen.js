@@ -79,6 +79,7 @@ function listenClozeText(q) {
   return [filled, ...lines.slice(1)];
 }
 async function listenPlayCard(q, token) {
+  if (typeof ttsSetShareCard === 'function') ttsSetShareCard(q);
   const p = listenPrefs(), gap = (Number(p.gap) || 0) * 1000;
   const say = t => listenSpeak(t, token);
   if (listenIsCloze(q)) { _ls.phase = 'a'; listenDraw(); for (const l of listenClozeText(q)) await say(l); return; }
@@ -154,6 +155,7 @@ async function listenPrebuild() {
   const list = listenCards(); _lpb = { stop: false };
   let made = 0, have = 0, fail = 0;
   for (let i = 0; i < list.length && !_lpb.stop; i++) {
+    if (typeof ttsSetShareCard === 'function') ttsSetShareCard(list[i]);
     const texts = listenCardTexts(list[i]).concat(Array.isArray(list[i].choices) && list[i].choices.length >= 2 && !listenIsCloze(list[i]) ? list[i].choices.map((c, k) => `${k + 1}、${c}`) : []);
     for (const t of texts) {
       try { const r = await ttsBuildText(t); made += r.made; have += r.have; }

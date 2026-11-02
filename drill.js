@@ -359,6 +359,7 @@ function drillPop() {
   if (dcur.t === 'c' && dcur.ck.choices) dst.op = dShuffle(dcur.ck.choices.slice());
   [dcur, ...DQ].filter(x => x.t === 'q').slice(0, 2).forEach(x => drillGetSn(x.it)); // 次の単語の意味のまとめを先に
   drillSave(); drillDraw();
+  if (typeof ttsSetShareCard === 'function') ttsSetShareCard(dcur.it ? dcur.it.card : dcur.ck ? dcur.ck.card : null);
   if (drillTtsOn()) { drillSpeakQ(); if (typeof ttsPrefetch === 'function' && (dcur.it || dcur.ck)) ttsPrefetch([drillAText(dcur)]); }
 }
 function drillRefill() {

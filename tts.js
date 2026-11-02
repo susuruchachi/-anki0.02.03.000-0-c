@@ -159,18 +159,21 @@ async function ttsGenerate(plain, offset) {
 }
 // 声を用意する（保存があればそれ。同じ文を同時に頼まない）
 // ★【0.03.82】expect：その声で聞こえるはずの読み（ひらがな）。作ったあと裏で聞き取って比べ、違えば消して次は別のモデルで作り直す
-function ttsAudioFor(plain, expect) {
+function ttsAudioFor(plain, expect, share) {
   const key = TTS_CACHE_VER + TTS_AI_VOICE + '|' + plain; // plain は部分（英語だけ・日本語だけ）。v2：文字の名前をカタカナにした版（前の版で作った声は使わない）
   if (_ttsPending.has(key)) return _ttsPending.get(key);
   const p = (async () => {
     const hit = await ttsCacheGet(key);
     if (hit) return hit;
+    // ★【0.03.86】共有・公開カテゴリーなら、だれかが作った声を探す
+    if (share) { const got = await ttsCloudGetAudio(plain); if (got) { await ttsCachePut(key, got, { ok: true, shared: true }); return got; } }
     const old = await ttsKvGet(key); // 前に聞き取りで作り直しになったもの（tries）
     const tries = (old && old.tries) || 0;
     const buf = await ttsGenerate(plain, tries);
     const model = _ttsLastModel;
     await ttsCachePut(key, buf, { tries, model });
-    if (expect && ttsVerifyOn() && tries < 2) setTimeout(() => ttsVerify(key, buf, expect, tries, model).catch(() => {}), 300);
+    if (expect && ttsVerifyOn() && tries < 2) setTimeout(() => ttsVerify(key, buf, expect, tries, model, share ? plain : null).catch(() => {}), 300);
+    else if (share) ttsCloudPutAudio(plain, buf, model); // チェックしないときは作ってすぐ共有
     return buf;
   })();
   _ttsPending.set(key, p);
@@ -180,7 +183,8 @@ function ttsAudioFor(plain, expect) {
 // 先に作っておく（次の問題・答えなど）
 function ttsPrefetch(texts) {
   if (!ttsUseAi()) return;
-  (texts || []).forEach(t => { const segs = ttsSegments(t); ttsSpokenParts(segs).then(parts => parts.forEach(x => ttsAudioFor(x.spoken, x.expect).catch(() => {}))).catch(() => {}); });
+  const share = _ttsShareCtx;
+  (texts || []).forEach(t => { const segs = ttsSegments(t); ttsSpokenParts(segs, share).then(parts => parts.forEach(x => ttsAudioFor(x.spoken, x.expect, share).catch(() => {}))).catch(() => {}); });
 }
 
 // ---------------- 鳴らす ----------------
@@ -222,9 +226,10 @@ async function ttsSpeakAi(text, opts = {}) {
   const my = ++_ttsSeq;
   const ctx = ttsContext(); if (!ctx) throw new Error('no audio context');
   // 日本語の部分は読み仮名にしてから（漢字の読み間違いを減らす）、部分ごとの声を一緒に頼んでおき、順に鳴らす
-  const parts = await ttsSpokenParts(segs);
+  const share = _ttsShareCtx;
+  const parts = await ttsSpokenParts(segs, share);
   if (my !== _ttsSeq) return;
-  const raws = parts.map(x => ttsAudioFor(x.spoken, x.expect));
+  const raws = parts.map(x => ttsAudioFor(x.spoken, x.expect, share));
   raws.forEach(p => p.catch(() => {}));
   let played = 0;
   for (let k = 0; k < segs.length; k++) {
@@ -247,12 +252,13 @@ async function ttsSpeakAi(text, opts = {}) {
 }
 // ★【0.03.85】鳴らさずに声だけ作る（聞き流しの「先に作っておく」）。{ made: 作った数, have: 作ってあった数 }
 async function ttsBuildText(text) {
-  const parts = await ttsSpokenParts(ttsSegments(text));
+  const share = _ttsShareCtx;
+  const parts = await ttsSpokenParts(ttsSegments(text), share);
   let made = 0, have = 0;
   for (const x of parts) {
     const key = TTS_CACHE_VER + TTS_AI_VOICE + '|' + x.spoken;
     if (await ttsCacheGet(key)) { have++; continue; }
-    await ttsAudioFor(x.spoken, x.expect); made++;
+    await ttsAudioFor(x.spoken, x.expect, share); made++;
   }
   return { made, have };
 }
@@ -303,12 +309,14 @@ function ttsNeedsReading(t) { return /[一-鿿々〆]/.test(t) || /[ゐゑ]/.tes
 const ttsKana = t => String(t || '').replace(/[ァ-ヶ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x60)).replace(/[^ぁ-ゖー]/g, '').replace(/ー/g, '');
 const ttsReadKey = t => TTS_CACHE_VER + 'r|' + t;
 // 部分ごとに { spoken: 声にする文, expect: 聞こえるはずの読み（ひらがな）}
-async function ttsSpokenParts(segs) {
+async function ttsSpokenParts(segs, share) {
   const out = segs.map(s => ({ seg: s, spoken: s.t, expect: s.ja && !/[一-鿿]/.test(s.t) ? s.t : '' }));
   const need = out.filter(x => x.seg.ja && ttsNeedsReading(x.seg.t));
   if (!need.length) return out;
   // 保存している読み（自分で直したものを含む）
   await Promise.all(need.map(async x => { const v = await ttsKvGet(ttsReadKey(x.seg.t)); if (v && v.kana) { x.spoken = v.kana; x.expect = v.kana; x.have = true; } }));
+  // ★【0.03.86】共有・公開カテゴリーなら、だれかが付けた読みを使う
+  if (share) await Promise.all(need.filter(x => !x.have).map(async x => { const k = await ttsCloudGetReading(x.seg.t); if (k && !/[\u4e00-\u9fff]/.test(k)) { x.spoken = k; x.expect = k; x.have = true; ttsKvPut(ttsReadKey(x.seg.t), { kana: k }); } }));
   const ask = need.filter(x => !x.have);
   if (ask.length && ttsReadingOn() && typeof aiRequest === 'function') {
     try {
@@ -318,7 +326,7 @@ async function ttsSpokenParts(segs) {
       ask.forEach((x, i) => {
         const k = String(r[i] || '').trim();
         // 漢字が残っていない・長さがおかしくないものだけ使う
-        if (k && !/[一-鿿]/.test(k) && k.length <= x.seg.t.length * 5 + 10) { x.spoken = k; x.expect = k; ttsKvPut(ttsReadKey(x.seg.t), { kana: k }); }
+        if (k && !/[一-鿿]/.test(k) && k.length <= x.seg.t.length * 5 + 10) { x.spoken = k; x.expect = k; ttsKvPut(ttsReadKey(x.seg.t), { kana: k }); if (share) ttsCloudPutReading(x.seg.t, k); }
       });
     } catch (e) { /* 読みを付けられなければ、そのまま声にする */ }
   }
@@ -336,11 +344,11 @@ function ttsSimilarity(a, b) {
   return 1 - d[m][n] / Math.max(m, n);
 }
 // 作った声を聞き取って比べる（違えば消して、次は別のモデルで作り直す）
-async function ttsVerify(key, buf, expect, tries, model) {
+async function ttsVerify(key, buf, expect, tries, model, sharePlain) {
   if (typeof aiRequest !== 'function' || !ttsKana(expect)) return;
   const txt = await aiRequest('あなたは音声の書き起こし係です。', [{ text: '音声で読み上げている日本語を、聞こえたとおりにすべてひらがなで書き起こす（漢字・カタカナは使わない。句読点は不要）。書き起こしだけを出力。' }, { mime: 'audio/wav', data: ttsB64(buf) }], { needPdf: true, maxTokens: 400, timeout: 15000, totalTimeout: 20000 });
   const sim = ttsSimilarity(txt, expect);
-  if (sim >= 0.8) { await ttsKvPut(key, { buf, tries, model, ok: true }); return; }
+  if (sim >= 0.8) { await ttsKvPut(key, { buf, tries, model, ok: true }); if (sharePlain) ttsCloudPutAudio(sharePlain, buf, model); return; }
   // 読み間違い：声を消して、作り直す回数を進める（同じ声を保存したままにしない）
   _ttsMem.delete(key);
   await ttsKvPut(key, { buf: null, tries: tries + 1, model, bad: String(txt).slice(0, 200) });
@@ -404,4 +412,70 @@ function ttsDictRemove(k) {
   ttsDict[k] = { deleted: true, at: Date.now() };
   try { saveData(); } catch (e) {}
   if (_ttsFix) ttsOpenFixDialog(_ttsFix.texts);
+}
+
+// ================================================================
+// ★【0.03.86】共有・公開カテゴリーの声は、使っている人みんなで分け合う（Firestore の susuru_anki_tts）
+//  ・その文の声・読み仮名を、まず共有の場所から探す。だれかが作っていれば、AI の回数を使わない
+//  ・自分が作った声は、読み間違いのチェックに通ってから（チェックがオフなら作ってすぐ）共有の場所に置く
+//  ・声は 16kHz・8bit（μ-law）に縮めて置く（元の約3分の1）。自分だけのカードの声は置かない
+// ================================================================
+let _ttsShareCtx = false;
+// 今読むカードが共有・公開カテゴリーのものか（クイズ・暗記テスト・聞き流しから呼ぶ）
+function ttsSetShareCard(card) {
+  let c = card; if (c && !c.sharedDocId && (c._sourceId || c.id)) c = db.find(q => q.id === (c._sourceId || c.id)) || c;
+  _ttsShareCtx = !!(c && c.sharedDocId);
+}
+function ttsShareReady() { return typeof currentUser !== 'undefined' && currentUser && typeof firestore !== 'undefined' && navigator.onLine !== false; }
+async function ttsCloudId(s) {
+  try { const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)); return [...new Uint8Array(h)].slice(0, 20).map(b => b.toString(16).padStart(2, '0')).join(''); }
+  catch (e) { return null; }
+}
+const ttsCloudRef = id => firestore.collection('susuru_anki_tts').doc(id);
+// WAV（16bit）→ 16kHz・μ-law（8bit）
+function ttsPackUlaw(wav) {
+  const v = new DataView(wav); const rate = v.getUint32(24, true) || 24000;
+  const pcm = new Int16Array(wav.slice(44)), outRate = 16000, n = Math.floor(pcm.length * outRate / rate), out = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    const x = pcm[Math.min(pcm.length - 1, Math.floor(i * rate / outRate))];
+    let s = Math.max(-32635, Math.min(32635, x)); const sign = s < 0 ? 0x80 : 0; if (s < 0) s = -s; s += 132;
+    let exp = 7; for (let m = 0x4000; (s & m) === 0 && exp > 0; m >>= 1) exp--;
+    out[i] = ~(sign | (exp << 4) | ((s >> (exp + 3)) & 0x0f)) & 0xff;
+  }
+  return out;
+}
+// μ-law → WAV（16kHz・16bit）
+function ttsUnpackUlaw(u8) {
+  const n = u8.length, pcm = new Int16Array(n);
+  for (let i = 0; i < n; i++) { const u = ~u8[i] & 0xff, sign = u & 0x80, exp = (u >> 4) & 7, man = u & 0x0f; let s = ((man << 3) + 132) << exp; s -= 132; pcm[i] = sign ? -s : s; }
+  const bytes = new Uint8Array(pcm.buffer), h = new ArrayBuffer(44), v = new DataView(h), w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  w(0, 'RIFF'); v.setUint32(4, 36 + bytes.length, true); w(8, 'WAVE'); w(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, 16000, true); v.setUint32(28, 32000, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, bytes.length, true);
+  const out = new Uint8Array(44 + bytes.length); out.set(new Uint8Array(h), 0); out.set(bytes, 44); return out.buffer;
+}
+async function ttsCloudGetAudio(plain) {
+  if (!ttsShareReady()) return null;
+  const id = await ttsCloudId('a|' + TTS_CACHE_VER + TTS_AI_VOICE + '|' + plain); if (!id) return null;
+  try {
+    const s = await ttsCloudRef(id).get(); if (!s.exists) return null;
+    const a = (s.data() || {}).a; if (!a) return null;
+    const u8 = typeof a.toUint8Array === 'function' ? a.toUint8Array() : new Uint8Array(a);
+    return ttsUnpackUlaw(u8);
+  } catch (e) { return null; }
+}
+async function ttsCloudPutAudio(plain, wav, model) {
+  if (!ttsShareReady() || !firebase.firestore.Blob) return;
+  const id = await ttsCloudId('a|' + TTS_CACHE_VER + TTS_AI_VOICE + '|' + plain); if (!id) return;
+  try { const u8 = ttsPackUlaw(wav); if (u8.length > 880000) return; await ttsCloudRef(id).set({ a: firebase.firestore.Blob.fromUint8Array(u8), v: TTS_AI_VOICE, m: model || '', by: currentUser.uid, at: Date.now() }); }
+  catch (e) { /* ほかの人が先に置いていた・ルールがまだ、など */ }
+}
+async function ttsCloudGetReading(text) {
+  if (!ttsShareReady()) return null;
+  const id = await ttsCloudId('r|' + text); if (!id) return null;
+  try { const s = await ttsCloudRef(id).get(); return s.exists ? ((s.data() || {}).r || null) : null; } catch (e) { return null; }
+}
+async function ttsCloudPutReading(text, kana) {
+  if (!ttsShareReady()) return;
+  const id = await ttsCloudId('r|' + text); if (!id) return;
+  try { await ttsCloudRef(id).set({ r: String(kana).slice(0, 1900), by: currentUser.uid, at: Date.now() }); } catch (e) {}
 }

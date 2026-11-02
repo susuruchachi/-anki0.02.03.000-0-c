@@ -676,6 +676,7 @@ function loadQuizQuestion() {
   currentNoteCardId = cur._sourceId || cur.id;
   const noteHint = document.getElementById('lblNoteTyping'); if (noteHint) noteHint.style.display = 'none';
 
+  if (typeof ttsSetShareCard === 'function') ttsSetShareCard(cur); // ★【0.03.86】共有・公開カテゴリーの声は分け合う
   if(document.getElementById('chkTTS').checked) {
     speakText(spoilerSafeSpeech(qSpeech));
     // ★【0.03.75】AI の声のときは、答えと次の問題の声を先に作っておく
