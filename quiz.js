@@ -26,7 +26,9 @@ function getBestVoice(langPrefix) {
 // ★【0.03.66】1文字だけの大文字（be worth A の A など）は、端末によって「capital A」と読まれるので、文字の名前で読ませる。
 // 文の始めの冠詞の A（A man came.）は小文字に、I（私）はそのまま
 const SPEECH_LETTER_NAMES = { A: 'ay', B: 'bee', C: 'see', D: 'dee', E: 'ee', F: 'eff', G: 'gee', H: 'aitch', J: 'jay', K: 'kay', L: 'el', M: 'em', N: 'en', O: 'oh', P: 'pee', Q: 'cue', R: 'ar', S: 'ess', T: 'tee', U: 'you', V: 'vee', W: 'double you', X: 'ex', Y: 'why', Z: 'zee' };
-function speechLetters(text) {
+// ★【0.03.76】AI の声（tts.js）には、カタカナの文字の名前で渡す（「ay」と渡すと「えーあい」と読まれた）
+const SPEECH_LETTER_KANA = { A: 'エー', B: 'ビー', C: 'シー', D: 'ディー', E: 'イー', F: 'エフ', G: 'ジー', H: 'エイチ', J: 'ジェー', K: 'ケー', L: 'エル', M: 'エム', N: 'エヌ', O: 'オー', P: 'ピー', Q: 'キュー', R: 'アール', S: 'エス', T: 'ティー', U: 'ユー', V: 'ブイ', W: 'ダブリュー', X: 'エックス', Y: 'ワイ', Z: 'ゼット' };
+function speechLetters(text, kana) {
   return String(text || '').replace(/(^|[^A-Za-z0-9.])([A-Z])(?![A-Za-z0-9]|\.[A-Za-z])/g, (m, pre, L, off, all) => {
     if (L === 'I') return m;
     if (L === 'A') {
@@ -34,11 +36,11 @@ function speechLetters(text) {
       // 文の始めで、すぐ後ろに小文字の単語が続くなら冠詞
       if (/(^|[.!?。！？「『"“]\s*)$/.test(before.replace(/\s+$/, '')) && /^\s+[a-z]/.test(after) && !/^\s+(or|and|to|with|of|in|on|at|for|from|as|than|by|into|is|are|was|were|and|nor)\b/.test(after)) return pre + 'a';
     }
-    return pre + SPEECH_LETTER_NAMES[L];
+    return pre + (kana ? SPEECH_LETTER_KANA[L] : SPEECH_LETTER_NAMES[L]);
   });
 }
-function cleanTextForSpeech(text) {
-  return speechLetters(String(text || ''))
+function cleanTextForSpeech(text, opts = {}) {
+  return speechLetters(String(text || ''), !!opts.kana)
     .replace(/[\[\]［］]/g, ' ')
     .replace(/\(\s*\)|（\s*）|\(　+\)|（　+）|_{2,}|＿{2,}/g, (m, off, all) => /[\u3040-\u30ff\u4e00-\u9fff]/.test(all.slice(Math.max(0, off - 2), off) + all.slice(off + m.length, off + m.length + 2)) ? '、空欄、' : ' blank ') // ★【0.03.69】日本語の文の空欄は「空欄」と読む
     .replace(/[～〜~]/g, ' ')

@@ -5,7 +5,8 @@
 // transient / ambient にすると、音楽を止めずに鳴る）。作った声はこの端末に保存して、同じ文は二度と作らない。
 // 使えないとき（AI のキーが無い・回数の上限・オフライン）は、いつもの読み上げにする。
 // ================================================================
-const TTS_AI_MODELS = ['gemini-3.8-flash-lite-tts', 'gemini-3.8-flash-tts', 'gemini-3.1-flash-tts-preview', 'gemini-2.5-flash-preview-tts'];
+// ★【0.03.76】読み間違いの少ない順（軽いモデルは後ろ）
+const TTS_AI_MODELS = ['gemini-3.8-flash-tts', 'gemini-3.1-flash-tts-preview', 'gemini-2.5-flash-preview-tts', 'gemini-3.8-flash-lite-tts'];
 const TTS_AI_VOICE = 'Kore';
 let _ttsCtx = null, _ttsSrc = null, _ttsSeq = 0, _ttsFailNoticed = false;
 const _ttsCooldown = {}, _ttsPending = new Map(), _ttsMem = new Map();
@@ -20,7 +21,7 @@ function ttsUseAi() {
 function ttsPlainText(text) {
   const div = document.createElement('div');
   div.innerHTML = typeof richTextToSpeech === 'function' ? richTextToSpeech(text) : escapeHtml(String(text || ''));
-  return cleanTextForSpeech(div.textContent || div.innerText || '');
+  return cleanTextForSpeech(div.textContent || div.innerText || '', { kana: true });
 }
 
 // ---------------- 保存（IndexedDB） ----------------
@@ -87,7 +88,7 @@ async function ttsGenerate(plain) {
 }
 // 声を用意する（保存があればそれ。同じ文を同時に頼まない）
 function ttsAudioFor(plain) {
-  const key = TTS_AI_VOICE + '|' + plain;
+  const key = 'v2|' + TTS_AI_VOICE + '|' + plain; // v2：文字の名前をカタカナにした版（前の版で作った声は使わない）
   if (_ttsPending.has(key)) return _ttsPending.get(key);
   const p = (async () => {
     const hit = await ttsCacheGet(key);
