@@ -933,6 +933,10 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
       </select>
       <div class="hint-small" style="margin-top:6px;">iPhone・iPad のいつもの読み上げは、音楽を止めてしまいます。「小さくして」「重ねて」を選ぶと、iPhone・iPad では AI（Gemini）で作った声を、ゲームの効果音と同じしくみで鳴らして、音楽を止めずに読み上げます（設定 → 🤖 AI で Gemini のキーが必要。作った声はこの端末に保存して、同じ文は作り直しません。初めての文は声ができるまで1〜3秒かかります）。キーが無い・回数の上限・オフラインのときは、いつもの読み上げになります。この端末だけの設定です。</div>
       <div id="lblTtsMixNote" class="hint-small" style="margin-top:4px; color:var(--warn);"></div>
+      <div class="form-row" style="margin-top:8px;">
+        <div style="flex:1;"><label class="section-label" style="font-weight:500;">AI の声の種類</label><select id="selTtsVoice" class="form-control" onchange="try{localStorage.setItem('susuru_anki_tts_voice', this.value)}catch(e){}"></select></div>
+        <div style="flex:1;"><label class="section-label" style="font-weight:500;">英語と日本語が混ざった文</label><select id="selTtsMode" class="form-control" onchange="try{localStorage.setItem('susuru_anki_tts_mode', this.value)}catch(e){}"><option value="whole">まとめて読む（抑揚が自然・おすすめ）</option><option value="split">分けて読む（英語の発音がはっきり）</option></select></div>
+      </div>
       <label class="toggle-pill" style="margin-top:8px;"><input type="checkbox" id="chkTtsReading" onchange="ttsSetPref(TTS_READ_PREF, this.checked)">📖 AI の声の前に読み仮名を付ける（漢字の読み間違いを減らす）</label>
       <label class="toggle-pill" style="margin-top:6px;"><input type="checkbox" id="chkTtsVerify" onchange="ttsSetPref(TTS_VERIFY_PREF, this.checked)">🔍 AI の声を聞き取って読み間違いを見つけたら作り直す</label>
       <div class="hint-small" style="margin-top:4px;">どちらも新しい文の声を作るときに AI の回数を1回ずつ多く使います（作った読みと声は保存するので、同じ文では使いません）。読み間違いは、問題の答えのあとや聞き流しの「🗣️ 読み方を直す」でも直せます。</div>

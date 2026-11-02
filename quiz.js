@@ -97,6 +97,8 @@ function applyTtsAudioSession() {
 function setTtsMixPref(v) { try { localStorage.setItem(TTS_MIX_KEY, v); } catch (e) {} applyTtsAudioSession(); renderTtsMixSetting(); }
 function renderTtsMixSetting() {
   const r = document.getElementById('chkTtsReading'); if (r && typeof ttsReadingOn === 'function') r.checked = ttsReadingOn();
+  const vs = document.getElementById('selTtsVoice'); if (vs && typeof TTS_VOICES !== 'undefined') { vs.innerHTML = TTS_VOICES.map(([v, l]) => `<option value="${v}">${l}（${v}）</option>`).join(''); vs.value = ttsVoice(); }
+  const ms = document.getElementById('selTtsMode'); if (ms && typeof ttsModeWhole === 'function') ms.value = ttsModeWhole() ? 'whole' : 'split';
   const v = document.getElementById('chkTtsVerify'); if (v && typeof ttsVerifyOn === 'function') v.checked = ttsVerifyOn();
   const sel = document.getElementById('selTtsMix'); if (!sel) return;
   sel.value = ttsMixPref();
