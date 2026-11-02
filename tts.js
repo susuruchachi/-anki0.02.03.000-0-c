@@ -8,7 +8,7 @@
 // ★【0.03.76】読み間違いの少ない順（軽いモデルは後ろ）
 const TTS_AI_MODELS = ['gemini-3.8-flash-tts', 'gemini-3.1-flash-tts-preview', 'gemini-2.5-flash-preview-tts', 'gemini-3.8-flash-lite-tts'];
 const TTS_AI_VOICE = 'Kore';
-let _ttsCtx = null, _ttsSrc = null, _ttsSeq = 0, _ttsFailNoticed = false, _ttsLastModel = '';
+let _ttsCtx = null, _ttsSrc = null, _ttsSeq = 0, _ttsFailNoticed = false, _ttsLastModel = '', _ttsQuotaHit = false;
 const _ttsCooldown = {}, _ttsPending = new Map(), _ttsMem = new Map();
 
 // 使うか：iPhone・iPad（audioSession がある Safari）で、「音楽を止める」以外を選んでいて、Gemini のキーがあるとき
@@ -134,13 +134,17 @@ async function ttsGenerate(plain, offset) {
     const ck = key + '|' + model;
     if ((_ttsCooldown[ck] || 0) > Date.now()) continue;
     try {
-      const res = await fetchWithTimeout(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`, {
+      const call = text => fetchWithTimeout(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [{ text: plain }] }], generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: TTS_AI_VOICE } } } } })
+        body: JSON.stringify({ contents: [{ parts: [{ text }] }], generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: TTS_AI_VOICE } } } } })
       }, 20000);
+      let res = await call(plain);
+      // ★【0.03.84】「の～」「とは？」のような短い部分を、読む文ではなく指示だと思って断ることがある（400）。読む文だと分かる形で頼み直す
+      if (res.status === 400) { const t = await res.text().catch(() => ''); if (/generate text|only be used for TTS/i.test(t)) res = await call(`Say: ${plain}`); else res = { ok: false, status: 400 }; }
       if (!res.ok) {
-        // 回数の上限は1時間、使えないモデルは1日、混雑は30秒休ませる
-        _ttsCooldown[ck] = Date.now() + (res.status === 429 ? 3600e3 : res.status === 404 || res.status === 400 || res.status === 403 ? 86400e3 : 30e3);
+        // 回数の上限は1時間、使えないモデルは1日、混雑は30秒休ませる（400 は1時間）
+        _ttsCooldown[ck] = Date.now() + (res.status === 429 ? 3600e3 : res.status === 404 || res.status === 403 ? 86400e3 : res.status === 400 ? 3600e3 : 30e3);
+        if (res.status === 429) _ttsQuotaHit = true;
         lastErr = new Error('TTS ' + res.status); continue;
       }
       const j = await res.json();
@@ -166,7 +170,7 @@ function ttsAudioFor(plain, expect) {
     const buf = await ttsGenerate(plain, tries);
     const model = _ttsLastModel;
     await ttsCachePut(key, buf, { tries, model });
-    if (expect && ttsVerifyOn() && tries < 3) setTimeout(() => ttsVerify(key, buf, expect, tries, model).catch(() => {}), 300);
+    if (expect && ttsVerifyOn() && tries < 2) setTimeout(() => ttsVerify(key, buf, expect, tries, model).catch(() => {}), 300);
     return buf;
   })();
   _ttsPending.set(key, p);
@@ -207,14 +211,39 @@ async function ttsSpeakAi(text, opts = {}) {
   if (my !== _ttsSeq) return;
   const raws = parts.map(x => ttsAudioFor(x.spoken, x.expect));
   raws.forEach(p => p.catch(() => {}));
+  let played = 0;
   for (let k = 0; k < segs.length; k++) {
-    const raw = await raws[k];
-    if (my !== _ttsSeq) return; // 待っているあいだに止められた・次の読み上げが来た
-    const buf = await ctx.decodeAudioData(raw.slice(0));
+    let buf = null;
+    try { const raw = await raws[k]; if (my !== _ttsSeq) return; buf = await ctx.decodeAudioData(raw.slice(0)); }
+    catch (e) {
+      if (my !== _ttsSeq) return;
+      // ★【0.03.84】この部分の声を作れなかった（回数の上限など）：この部分だけいつもの読み上げで読んで、続ける（前は日本語の部分が読まれないことがあった）
+      if (!played && k === segs.length - 1) throw e; // 1つも作れなかったときは、呼ぶ側でまとめていつもの読み上げに
+      ttsNoticeFallback();
+      await ttsNativeSay(parts[k].seg.t, parts[k].seg.ja, opts);
+      if (my !== _ttsSeq) return;
+      continue;
+    }
     if (my !== _ttsSeq) return;
     await ttsPlayBuffer(ctx, buf, opts, my);
+    played++;
     if (my !== _ttsSeq) return;
   }
+}
+// いつもの読み上げで1つの部分を読み、終わるまで待つ（iPhone・iPad では音楽が止まる）
+function ttsNativeSay(text, ja, opts = {}) {
+  return new Promise(res => {
+    if (!('speechSynthesis' in window) || !text) return res();
+    try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
+    const u = new SpeechSynthesisUtterance(text);
+    const v = typeof getBestVoice === 'function' ? getBestVoice(ja ? 'ja' : 'en') : null;
+    if (v) { u.voice = v; u.lang = v.lang; } else u.lang = ja ? 'ja-JP' : 'en-US';
+    u.rate = opts.rate || 1;
+    const done = () => { clearTimeout(g); try { if (typeof applyTtsAudioSession === 'function') applyTtsAudioSession(); } catch (e) {} res(); };
+    const g = setTimeout(done, text.length * 250 + 4000);
+    u.onend = u.onerror = done;
+    speechSynthesis.speak(u);
+  });
 }
 function ttsPlayBuffer(ctx, buf, opts, my) {
   return new Promise(res => {
@@ -229,7 +258,7 @@ function ttsPlayBuffer(ctx, buf, opts, my) {
 }
 function ttsNoticeFallback() {
   if (_ttsFailNoticed) return; _ttsFailNoticed = true;
-  if (typeof showAppToast === 'function') showAppToast('🔊 AI の声が使えなかったので、いつもの読み上げにしました（音楽は止まります）');
+  if (typeof showAppToast === 'function') showAppToast(_ttsQuotaHit ? '🔊 AI の声の無料回数（1日・モデルごと）を使い切ったので、新しい文はいつもの読み上げにします（音楽は止まります。作ってある声はそのまま使えます）' : '🔊 AI の声が使えなかったので、いつもの読み上げにしました（音楽は止まります）');
 }
 
 
@@ -273,7 +302,8 @@ async function ttsSpokenParts(segs) {
 function ttsB64(buf) { const b = new Uint8Array(buf); let s = ''; for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(s); }
 function ttsSimilarity(a, b) {
   a = ttsKana(a); b = ttsKana(b);
-  if (!a || !b) return 1;
+  if (!b) return 1; // 比べる読みが無い
+  if (!a) return 0; // 何も聞こえない（声が出ていない）
   const m = a.length, n = b.length, d = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]);
   for (let j = 1; j <= n; j++) d[0][j] = j;
   for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));

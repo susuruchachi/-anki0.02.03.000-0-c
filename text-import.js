@@ -345,10 +345,34 @@ function vtSave(parsed, parentCat, section) {
     if (info.shared && info.canEdit) card.sharedDocId = info.docId;
     touchCard(card); db.push(card); added++;
   });
+  // ★【0.03.84】前の版の置き場所に残っている同じカード（熟語がグループのフォルダーにも残っている、など）は、
+  // 成績を今の置き場所のカードにまとめてから消す（番号がずれた古いカードが並んで、順番が合わなくなっていた）
+  let removed = 0;
+  const secSet = new Set(getAllSubcategories(sec)), drop = new Set();
+  const placed = new Set(cards.map(c => nameMap[c.folder] + '\u0001' + String(c.q).trim() + '\u0001' + (c.kind || ''))); // 今回の取り込みで置く場所（同じ問題がほかのグループにもあるときは消さない）
+  cards.forEach(c => {
+    const kind = c.kind || '';
+    if (kind === 'intro' || kind === 'test') return;
+    const cat = nameMap[c.folder];
+    const main = db.find(d => d.category === cat && String(d.question).trim() === String(c.q).trim() && (d.kind || '') === kind);
+    if (!main) return;
+    db.forEach(d => {
+      if (d === main || drop.has(d.id) || d.category === cat || !secSet.has(d.category)) return;
+      if (String(d.question).trim() !== String(c.q).trim() || (d.kind || '') !== kind) return;
+      if (placed.has(d.category + '\u0001' + String(d.question).trim() + '\u0001' + (d.kind || ''))) return;
+      if (d.sharedDocId && getSharedAccess(d.sharedDocId).readOnly) return;
+      // 今の置き場所以外（ほかのグループ・前の版のフォルダー）にある同じ問題
+      CARD_STAT_FIELDS.forEach(f => { if (f === 'senses' || f === 'drillStats') { if (!main[f] && d[f]) main[f] = d[f]; return; } main[f] = Math.max(Number(main[f]) || 0, Number(d[f]) || 0); });
+      if (d.statsAt && (!main.statsAt || d.statsAt > main.statsAt)) main.statsAt = d.statsAt;
+      if (d.stars && !main.stars) main.stars = d.stars;
+      drop.add(d.id); touchCard(main);
+    });
+  });
+  if (drop.size) { tombstoneCards([...drop]); db = db.filter(d => !drop.has(d.id)); removed = drop.size; }
   autoMerge();
   saveData(true);
   if (typeof pushSharedDocsForCategories === 'function') pushSharedDocsForCategories([...touched]);
-  return { section: sec, added, updated };
+  return { section: sec, added, updated, removed };
 }
 
 // ---------------- 画面（🧠 暗記タブ） ----------------
@@ -427,6 +451,6 @@ function vtCommit(start) {
   if (typeof refreshVisibleViews === 'function') refreshVisibleViews(true);
   try { localStorage.setItem('susuru_anki_drill_cat', r.section); } catch (e) {}
   drillHome();
-  if (typeof showAppToast === 'function') showAppToast(`📄 「${r.section}」に保存しました（追加 ${r.added}・更新 ${r.updated}）`);
+  if (typeof showAppToast === 'function') showAppToast(`📄 「${r.section}」に保存しました（追加 ${r.added}・更新 ${r.updated}${r.removed ? `・前の版の重なり ${r.removed}枚をまとめました` : ''}）`);
   if (start && DG.length) drillStart();
 }
