@@ -930,7 +930,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
         <option value="mix">🎶 音楽にそのまま重ねて読み上げる（マナーモードでは鳴りません）</option>
         <option value="stop">⏹ 音楽を止めて読み上げる（前と同じ）</option>
       </select>
-      <div class="hint-small" style="margin-top:6px;">iPhone・iPad で、読み上げのたびに音楽が止まってしまうときに。この端末だけの設定です。</div>
+      <div class="hint-small" style="margin-top:6px;">iPhone・iPad のいつもの読み上げは、音楽を止めてしまいます。「小さくして」「重ねて」を選ぶと、iPhone・iPad では AI（Gemini）で作った声を、ゲームの効果音と同じしくみで鳴らして、音楽を止めずに読み上げます（設定 → 🤖 AI で Gemini のキーが必要。作った声はこの端末に保存して、同じ文は作り直しません。初めての文は声ができるまで1〜3秒かかります）。キーが無い・回数の上限・オフラインのときは、いつもの読み上げになります。この端末だけの設定です。</div>
       <div id="lblTtsMixNote" class="hint-small" style="margin-top:4px; color:var(--warn);"></div>
     </div>
 
@@ -1521,6 +1521,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 <script src="ai.js"></script>
 <script src="picker.js"></script>
 <script src="streak.js"></script>
+<script src="tts.js"></script>
 <script src="drill.js"></script>
 <script src="plan.js"></script>
 <script src="race.js"></script>

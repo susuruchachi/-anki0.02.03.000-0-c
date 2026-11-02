@@ -31,6 +31,14 @@ function listenCards() {
 // ---------------- 読み上げ（終わるまで待てる） ----------------
 function listenSpeak(text, token) {
   if (typeof applyTtsAudioSession === 'function') applyTtsAudioSession();
+  // ★【0.03.75】iPhone・iPad で音楽と一緒に流す設定なら AI の声で（使えなければいつもの読み上げ）
+  if (text && typeof ttsUseAi === 'function' && ttsUseAi()) {
+    if (!_ls || _ls.token !== token) return Promise.resolve();
+    return ttsSpeakAi(text, { rate: listenPrefs().rate || 1 }).catch(() => { if (typeof ttsNoticeFallback === 'function') ttsNoticeFallback(); return listenSpeakNative(text, token); });
+  }
+  return listenSpeakNative(text, token);
+}
+function listenSpeakNative(text, token) {
   return new Promise(resolve => {
     if (!('speechSynthesis' in window) || !text || !_ls || _ls.token !== token) return resolve();
     const div = document.createElement('div');
@@ -96,6 +104,9 @@ async function listenLoop(token) {
     }
     const q = _ls.list[_ls.i];
     listenMedia(q);
+    // ★【0.03.75】AI の声のときは、次のカードの声を先に作っておく
+    const nx = _ls.list[_ls.i + 1];
+    if (nx && typeof ttsPrefetch === 'function') ttsPrefetch(listenIsCloze(nx) ? listenClozeText(nx) : [String(nx.question || '').replace(/\n/g, '。'), Array.isArray(nx.choices) && nx.choices.length >= 2 ? `答え、${getPrimaryAnswer(nx.answer)}` : listenAnswerSpeech(nx.answer)]);
     await listenPlayCard(q, token);
     if (!_ls || _ls.token !== token || !_ls.playing) return;
     await listenWait(Math.max(800, (Number(listenPrefs().gap) || 0) * 500), token);
@@ -114,7 +125,7 @@ function listenStart() {
 }
 function listenPlay() {
   if (!_ls) return listenStart();
-  speechSynthesis.cancel();
+  if (typeof ttsStopAll === 'function') ttsStopAll(); else speechSynthesis.cancel();
   _ls.playing = true; _ls.token++;
   listenWakeLock(true);
   listenDraw();
@@ -123,7 +134,7 @@ function listenPlay() {
 function listenPause() {
   if (!_ls) return;
   _ls.playing = false; _ls.token++;
-  speechSynthesis.cancel(); listenWakeLock(false); listenDraw();
+  if (typeof ttsStopAll === 'function') ttsStopAll(); else speechSynthesis.cancel(); listenWakeLock(false); listenDraw();
 }
 function listenToggle() { if (_ls && _ls.playing) listenPause(); else listenPlay(); }
 function listenSkip(d) {
@@ -133,7 +144,7 @@ function listenSkip(d) {
 }
 function listenStop(finished) {
   if (_ls) { _ls.token++; _ls.playing = false; }
-  try { speechSynthesis.cancel(); } catch (e) {}
+  try { if (typeof ttsStopAll === 'function') ttsStopAll(); else speechSynthesis.cancel(); } catch (e) {}
   listenWakeLock(false);
   _ls = null;
   renderListenPage();

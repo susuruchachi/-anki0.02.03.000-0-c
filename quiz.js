@@ -93,7 +93,16 @@ function renderTtsMixSetting() {
 }
 applyTtsAudioSession();
 function speakText(text, options = {}) {
-  if (!('speechSynthesis' in window) || localStorage.getItem('muteTTS') === 'true') return;
+  if (localStorage.getItem('muteTTS') === 'true') return;
+  // ★【0.03.75】iPhone・iPad で音楽と一緒に流す設定なら、AI の声で（tts.js）。使えなければいつもの読み上げ
+  if (typeof ttsUseAi === 'function' && ttsUseAi() && text && String(text).trim()) {
+    ttsSpeakAi(text, options).catch(() => { if (typeof ttsNoticeFallback === 'function') ttsNoticeFallback(); speakTextNative(text, options); });
+    return;
+  }
+  speakTextNative(text, options);
+}
+function speakTextNative(text, options = {}) {
+  if (!('speechSynthesis' in window)) return;
   applyTtsAudioSession();
   window.speechSynthesis.cancel();
   if (!text || text.trim() === "") return;
@@ -261,12 +270,12 @@ function quizResultSpeech(r) { return `${r.q}。${r.label ? r.label + '。' : ''
 function speakQuizResult(i) { const r = _quizSession.results[i]; if (r && typeof speakText === 'function') speakText(quizResultSpeech(r)); }
 function speakQuizResults() {
   const b = document.getElementById('resSpeakAll');
-  if ('speechSynthesis' in window && speechSynthesis.speaking) { speechSynthesis.cancel(); if (b) b.textContent = '🔊 読み上げ'; return; }
+  if (typeof ttsSpeaking === 'function' ? ttsSpeaking() : ('speechSynthesis' in window && speechSynthesis.speaking)) { if (typeof ttsStopAll === 'function') ttsStopAll(); else speechSynthesis.cancel(); if (b) b.textContent = '🔊 読み上げ'; return; }
   const rows = [...document.querySelectorAll('#quizResultList .res-row')].filter(x => x.style.display !== 'none');
   const txt = rows.map(x => quizResultSpeech(_quizSession.results[Number(x.dataset.i)])).join('\n');
   if (!txt || typeof speakText !== 'function') return;
   speakText(txt);
-  if (b) { b.textContent = '⏹ 止める'; const t = setInterval(() => { if (!speechSynthesis.speaking) { clearInterval(t); b.textContent = '🔊 読み上げ'; } }, 500); }
+  if (b) { b.textContent = '⏹ 止める'; let n = 0; const t = setInterval(() => { if (++n > 10 && !(typeof ttsSpeaking === 'function' ? ttsSpeaking() : speechSynthesis.speaking)) { clearInterval(t); b.textContent = '🔊 読み上げ'; } }, 500); }
 }
 // ★【0.03.64】同じ問題をもう一回（成績は今のものから作り直す）
 function quizRebuildEntry(e) {
@@ -657,6 +666,8 @@ function loadQuizQuestion() {
 
   if(document.getElementById('chkTTS').checked) {
     speakText(spoilerSafeSpeech(qSpeech));
+    // ★【0.03.75】AI の声のときは、答えと次の問題の声を先に作っておく
+    if (typeof ttsPrefetch === 'function') { const nx = quizPool[quizIndex + 1]; ttsPrefetch([getPrimaryAnswer(cur.answer), nx ? spoilerSafeSpeech(nx.kind && /\n/.test(nx.question) ? nx.question.split('\n')[0] : nx.question) : '']); }
   }
   // ★【0.03.02】テスト形式で選択肢があるカードは、記述式でも選択肢を問題文の下に表示する
   // ★【0.03.72】長い問題文（例文を並べた選択問題など）は左寄せ・少し小さく。①②③… だけの選択肢は問題文の中にあるので下に並べない

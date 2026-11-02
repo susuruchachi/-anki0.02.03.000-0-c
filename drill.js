@@ -357,7 +357,7 @@ function drillPop() {
   if (dcur.t === 'c' && dcur.ck.choices) dst.op = dShuffle(dcur.ck.choices.slice());
   [dcur, ...DQ].filter(x => x.t === 'q').slice(0, 2).forEach(x => drillGetSn(x.it)); // 次の単語の意味のまとめを先に
   drillSave(); drillDraw();
-  if (drillTtsOn()) drillSpeakQ();
+  if (drillTtsOn()) { drillSpeakQ(); if (typeof ttsPrefetch === 'function' && (dcur.it || dcur.ck)) ttsPrefetch([drillAText(dcur)]); }
 }
 function drillRefill() {
   if (DS.r > 1 || DS.gi >= DG.length) return drillEndRound();
@@ -410,7 +410,7 @@ function drillGiPick(i) { if (dst.ph !== 'gq' || !dst.giq) return; dst.gpick = i
 // ---------------- 読み上げ ----------------
 // ★【0.03.28】問題（単語・Check! の問題文）は出たときに、答えは結果の画面で読み上げる。🔊 でもう一度
 function drillTtsOn() { try { return localStorage.getItem('susuru_anki_drill_tts') !== 'off'; } catch (e) { return true; } }
-function drillToggleTts() { try { localStorage.setItem('susuru_anki_drill_tts', drillTtsOn() ? 'off' : 'on'); } catch (e) {} if (!drillTtsOn() && 'speechSynthesis' in window) speechSynthesis.cancel(); drillDraw(); }
+function drillToggleTts() { try { localStorage.setItem('susuru_anki_drill_tts', drillTtsOn() ? 'off' : 'on'); } catch (e) {} if (!drillTtsOn()) { if (typeof ttsStopAll === 'function') ttsStopAll(); else if ('speechSynthesis' in window) speechSynthesis.cancel(); } drillDraw(); }
 function drillQText(c) { return c.it ? c.it.w : c.ck.q; }
 function drillAText(c) {
   if (c.ck) return c.ck.ans;
