@@ -317,7 +317,8 @@ async function ttsSpokenParts(segs, share) {
   const rd = await ttsReadings(segs.filter(s => s.ja && ttsNeedsReading(s.t)).map(s => s.t), share);
   const noKanji = t => !/[一-鿿々〆]/.test(t);
   const ja = s => { const r = rd.get(s.t); return { t: r && r.t ? r.t : s.t, k: r && r.k ? r.k : (noKanji(s.t) ? s.t : '') }; };
-  if (!ttsModeWhole() || segs.length <= 1) {
+  const orig0 = segs.map(x => x.t).join(' ');
+  if (!ttsModeWhole() || segs.length <= 1 || ttsSplitTexts().includes(orig0)) {
     return segs.map(s => { if (!s.ja) return { seg: s, spoken: s.t, expect: '' }; const x = ja(s); return { seg: s, spoken: x.t, expect: x.k }; });
   }
   // ★【0.03.87】まとめて1つの声にする（部分ごとに作ると、「とは？」のような短い部分の抑揚がおかしくなっていた）
@@ -329,9 +330,12 @@ async function ttsSpokenParts(segs, share) {
     else body += sp + s.t;
     orig += sp + s.t;
   });
-  // 英語と日本語が混ざっているときは、英語の部分を英語の発音で読むように頼む（説明は読まない）
-  const spoken = hasEn && hasJa ? `Read the following aloud naturally. Use natural Japanese intonation for Japanese, and native English pronunciation for English words:\n${body}` : body;
-  return [{ seg: { ja: hasJa, t: orig }, spoken, expect: hasEn || !kanaOk ? '' : kana }];
+  // 英語と日本語が混ざっているときは、英語の部分を英語の発音で読むように頼む（説明は読まない）。
+  // 英語が「of」「to」のような短い語だけなら頼まない（頼むと「読めません」と英語で話し出すことがあった）
+  const enWords = segs.filter(x => !x.ja).map(x => x.t).join(' ').split(/\s+/).filter(Boolean);
+  const direct = hasEn && hasJa && !(enWords.length <= 2 && enWords.every(w => w.replace(/[^A-Za-z]/g, '').length <= 3));
+  const spoken = direct ? `Read the following aloud naturally. Use natural Japanese intonation for Japanese, and native English pronunciation for English words:\n${body}` : body;
+  return [{ seg: { ja: hasJa, t: orig }, spoken, expect: hasEn ? '#mix|' + orig0 : (!kanaOk ? '' : kana) }];
 }
 // ★【0.03.87】日本語の部分の「読み上げ用の文」と「読み（ひらがな）」。{ t: 読み間違えやすい漢字だけかなにした文, k: 全部ひらがなの読み }
 // 全部をひらがなにすると、語の切れ目が分からなくなって抑揚がおかしくなるので、ふつうの語は漢字のまま
@@ -376,8 +380,24 @@ function ttsSimilarity(a, b) {
   return 1 - d[m][n] / Math.max(m, n);
 }
 // 作った声を聞き取って比べる（違えば消して、次は別のモデルで作り直す）
+// まとめて読ませた文で、AI が読まずに「読めません」などと話していないか
+const TTS_REFUSAL_RE = /sorry|unable|can(?:no|'|’)t|cannot|not able|I'm|I am|as an ai|申し訳|できません|読めません|読み上げられ/i;
+function ttsSplitTexts() { try { return JSON.parse(localStorage.getItem('susuru_anki_tts_split') || '[]'); } catch (e) { return []; } }
+function ttsAddSplitText(t) { const a = ttsSplitTexts().filter(x => x !== t); a.push(t); try { localStorage.setItem('susuru_anki_tts_split', JSON.stringify(a.slice(-500))); } catch (e) {} }
 async function ttsVerify(key, buf, expect, tries, model, sharePlain) {
-  if (typeof aiRequest !== 'function' || !ttsKana(expect)) return;
+  if (typeof aiRequest !== 'function') return;
+  if (String(expect).startsWith('#mix|')) {
+    // ★【0.03.89】英語と日本語が混ざった文：聞き取って、読まずに話していたら、その文は次から分けて作る
+    const orig = expect.slice(5);
+    const heard = await aiRequest('あなたは音声の書き起こし係です。', [{ text: '音声で話している内容を、聞こえたとおりに書き起こす（英語は英語、日本語は日本語で）。書き起こしだけを出力。' }, { mime: 'audio/wav', data: ttsB64(buf) }], { needPdf: true, maxTokens: 400, timeout: 15000, totalTimeout: 20000 });
+    const h = String(heard || '');
+    const bad = TTS_REFUSAL_RE.test(h) && !TTS_REFUSAL_RE.test(orig);
+    if (!bad) { await ttsKvPut(key, { buf, tries, model, ok: true }); if (sharePlain) ttsCloudPutAudio(sharePlain, buf, model); return; }
+    _ttsMem.delete(key); await ttsKvDel(key); ttsAddSplitText(orig);
+    console.warn('TTS が読まずに話していたので、次から分けて作ります', { orig, heard: h });
+    return;
+  }
+  if (!ttsKana(expect)) return;
   const txt = await aiRequest('あなたは音声の書き起こし係です。', [{ text: '音声で読み上げている日本語を、聞こえたとおりにすべてひらがなで書き起こす（漢字・カタカナは使わない。句読点は不要）。書き起こしだけを出力。' }, { mime: 'audio/wav', data: ttsB64(buf) }], { needPdf: true, maxTokens: 400, timeout: 15000, totalTimeout: 20000 });
   const sim = ttsSimilarity(txt, expect);
   if (sim >= 0.8) { await ttsKvPut(key, { buf, tries, model, ok: true }); if (sharePlain) ttsCloudPutAudio(sharePlain, buf, model); return; }

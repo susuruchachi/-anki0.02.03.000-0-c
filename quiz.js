@@ -52,6 +52,12 @@ function cleanTextForSpeech(text, opts = {}) {
     .replace(/[\[\]［］]/g, ' ')
     .replace(/\(\s*\)|（\s*）|\(　+\)|（　+）|_{2,}|＿{2,}/g, (m, off, all) => /[\u3040-\u30ff\u4e00-\u9fff]/.test(all.slice(Math.max(0, off - 2), off) + all.slice(off + m.length, off + m.length + 2)) ? '、空欄、' : ' blank ') // ★【0.03.69】日本語の文の空欄は「空欄」と読む
     .replace(/[～〜~]/g, ' ')
+    .replace(/…|\.\.\./g, ' ')
+    // ★【0.03.89】辞書の書き方を読みやすく：(形容詞) → 形容詞、 ／ 短い補い（～の）（of ～）（to ...）は読まない ／ 長い補いはかっこを外す ／ 「/」は「、」
+    .replace(/[(（]\s*((?:他|自)?動詞|名詞|形容詞|副詞|前置詞|接続詞|代名詞|助動詞|熟語|成句|句|間投詞)\s*[①-⑳0-9]*\s*[)）]/g, ' $1、')
+    .replace(/[(（]([^()（）]*)[)）]/g, (m, inner, off, all) => { const t = inner.replace(/\s+/g, ' ').trim(); if (!t) return m; const jaBefore = /[\u3040-\u30ff\u4e00-\u9fff」）]\s*$/.test(all.slice(Math.max(0, off - 3), off)); if (/^[A-Za-z' .,-]*$/.test(t) && t.split(' ').filter(Boolean).length <= 2 && (jaBefore || off === 0)) return ' '; if (!/[A-Za-z]/.test(t) && t.replace(/[^\u3040-\u30ff\u4e00-\u9fff]/g, '').length <= 2) return ' '; return /[A-Za-z]/.test(t) && !/[\u3040-\u30ff\u4e00-\u9fff]/.test(t) ? ` ${t} ` : `、${t}、`; })
+    .replace(/\s*[/／]\s*/g, '、')
+    .replace(/、\s*、+/g, '、').replace(/([。．！？!?])\s*、/g, '$1').replace(/^\s*、|、\s*$/g, '')
     .replace(/\s+/g, ' ')
     .trim();
 }
