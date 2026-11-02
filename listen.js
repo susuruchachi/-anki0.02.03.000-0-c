@@ -144,6 +144,8 @@ function listenRedoVoice() {
   if (typeof showAppToast === 'function') showAppToast('🔁 このカードの声を作り直します');
   listenPlay();
 }
+function listenCardTexts(q) { return listenIsCloze(q) ? listenClozeText(q) : [String(q.question || '').replace(/\n/g, '。'), Array.isArray(q.choices) && q.choices.length >= 2 ? `答え、${getPrimaryAnswer(q.answer)}` : listenAnswerSpeech(q.answer), q.note && listenPrefs().note ? String(q.note).replace(/\n/g, '。') : ''].filter(Boolean); }
+function listenFixReading() { if (!_ls) return; const q = _ls.list[_ls.i]; if (!q) return; listenPause(); if (typeof ttsOpenFixDialog === 'function') ttsOpenFixDialog(listenCardTexts(q)); }
 function listenToggle() { if (_ls && _ls.playing) listenPause(); else listenPlay(); }
 function listenSkip(d) {
   if (!_ls) return;
@@ -225,7 +227,7 @@ function listenDraw() {
         <button class="btn btn-primary listen-play" onclick="listenToggle()">${_ls.playing ? '⏸ 一時停止' : '▶️ 再生'}</button>
         <button class="chip" onclick="listenSkip(1)" title="次へ">⏭</button>
       </div>
-      ${typeof ttsUseAi === 'function' && ttsUseAi() ? '<button class="chip" style="margin-top:8px;" onclick="listenRedoVoice()">🔁 読み間違い：このカードの声を作り直す</button>' : ''}
+      <button class="chip" style="margin-top:8px;" onclick="listenFixReading()">🗣️ 読み間違い：読み方を直す</button>
       <button class="btn btn-secondary" style="margin-top:8px;" onclick="listenStop()">⏹ やめる</button>
     </div>`;
 }

@@ -39,7 +39,15 @@ function speechLetters(text, kana) {
     return pre + (kana ? SPEECH_LETTER_KANA[L] : SPEECH_LETTER_NAMES[L]);
   });
 }
+// ★【0.03.82】読み方の辞書（「読み方を直す」で登録）の書き方を読み方に置き換える（長い書き方から）
+function applyTtsDict(text) {
+  let t = String(text || '');
+  const d = typeof ttsDict === 'object' && ttsDict ? ttsDict : {};
+  Object.keys(d).filter(k => k && d[k] && !d[k].deleted && d[k].r).sort((a, b) => b.length - a.length).forEach(k => { if (t.includes(k)) t = t.split(k).join(d[k].r); });
+  return t;
+}
 function cleanTextForSpeech(text, opts = {}) {
+  text = applyTtsDict(text);
   return (opts.noLetters ? String(text || '') : speechLetters(String(text || ''), !!opts.kana))
     .replace(/[\[\]［］]/g, ' ')
     .replace(/\(\s*\)|（\s*）|\(　+\)|（　+）|_{2,}|＿{2,}/g, (m, off, all) => /[\u3040-\u30ff\u4e00-\u9fff]/.test(all.slice(Math.max(0, off - 2), off) + all.slice(off + m.length, off + m.length + 2)) ? '、空欄、' : ' blank ') // ★【0.03.69】日本語の文の空欄は「空欄」と読む
@@ -88,6 +96,8 @@ function applyTtsAudioSession() {
 }
 function setTtsMixPref(v) { try { localStorage.setItem(TTS_MIX_KEY, v); } catch (e) {} applyTtsAudioSession(); renderTtsMixSetting(); }
 function renderTtsMixSetting() {
+  const r = document.getElementById('chkTtsReading'); if (r && typeof ttsReadingOn === 'function') r.checked = ttsReadingOn();
+  const v = document.getElementById('chkTtsVerify'); if (v && typeof ttsVerifyOn === 'function') v.checked = ttsVerifyOn();
   const sel = document.getElementById('selTtsMix'); if (!sel) return;
   sel.value = ttsMixPref();
   const note = document.getElementById('lblTtsMixNote');
@@ -1551,6 +1561,7 @@ function renderAiFeedbackBox(cur, isCorrect, opts) {
   if (!isCorrect && opts.typed && !opts.focusLate && String(opts.given || '').trim()) btns.push(`<button type="button" class="chip" onclick="regradeLastAnswer(true)">🙆 合っているので正解にする</button>`);
   const canExplain = !isCorrect && !opts.pass && typeof aiAvailable === 'function' && aiAvailable() && getAiPrefs().hint && !window.currentOnlineMatch && !(ai && ai.tip);
   if (canExplain) btns.push(`<button type="button" class="chip" id="btnAiExplain" onclick="showAiExplanation()">🤖 AIの解説</button>`);
+  if (document.getElementById('chkTTS') && document.getElementById('chkTTS').checked && typeof ttsOpenFixDialog === 'function') btns.push(`<button type="button" class="chip" onclick="ttsOpenFixDialog([quizPool[quizIndex].question, getPrimaryAnswer(quizPool[quizIndex].answer)])">🗣️ 読み方を直す</button>`);
   box.innerHTML = parts.join('') + (btns.length ? `<div class="ai-btns">${btns.join('')}</div>` : '') + '<div id="aiExplainArea"></div>';
   box.style.display = (parts.length || btns.length) ? 'block' : 'none';
   if (canExplain && getAiPrefs().explainAuto) showAiExplanation();

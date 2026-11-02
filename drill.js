@@ -749,7 +749,7 @@ async function drillFin(ok, ans, tip) {
   drillHistStore();
   dView = null;
   dst.res = `<div class="card ${ok ? 'drill-ok-card' : 'drill-ng-card'}">${core}
-    <div class="drill-btns"><button class="btn btn-primary" onclick="drillPop()">次</button>${drillAiOk() ? `<button class="btn btn-secondary" onclick="drillQo()">💬 質問する${drillQaList(c).length ? `（前の質問 ${drillQaList(c).length}）` : ''}</button>` : (drillQaList(c).length ? `<button class="btn btn-secondary" onclick="drillQo()">💬 前の質問（${drillQaList(c).length}）</button>` : '')}</div></div>`;
+    <div class="drill-btns"><button class="btn btn-primary" onclick="drillPop()">次</button>${drillTtsOn() && typeof ttsOpenFixDialog === 'function' ? '<button class="btn btn-secondary" onclick="ttsOpenFixDialog([drillQText(dcur), drillAText(dcur)])">🗣️ 読み方</button>' : ''}${drillAiOk() ? `<button class="btn btn-secondary" onclick="drillQo()">💬 質問する${drillQaList(c).length ? `（前の質問 ${drillQaList(c).length}）` : ''}</button>` : (drillQaList(c).length ? `<button class="btn btn-secondary" onclick="drillQo()">💬 前の質問（${drillQaList(c).length}）</button>` : '')}</div></div>`;
   drillSave(); drillDraw();
 }
 function drillStatsText(c) {
