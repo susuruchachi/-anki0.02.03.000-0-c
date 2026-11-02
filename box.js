@@ -281,7 +281,7 @@ function handleQuestionLongpress(itemRef) {
 function openCardMoveDialog(item) {
   document.getElementById('ctxHeader').innerText = '📂 移動先のフォルダー';
   const body = document.getElementById('ctxBody');
-  body.innerHTML = `<div style="padding:8px;"><select id="cardMoveSelect" class="form-control">${buildCategoryOptionsHTML(new Set([item.category]), false)}</select>
+  body.innerHTML = `<div style="padding:8px;">${folderPickFieldHTML('cardMoveSelect', '', { title: '📂 移動先のフォルダー', emptyLabel: '移動先を選ぶ', selectable: c => c !== item.category })}
     <button type="button" class="btn" style="margin-top:10px; width:100%;" id="cardMoveOk">移動する</button></div>`;
   document.getElementById('ctxOverlay').style.display = 'flex';
   document.getElementById('cardMoveOk').onclick = async () => {

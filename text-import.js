@@ -362,14 +362,11 @@ function vtOpen() {
     <textarea id="vtText" class="form-control" rows="9" style="margin-top:8px;" placeholder="ここに貼り付け">${dE((_vt && _vt.text) || '')}</textarea>
     <input type="file" id="vtFile" accept=".txt,.md,text/plain" class="form-control" style="margin-top:6px;">
     <label class="section-label" style="font-weight:500; margin-top:8px;">📁 保存先（親フォルダー）</label>
-    <select id="vtParent" class="form-control"><option value="">（いちばん上）</option>${buildCategoryOptionsHTML(new Set(), false)}</select>
+    ${folderPickFieldHTML('vtParent', (_vt && _vt.parent !== undefined) ? _vt.parent : (categories.includes('鉄壁') ? '鉄壁' : ''), { title: '📁 保存先（親フォルダー）', allLabel: '🔝 いちばん上', hint: 'このフォルダーの中に、読み取ったセクションのフォルダーを作ります' })}
     <label class="section-label" style="font-weight:500; margin-top:8px;">🏷️ フォルダー名（読み取ると自動で入ります）</label>
     <input id="vtName" class="form-control" value="${dE((_vt && _vt.name) || '')}" placeholder="例：#26 価値・基準・選択・出来事・参加">
     <div class="drill-btns" style="margin-top:10px;"><button class="btn btn-primary" onclick="vtPreview()">🔍 読み取る</button><button class="btn btn-secondary" onclick="_vt=null; drillHome()">戻る</button></div>
     <div id="vtResult"></div></div>`;
-  const sel = document.getElementById('vtParent');
-  const def = (_vt && _vt.parent !== undefined) ? _vt.parent : (categories.includes('鉄壁') ? '鉄壁' : '');
-  sel.value = def;
   document.getElementById('vtAiFile').onchange = e => vtAiRead([...e.target.files]);
   document.getElementById('vtFile').onchange = e => { const f = e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = () => { document.getElementById('vtText').value = r.result; vtPreview(); }; r.readAsText(f); };
 }

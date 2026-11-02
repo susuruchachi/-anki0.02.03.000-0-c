@@ -185,7 +185,7 @@ function scanFromVocabText(raw) {
       closeScanImport();
       _vt = { text: raw, name: vtSectionName(vp.title) || '', parent: scanImportTargetCategory };
       openPage('pgDrill'); vtOpen();
-      setTimeout(() => { try { document.getElementById('vtParent').value = scanImportTargetCategory; vtPreview(); } catch (e) {} }, 50);
+      setTimeout(() => { try { setFolderField('vtParent', scanImportTargetCategory); vtPreview(); } catch (e) {} }, 50);
       return;
     }
   }

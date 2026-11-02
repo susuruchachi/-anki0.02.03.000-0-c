@@ -851,7 +851,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 
     <div class="card">
       <div class="setting-box-title">🥧 ランク分布グラフ</div>
-      <select id="selStatsCategory" class="form-control" style="margin-bottom:6px;" onchange="setStatsCategory(this.value)"></select>
+      <div id="statsCatPick" style="margin-bottom:6px;"></div>
       <div id="lblStatsScope" class="hint-small" style="margin-bottom:6px;"></div>
       <div style="width: 100%; max-width: 250px; margin: 0 auto;">
         <canvas id="rankPieChart"></canvas>
@@ -1090,10 +1090,6 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 
     <div class="card" id="sharedEditorPanel" style="display:none; border-color: var(--primary);">
       <div class="setting-box-title" style="color: var(--primary);">📝 共同編集: 新しい問題の追加</div>
-      <div class="form-group">
-        <label>フォルダー</label>
-        <select id="selSharedCategory" class="form-control" style="margin-bottom:10px;"></select>
-      </div>
       <div class="form-group"><input type="text" id="txtSharedNewQ" class="form-control" placeholder="問題文"></div>
       <div class="form-group"><input type="text" id="txtSharedNewA" class="form-control" placeholder="答え"></div>
       <button class="btn" onclick="addCardToShared()">➕ クラウドに直接追加する</button>

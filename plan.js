@@ -352,7 +352,7 @@ function renderPlanSettings() {
     <div class="hint-small">フォルダーの並び順に、1週に1つずつ進めます。例文・Review Test など「上から出題しない」フォルダーは数えません。</div>
     ${children.length ? `<div class="plan-weeks">${children.slice(0, 12).map((c, k) => `<span class="plan-week${k === curIdx ? ' cur' : ''}">${k + 1}. ${escapeHtml(c)}</span>`).join('')}${children.length > 12 ? `<span class="plan-week">… 全${children.length}週</span>` : ''}</div>` : ''}
     <div class="plan-step"><span class="plan-step-no">3</span>📍 今週はどこ？</div>
-    <select id="planCurrent" class="form-control">${children.map((c, k) => `<option value="${k}" ${k === curIdx ? 'selected' : ''}>${k + 1}週目：${escapeHtml(c)}</option>`).join('')}</select>
+    ${folderPickFieldHTML('planCurrentCat', children[curIdx] || '', { title: '📍 今週の範囲', emptyLabel: '今週の範囲を選ぶ', selectable: c => children.includes(c), note: c => children.includes(c) ? `${children.indexOf(c) + 1}週目` : '', extra: c => c ? `${children.indexOf(c) + 1}週目 / 全${children.length}週` : '', hint: '今週やるフォルダーを選びます（次の週から、並び順に1つずつ進みます）' })}
     <div class="plan-step"><span class="plan-step-no">4</span>🗓️ 曜日と復習</div>
     <div class="form-row" style="align-items:center;">
       <div style="flex:1;"><label class="section-label" style="font-weight:500;">🧠 単語を始める日</label>${daySel('planFrom', p.wordsFrom ?? 2)}</div>
@@ -413,7 +413,7 @@ function saveStudyPlan() {
   const unit = document.getElementById('planUnit').value || 'leaves';
   const weeks = planUnitFolders(root, unit);
   if (!weeks.length) return alert('フォルダーを選んでください。');
-  const idx = Number(document.getElementById('planCurrent').value) || 0;
+  const idx = Math.max(0, weeks.indexOf((document.getElementById('planCurrentCat') || {}).value)); // ★【0.03.81】フォルダーを選ぶ画面で選ぶ
   // 「今週」はプランの週の区切りで数える（週をまたぐプランは、始める日の前なら先週のまま）
   const W = planWeekOffsetFor(Number(document.getElementById('planFrom').value), Number(document.getElementById('planDue').value));
   const mon = planMonday(planShift(new Date(), -W)); mon.setDate(mon.getDate() - idx * 7);

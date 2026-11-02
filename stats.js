@@ -19,12 +19,10 @@ const STATUS_TESTS = {
 };
 const STATUS_NAMES = { grad: '🎓 卒業', master: '⚡ 得意', normal: '☕ 普通', weak: '⚠️ 苦手', shikkari: '🧱 しっかり', unseen: '💤 未着手' };
 function renderStatsAndCharts() {
-  const sel = document.getElementById('selStatsCategory');
   if (statsCategory && !categories.includes(statsCategory)) statsCategory = '';
-  if (sel) {
-    sel.innerHTML = '<option value="">📚 すべてのフォルダー</option>' + buildCategoryOptionsHTML(new Set(), false);
-    sel.value = statsCategory;
-  }
+  // ★【0.03.81】フォルダーはフォルダーを選ぶ画面で
+  const pk = document.getElementById('statsCatPick');
+  if (pk) pk.innerHTML = folderPickFieldHTML('selStatsCategory', statsCategory, { title: '🥧 ランク分布のフォルダー', allLabel: '📚 すべてのフォルダー', hint: '選んだフォルダー（下のフォルダーも含む）だけの分布にします', onChange: v => setStatsCategory(v) });
   const cards = statsCards(statsCategory);
   const t = cards.length;
   document.getElementById('statTotal').innerText = t;

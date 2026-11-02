@@ -456,7 +456,7 @@ function runCategoryAction(catName, act, info) {
       const parent = getCategoryParent(catName);
       const panel = showCategoryPanel(`
         <label class="section-label">移動先（この中に入れます）</label>
-        <select id="catEditSelect" class="form-control">${buildCategoryOptionsHTML(exclude, !!parent)}</select>
+        ${folderPickFieldHTML('catEditSelect', '', Object.assign({ title: '📂 移動先（この中に入れます）', emptyLabel: '移動先を選ぶ', selectable: c => !exclude.has(c) }, parent ? { allLabel: '🔝 一番上の階層', topValue: '__top__' } : {}))}
         <div class="hint-small">今の場所: ${parent ? escapeHtml(parent) : '一番上の階層'}</div>
         <div class="form-row" style="margin-top:8px;"><button type="button" class="btn" id="catEditOk">移動</button></div>`);
       panel.querySelector('#catEditOk').onclick = () => {
@@ -472,7 +472,7 @@ function runCategoryAction(catName, act, info) {
       const exclude = new Set(getAllSubcategories(catName));
       const panel = showCategoryPanel(`
         <label class="section-label">統合先のフォルダー</label>
-        <select id="catEditSelect" class="form-control">${buildCategoryOptionsHTML(exclude, false)}</select>
+        ${folderPickFieldHTML('catEditSelect', '', { title: '🔀 統合先のフォルダー', emptyLabel: '統合先を選ぶ', selectable: c => !exclude.has(c) })}
         <div class="hint-small">「${escapeHtml(catName)}」の問題とサブフォルダーをすべて統合先へ移し、「${escapeHtml(catName)}」は削除します。同じ問題・答えのカードは1枚にまとめます（成績は良い方を残します）。</div>
         <div class="form-row" style="margin-top:8px;"><button type="button" class="btn" id="catEditOk">統合する</button></div>`);
       panel.querySelector('#catEditOk').onclick = () => {
