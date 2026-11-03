@@ -54,26 +54,50 @@ function renderStreakCard() {
 }
 
 // 学習ヒートマップ（実績ページ・過去12週）
+// ★【0.03.95】見やすく：横いっぱいの大きさ・曜日と月の見出し・今日の枠・色の見本・押すとその日の数・今週／今月のまとめ
 function renderStudyHeatmap() {
   const hc = document.getElementById('heatmapContainer'); if (!hc) return;
   const today = getTodayStr(), days = {}; Object.entries(studyDays || {}).forEach(([k, v]) => { days[k] = studyDayCount(v); });
-  const weeks = 12;
-  // 今週の土曜日まで並べる（列＝週、行＝曜日）
+  const weeks = 15;
+  // 列＝週（日曜はじまり）、行＝曜日。いちばん右が今週
   const endOffset = 6 - new Date(today + 'T12:00:00').getDay();
   const start = streakShift(today, endOffset - (weeks * 7 - 1));
-  let html = '';
-  for (let w = 0; w < weeks; w++) {
-    html += '<div class="heatmap-col">';
-    for (let r = 0; r < 7; r++) {
+  const lv = n => n >= 50 ? 4 : n >= 20 ? 3 : n >= 5 ? 2 : n > 0 ? 1 : 0;
+  const wd = ['日', '月', '火', '水', '木', '金', '土'];
+  // 月の見出し（その週に月の1日が入る列に）
+  const mcol = [];
+  for (let w = 0; w < weeks; w++) { let label = ''; for (let r = 0; r < 7; r++) { const k = streakShift(start, w * 7 + r); if (k.slice(8) === '01') { label = Number(k.slice(5, 7)) + '月'; break; } } mcol.push(label); }
+  // いちばん左の列には、2列以内に月の始まりが無いときだけ月を書く（重なって読めなかった）
+  if (!mcol.slice(0, 3).some(Boolean)) mcol[0] = Number(start.slice(5, 7)) + '月';
+  let months = '<div></div>' + mcol.map(l => `<div class="hm-month">${l}</div>`).join('');
+  let cells = '';
+  for (let r = 0; r < 7; r++) {
+    cells += `<div class="hm-wd">${r % 2 ? wd[r] : ''}</div>`;
+    for (let w = 0; w < weeks; w++) {
       const k = streakShift(start, w * 7 + r), n = days[k] || 0;
-      const lvl = k > today ? -1 : n >= 50 ? 4 : n >= 20 ? 3 : n >= 5 ? 2 : n > 0 ? 1 : 0;
-      html += `<div class="heatmap-cell"${lvl < 0 ? ' style="visibility:hidden"' : ''} data-level="${Math.max(lvl, 0)}" title="${k}：${n}問"></div>`;
+      if (k > today) { cells += '<div class="hm-cell hm-future"></div>'; continue; }
+      cells += `<button type="button" class="hm-cell${k === today ? ' hm-today' : ''}" data-level="${lv(n)}" data-k="${k}" data-n="${n}" aria-label="${k} ${n}問"></button>`;
     }
-    html += '</div>';
   }
+  // まとめ
+  const sum = (from, to) => Object.entries(days).filter(([k]) => k >= from && k <= to).reduce((a, [, n]) => a + n, 0);
+  const wk0 = streakShift(today, -new Date(today + 'T12:00:00').getDay());
+  const thisWeek = sum(wk0, today), thisMonth = sum(today.slice(0, 8) + '01', today);
+  const studied = Object.values(days).filter(n => n > 0), avg = studied.length ? Math.round(studied.reduce((a, n) => a + n, 0) / studied.length) : 0;
   const s = getStreakInfo();
-  hc.innerHTML = `<div class="heatmap-weeks">${html}</div>
-    <div class="hint-small" style="margin-top:8px; text-align:center;">🔥 ${s.cur}日連続 ・ 最長 ${s.best}日 ・ 学習した日 合計 ${s.total}日</div>`;
+  hc.innerHTML = `<div class="hm-stats">
+      <div><b>🔥 ${s.cur}</b><span>日連続</span></div><div><b>${s.best}</b><span>最長（日）</span></div>
+      <div><b>${thisWeek}</b><span>今週の問題数</span></div><div><b>${thisMonth}</b><span>今月の問題数</span></div>
+    </div>
+    <div class="hm-grid" style="grid-template-columns: 18px repeat(${weeks}, minmax(0, 1fr));">${months}${cells}</div>
+    <div class="hm-foot"><span id="hmInfo" class="hint-small">マスを押すと、その日の問題数が出ます</span>
+      <span class="hm-legend">少<i data-level="0"></i><i data-level="1"></i><i data-level="2"></i><i data-level="3"></i><i data-level="4"></i>多</span></div>
+    <div class="hint-small" style="margin-top:4px;">学習した日 合計 ${s.total}日 ・ 学習した日の平均 ${avg}問（色：1問〜／5問〜／20問〜／50問〜）</div>`;
+  hc.querySelectorAll('.hm-cell[data-k]').forEach(c => c.onclick = () => {
+    hc.querySelectorAll('.hm-cell.hm-sel').forEach(x => x.classList.remove('hm-sel')); c.classList.add('hm-sel');
+    const k = c.dataset.k, d = new Date(k + 'T12:00:00');
+    document.getElementById('hmInfo').textContent = `${d.getMonth() + 1}月${d.getDate()}日（${wd[d.getDay()]}）：${Number(c.dataset.n) ? c.dataset.n + '問' : 'お休み'}${k === today ? '（今日）' : ''}`;
+  });
 }
 
 // ★【0.03.62】アプリのアイコンのバッジ：今日の週間プランの残り（対応している端末だけ）。
