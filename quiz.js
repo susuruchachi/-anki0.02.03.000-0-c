@@ -47,7 +47,7 @@ function applyTtsDict(text) {
   return t;
 }
 function cleanTextForSpeech(text, opts = {}) {
-  text = applyTtsDict(text);
+  text = applyTtsDict(typeof markPlain === 'function' ? markPlain(text) : text); // ★【0.03.97】取り消し線の語は読まない
   return (opts.noLetters ? String(text || '') : speechLetters(String(text || ''), !!opts.kana))
     .replace(/[\[\]［］]/g, ' ')
     .replace(/\(\s*\)|（\s*）|\(　+\)|（　+）|_{2,}|＿{2,}/g, (m, off, all) => /[\u3040-\u30ff\u4e00-\u9fff]/.test(all.slice(Math.max(0, off - 2), off) + all.slice(off + m.length, off + m.length + 2)) ? '、空欄、' : ' blank ') // ★【0.03.69】日本語の文の空欄は「空欄」と読む
@@ -428,6 +428,7 @@ function dropBracketParts(str) { return String(str || '').replace(/[\[［][^\]�
 // ★【0.03.69】「・」も区切り（「過去・詠嘆」は「詠嘆、過去」でも正解）。◯（活用の無い形）を含む答え（活用表）は並び順も見る
 function normalizeAnswer(str, keepOrder) {
   if(!str) return '';
+  if (typeof markPlain === 'function') str = markPlain(str); // ★【0.03.97】~~使わない語~~ は答えに含めない
   let s = foldKana(String(str).replace(/[Ａ-Ｚａ-ｚ０-９]/g, c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0)).toLowerCase().trim());
   s = s.replace(/擦/g, 'こす');
   // ★【0.03.06】［ ］・～・… などの記号は入力しなくてよい（中身だけ合っていれば正解）

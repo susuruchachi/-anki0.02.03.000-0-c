@@ -30,7 +30,7 @@ function vtSplitTop(s, seps) {
 function vtParse(text) {
   const out = { title: '', groups: [], skipped: [] };
   const byNo = {}, seenChk = new Set();
-  let g = null, w = null, mode = '', intro = null;
+  let g = null, w = null, mode = '', intro = null, fig = null;
   const finishIntro = () => { if (g && intro !== null) { const t = intro.replace(/）\s*$/, '').trim(); if (t.length > (g.intro || '').length) g.intro = t; } intro = null; };
   const introClosed = s => { let d = 1; for (const ch of s) { if (ch === '（') d++; else if (ch === '）') d--; } return d <= 0; };
   const pushCheck = s => { s = String(s || '').trim(); if (!s || !g) return; if (seenChk.has(s)) return; seenChk.add(s); g.checks.push(s); };
@@ -46,14 +46,17 @@ function vtParse(text) {
     if ((m = l.match(/^■\s*グループ\s*[：:]\s*(.+)$/))) {
       const name = m[1].trim();
       g = out.groups.find(x => x.name === name) || null;
-      if (!g) { g = { name, intro: '', items: [], checks: [] }; out.groups.push(g); }
+      if (!g) { g = { name, intro: '', items: [], checks: [], figs: [] }; out.groups.push(g); }
       w = null; mode = ''; continue;
     }
     if (l.startsWith('■')) { if (!out.groups.length && !out.title) out.title = l.replace(/^■\s*/, ''); g = null; continue; }
     // グループの見出しが無い単語帳：最初の [No.] で「単語」グループを作る
-    if (!g && /^\[No\./.test(l)) { g = out.groups.find(x => x.name === '単語') || null; if (!g) { g = { name: '単語', intro: '', items: [], checks: [] }; out.groups.push(g); } }
+    if (!g && /^\[No\./.test(l)) { g = out.groups.find(x => x.name === '単語') || null; if (!g) { g = { name: '単語', intro: '', items: [], checks: [], figs: [] }; out.groups.push(g); } }
     if (!g) continue;
     if (/^（導入[：:]/.test(l)) { intro = l.replace(/^（導入[：:]\s*/, ''); if (introClosed(intro)) finishIntro(); continue; }
+    // ★【0.03.97】図（題）：… と、続く行（字下げした表の行など）。グループの導入の文のうしろに付ける
+    if ((m = l.match(/^図\s*(?:[（(]([^）)]*)[）)])?\s*[：:]\s*(.*)$/))) { fig = { title: (m[1] || '').trim(), lines: m[2].trim() ? [m[2].trim()] : [] }; (g.figs = g.figs || []).push(fig); mode = '図'; continue; }
+    if (mode === '図' && !/^(\[No\.|■|Check!?[：:]|(意味|品詞属性|補足|表現|関連語注記|派生語|問題|選択肢)\s*[：:]|\d+-\d+\s)/i.test(l)) { fig.lines.push(l); continue; }
     if ((m = l.match(/^Check!?\s*[：:]\s*(.*)$/i))) { mode = 'check'; w = null; if (m[1]) pushCheck(m[1]); continue; }
     if ((m = l.match(/^\[No\.\s*([^\]]+)\]\s*(.+?)\s*(★*)$/))) {
       mode = 'item';
@@ -72,7 +75,7 @@ function vtParse(text) {
       else if (mode === '問題') { if (v) w.qx.push(v); }
       else if (mode === '選択肢') w.choices = vtSplitTop(v, '／/').filter(Boolean);
       else if (mode === '品詞属性') w.attr = v;
-      else if (mode === '補足') { if (v) w.notes.push(v.replace(/^★\s*/, '')); }
+      else if (mode === '補足') { if (v) w.notes.push(vtUnderline(v.replace(/^★\s*/, ''))); }
       else if (mode === '表現') w.exprs.push(...vtSplitTop(v, '／'));
       else if (mode === '関連語注記') { if (v) w.related.push(v); }
       continue;
@@ -80,12 +83,12 @@ function vtParse(text) {
     if ((m = l.match(/^(\d+)-(\d+)\s+(.+?)\s*(★*)\s*｜\s*(.+)$/))) {
       const parts = vtSplitTop(m[5], '／');
       const d = { no: m[1] + '-' + m[2], k: Number(m[2]), w: m[3].trim(), stars: m[4].length, mean: parts[0] || '', notes: [], exprs: [] };
-      parts.slice(1).forEach(p => { if (/^[◆▶]/.test(p)) d.exprs.push(p); else d.notes.push(p.replace(/^★\s*/, '')); });
+      parts.slice(1).forEach(p => { if (/^[◆▶]/.test(p)) d.exprs.push(p); else d.notes.push(vtUnderline(p.replace(/^★\s*/, ''))); });
       if (!w.derived.some(x => x.no === d.no)) w.derived.push(d);
       mode = '派生語'; continue;
     }
     if (mode === '表現') { w.exprs.push(...vtSplitTop(l, '／')); continue; }
-    if (mode === '補足') { w.notes.push(l); continue; }
+    if (mode === '補足') { w.notes.push(vtUnderline(l)); continue; }
     if (mode === '問題') { w.qx.push(l); continue; }
     if (mode === '関連語注記') { w.related.push(l); continue; }
     out.skipped.push(l);
@@ -95,8 +98,19 @@ function vtParse(text) {
 }
 
 // 「名 ①価値 ②価値観　他 ～を重んじる」→「(名詞①)価値/(名詞②)価値観/(他動詞)～を重んじる」
+// ★【0.03.97】「①名 進歩 ②自 進歩する, 前進する」（番号のうしろに品詞）→「名 進歩　自 進歩する, 前進する」（同じ品詞が続けば「名 ①… ②…」）
+function vtPosAfterNum(s) {
+  const t = String(s || '').trim();
+  if (!/^[①②③④⑤⑥⑦⑧⑨]\s*(名|他|自|形|副|前|接|句|動|代|助)(?=[\s　（(～〜]|$)/.test(t)) return t;
+  const parts = t.split(/(?=[①②③④⑤⑥⑦⑧⑨])/).map(x => x.trim()).filter(Boolean);
+  const list = parts.map(p => { const m = p.slice(1).trim().match(/^(名|他|自|形|副|前|接|句|動|代|助)(?=[\s　（(～〜]|$)\s*(.*)$/); return m ? { pos: m[1], t: m[2].trim() } : { pos: '', t: p.slice(1).trim() }; });
+  if (list.some(x => !x.pos)) return t;
+  const groups = [];
+  list.forEach(x => { const g = groups[groups.length - 1]; if (g && g.pos === x.pos) g.ts.push(x.t); else groups.push({ pos: x.pos, ts: [x.t] }); });
+  return groups.map(g => g.pos + ' ' + (g.ts.length > 1 ? g.ts.map((x, i) => VT_CIRC[i] + x).join(' ') : g.ts[0])).join('　');
+}
 function vtMeaning(s, head) {
-  s = String(s || '').trim();
+  s = vtPosAfterNum(String(s || '').trim());
   if (!s) return '';
   const chunks = s.split(/[\s　]+(?=(?:名|他|自|形|副|前|接|句|動|代|助)(?:[\s　（(①②③④⑤⑥⑦⑧⑨]))/);
   const segs = [];
@@ -124,9 +138,33 @@ function vtMeaning(s, head) {
 }
 function vtPlainMeaning(s) { return String(vtMeaning(s)).replace(/\([^()]*\)/g, '').replace(/\//g, '／'); }
 
+// ★【0.03.97】「（of に下線）」のような下線の注記を、++of++ の印にする（注記は消す）
+//  ・前にある英語の中で、その語（語の切れ目で）の最初のもの。見つからない1〜2文字（government（n に下線））は、すぐ前の英単語の中の最初のその文字
+function vtUnderline(s) {
+  let src = String(s || '');
+  const re = /\s*[（(]\s*([A-Za-z][A-Za-z' \-]*?)\s*に下線\s*[）)]/;
+  let m, guard = 0;
+  while ((m = src.match(re)) && guard++ < 10) {
+    const x = m[1].trim(), before = src.slice(0, m.index), after = src.slice(m.index + m[0].length);
+    const esc = x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // 前の部分の、かぎカッコの外の英語で探す（「…」の訳の中は探さない）
+    let done = null;
+    const wb = new RegExp('(^|[^A-Za-z+])(' + esc + ')(?![A-Za-z+])');
+    const outside = before.replace(/「[^」]*」/g, mm => '\u0000'.repeat(mm.length));
+    const w = outside.match(wb);
+    if (w) { const i = w.index + w[1].length; done = before.slice(0, i) + '++' + x + '++' + before.slice(i + x.length); }
+    else if (x.length <= 2) {
+      const lw = outside.match(/([A-Za-z]+)[^A-Za-z]*$/);
+      if (lw) { const st = lw.index, k = lw[1].indexOf(x); if (k >= 0) { const i = st + k; done = before.slice(0, i) + '++' + x + '++' + before.slice(i + x.length); } }
+    }
+    src = (done !== null ? done : before + `（${x} に下線）`.replace(/に下線/, 'に下線\u200b')) + after;
+  }
+  return src.replace(/\u200b/g, '');
+}
+
 // 表現：◆熟語「訳」（＝…） → 熟語のカード。▶ 例文「訳」・ふつうの語句「訳」 → 例文のカード（太字 **…** を空欄に）
 function vtExpr(e, head) {
-  e = String(e || '').trim();
+  e = vtUnderline(String(e || '').trim());
   if (e.startsWith('◆')) {
     const m = e.slice(1).trim().match(/^(.+?)「([^」]+)」(.*)$/);
     if (!m) return null;
@@ -136,7 +174,7 @@ function vtExpr(e, head) {
   if (!m || !/[A-Za-z]/.test(m[1])) return null;
   let en = m[1].trim(); const ja = m[2].trim();
   let target = null;
-  const b = en.match(/\*\*([^*]+)\*\*/);
+  const b = en.match(/\*\*([^*]+)\*\*/) || en.match(/\+\+([^+]+)\+\+/); // ★【0.03.97】下線の語（++for++）も空欄にする
   if (b) { target = b[1].trim(); en = en.replace(b[0], '（　　　）').replace(/\*\*/g, ''); }
   else {
     const hw = String(head || '').split(/\s+/)[0].toLowerCase(), stem = hw.length > 5 ? hw.slice(0, hw.length - 2) : hw;
@@ -162,7 +200,21 @@ function vtAccentChoices(a) {
   return keep.length >= 2 ? keep : null;
 }
 // 1つの Check! から問題の配列（アクセントで「a / b」と2語あれば2問。元の試作と同じ）
+// ★【0.03.97】1行に「問1 → 答1 ／ 問2 → 答2」と2問以上あれば分ける（答えの中の「福祉／幸福」は分けない）
+function vtSplitChecks(raw) {
+  const s = String(raw || '').trim();
+  if ((s.match(/→/g) || []).length < 2) return [s];
+  const out = []; let cur = '';
+  vtSplitTop(s, '／').forEach(t => {
+    if (cur && /→/.test(cur) && /→/.test(t)) { out.push(cur); cur = t; }
+    else cur = cur ? cur + '／' + t : t;
+  });
+  if (cur) out.push(cur);
+  return out;
+}
 function vtChecks(raw) {
+  const all = vtSplitChecks(raw);
+  if (all.length > 1) return all.flatMap(x => vtChecks(x));
   const s = String(raw || '').trim(), k = s.lastIndexOf('→');
   if (k < 0) return [];
   const q = s.slice(0, k).trim(), a = s.slice(k + 1).trim();
@@ -192,6 +244,29 @@ function vtCheck(raw) {
   return { q, a };
 }
 
+// ★【0.03.97】図を導入の文に付けるときの形：「🗺️ 図（題）」の行のあとに中身の行
+function vtFigText(f) { return [`🗺️ 図${f.title ? `（${f.title}）` : ''}`, ...f.lines].join('\n'); }
+// 「名前動後（名 [prágres] ／ 動 [prəgrés]）」→ 品詞ごとのアクセント問題（発音記号の強く読む母音の位置を、つづりの母音に当てる）
+function vtStressQs(word, note) {
+  const out = [], w = String(word || '').trim();
+  if (!/^[A-Za-z]+$/.test(w) || !/名前動後|アクセント/.test(note)) return out;
+  const POS = { '名': '名詞', '動': '動詞', '形': '形容詞', '他': '動詞', '自': '動詞' };
+  const re = /(名|動|形|他|自)\s*[\[［/]([^\]］/]+)[\]］/]/g; let m;
+  const cl = [...w.matchAll(/[aeiouy]+/gi)].map(x => ({ p: x.index, l: x[0].length }));
+  if (cl.length < 2) return out;
+  while ((m = re.exec(note))) {
+    const ipa = m[2].normalize('NFD');
+    const vs = [...ipa.matchAll(/[aeiouæɑɒɔəɛɪʊʌɜɚɝ]+[\u0300-\u036f]*/g)];
+    let k = vs.findIndex(v => v[0].includes('\u0301'));
+    if (k < 0) { const s0 = ipa.indexOf('ˈ'); if (s0 >= 0) k = vs.findIndex(v => v.index > s0); }
+    if (k < 0 || vs.length !== cl.length) continue;
+    const mk = c => (w.slice(0, c.p + 1) + '\u0301' + w.slice(c.p + 1)).normalize('NFC');
+    const choices = cl.map(mk), a = choices[k];
+    out.push({ q: `${w}（${POS[m[1]]}）のアクセント位置は？（強く読む母音に ´ が付いたものを選ぶ）`, a, choices });
+  }
+  return out;
+}
+
 // ---------------- カードにする ----------------
 function vtSectionName(title) {
   const t = String(title || '').trim();
@@ -209,7 +284,9 @@ function vtCards(parsed, section) {
   parsed.groups.forEach((g, gi) => {
     const folder = `${code}-${gi + 1} ${g.name}`; // 番号を付けて、本の順に並ぶように
     folders.push(folder);
-    if (g.intro) add({ folder, q: '📖 導入の文', a: g.intro, kind: 'intro' });
+    const figs = (g.figs || []).filter(f => f.lines.length);
+    const introText = [g.intro, ...figs.map(vtFigText)].filter(Boolean).join('\n\n');
+    if (introText) add({ folder, q: '📖 導入の文', a: introText, kind: 'intro' });
     let lastBase = 0;
     g.items.forEach(w => {
       const base = parseInt(w.no, 10);
@@ -232,19 +309,36 @@ function vtCards(parsed, section) {
         if (x.type === 'phrase') {
           const key = x.q.toLowerCase(); if (seenPhrase.has(key)) return; seenPhrase.add(key);
           // ◆の熟語は「チャンツ」フォルダーへ（元の試作と同じく暗記テストには出さない。クイズ・週間プランのチャンツで）
-          add({ folder: chFolder, q: x.q, a: x.a, no, note: `${head}：${vtPlainMeaning(mean)}` });
+          // ★【0.03.97】~~a~~（取り消し線）は「その語は付けない」：メモに × の形を書き、「（ ）に入るのは？」の選択問題も作る
+          const st = [...x.q.matchAll(/~~([^~\n]+?)~~/g)].map(m => m[1].trim());
+          add({ folder: chFolder, q: x.q, a: x.a, no, note: [`${head}：${vtPlainMeaning(mean)}`, ...(st.length ? [`× ${markWrongForm(x.q)}（${st.join('・')} は付けない）`] : [])].join('\n') });
+          st.forEach((w0, si) => {
+            let qq = x.q; let n = 0;
+            qq = qq.replace(/[(（]?\s*~~([^~\n]+?)~~\s*[)）]?/g, (m, inner) => (n++ === si ? '（　　　）' : markWrongForm(m).replace(/^[(（]|[)）]$/g, '')));
+            const art = /^(a|an|the)$/i.test(w0);
+            const choices = art ? ['a', 'an', 'the', '何も入らない'] : [w0, '何も入らない'];
+            add({ folder: chFolder, q: `${markStrip(qq).replace(/[ \t]+/g, ' ').trim()}\n（　　　）に入るのは？`, a: '何も入らない', kind: 'test', choices, no });
+          });
         } else add({ folder: exFolder, q: x.q, a: x.a, kind: 'cloze', note: `${head}：${vtPlainMeaning(mean)}`, no });
       });
     });
     // Check! は表に出す番号を持たない（並び順のためだけに、グループの最後の語のうしろの番号を持つ）
     let ci = 0;
-    g.checks.forEach(c => vtChecks(c).forEach(x => add({ folder, q: x.q, a: x.a, kind: 'test', choices: x.choices || null, no: lastBase + 0.99 + Math.min(++ci, 99) / 10000 })));
+    const chk = g.checks.flatMap(c => vtChecks(c));
+    // ★【0.03.97】図のアクセント（demócracy → democrátic など）と「名前動後（名 [prágres] ／ 動 [prəgrés]）」からも、アクセントの選択問題を作る（Check! と同じものは作らない）
+    const have = new Set(chk.map(x => String(x.a).normalize('NFC')));
+    const more = [];
+    figs.forEach(f => f.lines.forEach(line => (line.normalize('NFC').match(/[A-Za-z]*[áéíóúýÁÉÍÓÚ][A-Za-z]*/g) || []).forEach(wd => { if (have.has(wd)) return; const x = vtCheck(`アクセント → ${wd}`); if (x && x.choices) { have.add(wd); more.push(x); } })));
+    g.items.forEach(w => [w, ...w.derived].forEach(it => (it.notes || []).forEach(n => vtStressQs(it.w, n).forEach(x => { if (!have.has(x.a)) { have.add(x.a); more.push(x); } }))));
+    chk.concat(more).forEach(x => add({ folder, q: x.q, a: x.a, kind: 'test', choices: x.choices || null, no: lastBase + 0.99 + Math.min(++ci, 99) / 10000 }));
   });
   return { cards, folders, exFolder, chFolder, code };
 }
 
 // ★【0.03.71】前に取り込んだフォルダーを探す（フォルダー名が変わっていても、中のカードの問題が同じなら同じフォルダーとみなす）
-const vtKey = (q, kind) => String(q).trim() + '\u0001' + (kind || '');
+const vtQNorm = q => (typeof markStrip === 'function' ? markStrip(q) : String(q)).trim();
+const vtSameQ = (a, b) => vtQNorm(a) === vtQNorm(b); // ★【0.03.97】下線・取り消し線の印が付いた/外れただけなら同じ問題
+const vtKey = (q, kind) => vtQNorm(q) + '\u0001' + (kind || '');
 function vtMatchCount(cat, keys, deep) {
   const cs = new Set(deep ? getAllSubcategories(cat) : [cat]);
   let n = 0; db.forEach(d => { if (cs.has(d.category) && d.kind !== 'intro' && keys.has(vtKey(d.question, d.kind))) n++; });
@@ -314,12 +408,12 @@ function vtSave(parsed, parentCat, section) {
   cards.forEach(c => {
     const cat = nameMap[c.folder]; touched.add(cat);
     const kind = c.kind || '';
-    const ex = db.find(d => d.category === cat && String(d.question).trim() === String(c.q).trim() && (d.kind || '') === kind);
+    const ex = db.find(d => d.category === cat && vtSameQ(d.question, c.q) && (d.kind || '') === kind);
     if (ex) {
       if (ex.sharedDocId && getSharedAccess(ex.sharedDocId).readOnly) return;
       let ch = false;
       const set = (f, v) => { if (v === undefined || v === null || v === '') return; if (JSON.stringify(ex[f]) !== JSON.stringify(v)) { ex[f] = v; ch = true; } };
-      set('answer', c.a); set('choices', c.choices); set('stars', c.stars || null);
+      set('question', c.q); set('answer', c.a); set('choices', c.choices); set('stars', c.stars || null);
       if (c.no !== null && c.no !== undefined && !(typeof ex.no === 'number' && Math.abs(ex.no - c.no) < 1e-6)) set('no', c.no); // 小数の誤差では書き換えない
       // ★【0.03.71】メモは、自分で書き足した分を消さない：前に取り込んだメモ（vtNote）の部分だけを新しいものに置き換える
       if (c.note) {
@@ -349,17 +443,17 @@ function vtSave(parsed, parentCat, section) {
   // 成績を今の置き場所のカードにまとめてから消す（番号がずれた古いカードが並んで、順番が合わなくなっていた）
   let removed = 0;
   const secSet = new Set(getAllSubcategories(sec)), drop = new Set();
-  const placed = new Set(cards.map(c => nameMap[c.folder] + '\u0001' + String(c.q).trim() + '\u0001' + (c.kind || ''))); // 今回の取り込みで置く場所（同じ問題がほかのグループにもあるときは消さない）
+  const placed = new Set(cards.map(c => nameMap[c.folder] + '\u0001' + vtQNorm(c.q) + '\u0001' + (c.kind || ''))); // 今回の取り込みで置く場所（同じ問題がほかのグループにもあるときは消さない）
   cards.forEach(c => {
     const kind = c.kind || '';
     if (kind === 'intro' || kind === 'test') return;
     const cat = nameMap[c.folder];
-    const main = db.find(d => d.category === cat && String(d.question).trim() === String(c.q).trim() && (d.kind || '') === kind);
+    const main = db.find(d => d.category === cat && vtSameQ(d.question, c.q) && (d.kind || '') === kind);
     if (!main) return;
     db.forEach(d => {
       if (d === main || drop.has(d.id) || d.category === cat || !secSet.has(d.category)) return;
-      if (String(d.question).trim() !== String(c.q).trim() || (d.kind || '') !== kind) return;
-      if (placed.has(d.category + '\u0001' + String(d.question).trim() + '\u0001' + (d.kind || ''))) return;
+      if (!vtSameQ(d.question, c.q) || (d.kind || '') !== kind) return;
+      if (placed.has(d.category + '\u0001' + vtQNorm(d.question) + '\u0001' + (d.kind || ''))) return;
       if (d.sharedDocId && getSharedAccess(d.sharedDocId).readOnly) return;
       // 今の置き場所以外（ほかのグループ・前の版のフォルダー）にある同じ問題
       CARD_STAT_FIELDS.forEach(f => { if (f === 'senses' || f === 'drillStats') { if (!main[f] && d[f]) main[f] = d[f]; return; } main[f] = Math.max(Number(main[f]) || 0, Number(d[f]) || 0); });

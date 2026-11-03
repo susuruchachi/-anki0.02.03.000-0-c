@@ -6,6 +6,36 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
+// ★【0.03.97】単語帳の書き方の印：~~a~~ は取り消し線（その語は使わない。make (~~a~~) progress）、++of++ は下線（大事な語）
+const MARK_STRIKE_RE = /~~([^~\n]+?)~~/g, MARK_UNDER_RE = /\+\+([^+\n]+?)\+\+/g;
+function hasMarks(s) { return /~~[^~\n]+?~~|\+\+[^+\n]+?\+\+/.test(String(s || '')); }
+// エスケープ済みの HTML の中の印をタグにする
+function markHTML(html) { return String(html == null ? '' : html).replace(MARK_STRIKE_RE, '<s class="mk-s">$1</s>').replace(MARK_UNDER_RE, '<u class="mk-u">$1</u>'); }
+// 印だけを外す（文字は残す）
+function markStrip(s) { return String(s == null ? '' : s).replace(MARK_STRIKE_RE, '$1').replace(MARK_UNDER_RE, '$1'); }
+// 読み上げ・答え合わせ用：取り消し線の語は無いものにする（「(~~a~~)」ならかっこごと）
+function markPlain(s) {
+  return String(s == null ? '' : s).replace(/[(（]\s*~~[^~\n]+?~~\s*[)）]/g, ' ').replace(MARK_STRIKE_RE, ' ').replace(MARK_UNDER_RE, '$1').replace(/[ \t]{2,}/g, ' ').replace(/ +([,.?!])/g, '$1').trim();
+}
+// 取り消し線の語を「付けない」とわかる形で（メモ用）：make (~~a~~) progress → make a progress
+function markWrongForm(s) { return String(s == null ? '' : s).replace(/[(（]\s*~~([^~\n]+?)~~\s*[)）]/g, '$1').replace(MARK_STRIKE_RE, '$1').replace(MARK_UNDER_RE, '$1'); }
+
+// ★【0.03.97】単語帳の「図」を表示する：「🗺️ 図（題）」の行と中身の行。表の形（見出し「A→B→C」＋「名前：x → y → z」）なら表にする
+function figHTML(text) {
+  const e = t => markHTML(escapeHtml(t));
+  const lines = String(text || '').split('\n').map(x => x.trim()).filter(Boolean);
+  const title = lines[0] && lines[0].startsWith('🗺️') ? lines.shift() : '';
+  const cells = t => t.split(/\s*(?:→|―|—)\s*/).map(x => x.trim());
+  const rows = lines.map(l => { const m = l.match(/^([^：:]{1,12})[：:]\s*(.+)$/); return m && /→|―/.test(m[2]) ? [m[1], ...cells(m[2])] : null; });
+  const head = lines.length >= 2 && /→/.test(lines[0]) && !/[：:]/.test(lines[0]) ? cells(lines[0]) : null;
+  const body = rows.slice(head ? 1 : 0);
+  let inner;
+  if (body.length && body.every(Boolean) && body.every(r => r.length === body[0].length) && (!head || head.length === body[0].length - 1)) {
+    inner = `<table class="fig-table">${head ? `<tr><th></th>${head.map(h => `<th>${e(h)}</th>`).join('')}</tr>` : ''}${body.map(r => `<tr><th>${e(r[0])}</th>${r.slice(1).map(c => `<td>${e(c)}</td>`).join('')}</tr>`).join('')}</table>`;
+  } else inner = lines.map(l => `<div>${e(l).replace(/\s+／\s+/g, '<br>')}</div>`).join('');
+  return `${title ? `<div class="fig-title">${e(title)}</div>` : ''}${inner}`;
+}
+
 // ★【0.03.02】onclick="fn(...)" の引数に文字列を安全に埋め込む（名前に ' や \ が入っていてもスクリプトとして実行されない）
 function jsArg(v) {
   return JSON.stringify(String(v == null ? '' : v)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '&#39;');
@@ -117,8 +147,8 @@ function hideNoteTranslations(note, answerIsLatin) {
 // 一覧表示用：隠す部分をタップで表示できるHTMLにする
 function noteToSpoilerHTML(note, answerIsLatin) {
   return splitNoteForHiding(note, answerIsLatin).map(p => p.hide
-    ? `<span class="note-spoiler" onclick="event.stopPropagation(); this.classList.toggle('shown')">${escapeHtml(p.t)}</span>`
-    : escapeHtml(p.t)).join('');
+    ? `<span class="note-spoiler" onclick="event.stopPropagation(); this.classList.toggle('shown')">${markHTML(escapeHtml(p.t))}</span>`
+    : markHTML(escapeHtml(p.t))).join('');
 }
 
 function toggleLightMode(forceOn = false) {

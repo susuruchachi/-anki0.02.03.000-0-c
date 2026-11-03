@@ -251,7 +251,7 @@ function listenDraw() {
       ${cloze ? '' : `<div class="listen-q">${escapeHtml(String(q.question || '')).replace(/\n/g, '<br>')}</div>`}
       ${!cloze && Array.isArray(q.choices) && q.choices.length >= 2 ? `<div class="hint-small">${q.choices.map((c, k) => `${k + 1}. ${escapeHtml(c)}`).join('　')}</div>` : ''}
       <div class="listen-a${ph === 'q' ? ' hidden' : ''}">${escapeHtml(ans).replace(/\n/g, '<br>')}</div>
-      ${listenPrefs().note && q.note && ph === 'n' ? `<div class="hint-small listen-n">📝 ${escapeHtml(q.note).replace(/\n/g, '<br>')}</div>` : ''}
+      ${listenPrefs().note && q.note && ph === 'n' ? `<div class="hint-small listen-n">📝 ${markHTML(escapeHtml(q.note)).replace(/\n/g, '<br>')}</div>` : ''}
       <div class="listen-ctrl">
         <button class="chip" onclick="listenSkip(-1)" title="前へ">⏮</button>
         <button class="btn btn-primary listen-play" onclick="listenToggle()">${_ls.playing ? '⏸ 一時停止' : '▶️ 再生'}</button>
