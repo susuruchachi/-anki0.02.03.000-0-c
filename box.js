@@ -339,7 +339,11 @@ function openCardModal(mode, itemOrDefaults) {
   document.getElementById('txtCardQuestion').value = mode === 'edit' ? (itemOrDefaults.question || '') : '';
   document.getElementById('txtCardAnswer').value = mode === 'edit' ? (itemOrDefaults.answer || '') : '';
   document.getElementById('txtCardNote').value = mode === 'edit' ? (itemOrDefaults.note || '') : '';
-  document.getElementById('numCardNo').value = mode === 'edit' && itemOrDefaults.no ? itemOrDefaults.no : '';
+  document.getElementById('numCardNo').value = mode === 'edit' && itemOrDefaults.no ? cardNoText(itemOrDefaults.no) : '';
+  // ★【0.04.02】形式・選択肢も、この画面で決められる
+  document.getElementById('selCardKind').value = mode === 'edit' && ['test', 'cloze', 'self'].includes(itemOrDefaults.kind) ? itemOrDefaults.kind : '';
+  document.getElementById('txtCardChoices').value = mode === 'edit' && Array.isArray(itemOrDefaults.choices) ? itemOrDefaults.choices.join(' / ') : '';
+  updateCardKindHint();
   document.getElementById('selCardStars').value = String(mode === 'edit' ? (Number(itemOrDefaults.stars) || 0) : 0);
   updateCardImagePreview('question');
   updateCardImagePreview('answer');
@@ -347,6 +351,18 @@ function openCardModal(mode, itemOrDefaults) {
   updateCardPreview();
 }
 
+function updateCardKindHint() {
+  const el = document.getElementById('lblCardKindHint'); if (!el) return;
+  const k = document.getElementById('selCardKind').value;
+  el.textContent = k === 'test' ? '暗記テストでは、そのフォルダー（グループ）の単語のあとに Check! として出ます。問題番号は表に出しません。' : k === 'cloze' ? '問題文の（　　　）に答えを入れる問題。週間プランの「例文」に入ります。問題と答えの入れ替えの対象外です。' : k === 'self' ? '記述式でも、答えを見て〇×を自分で決めます。' : '';
+}
+// 「1045」「1045-1」「1045-1-1」→ 1045 / 1045.01 / 1045.0101（取り込みと同じ持ち方）。読めなければ null
+function parseCardNoInput(v) {
+  const m = String(v || '').replace(/[０-９]/g, d => String.fromCharCode(d.charCodeAt(0) - 0xFEE0)).replace(/[ー－‐−]/g, '-').trim().match(/^(\d+)(?:\s*-\s*(\d+))?(?:\s*-\s*(\d+))?$/);
+  if (!m) return null;
+  const n = Number(m[1]) + (m[2] ? Number(m[2]) / 100 : 0) + (m[3] ? Number(m[3]) / 10000 : 0);
+  return n > 0 ? Math.round(n * 10000) / 10000 : null;
+}
 function closeCardModal() {
   document.getElementById('cardModalOverlay').style.display = 'none';
 }
@@ -379,18 +395,25 @@ async function submitCardModal() {
   const q = document.getElementById('txtCardQuestion').value.trim();
   const a = document.getElementById('txtCardAnswer').value.trim();
   const note = document.getElementById('txtCardNote').value.trim();
-  const noVal = parseInt(document.getElementById('numCardNo').value, 10);
-  const no = Number.isFinite(noVal) && noVal > 0 ? noVal : null;
+  const noRaw = document.getElementById('numCardNo').value.trim();
+  const no = parseCardNoInput(noRaw);
+  if (noRaw && !no) { alert('問題番号は「1045」「1045-1」「1045-1-1」のように入れてください。'); document.getElementById('numCardNo').focus(); return; }
+  const kind = document.getElementById('selCardKind').value;
+  const choices = typeof parseChoicesCell === 'function' ? parseChoicesCell(document.getElementById('txtCardChoices').value) : null;
+  if (document.getElementById('txtCardChoices').value.trim() && !choices) { alert('選択肢は「 / 」で区切って2つ以上入れてください。'); document.getElementById('txtCardChoices').focus(); return; }
   const stars = parseStars(document.getElementById('selCardStars').value);
   if (!q) { alert('問題文を入力してください。'); document.getElementById('txtCardQuestion').focus(); return; }
   if (!a) { alert('答えを入力してください。'); document.getElementById('txtCardAnswer').focus(); return; }
+  if (choices && !choices.some(c => c.trim() === a || (typeof isAnswerCorrect === 'function' && isAnswerCorrect(c, a))) && !confirm('答えと同じ選択肢がありません。このまま保存しますか？')) return;
 
   if (_cardModalState.mode === 'edit') {
     // 同期でオブジェクトが差し替わっていても、IDで最新のカードを更新する
     const item = db.find(x => x.id === _cardModalState.item.id) || _cardModalState.item;
     item.question = q; item.answer = a;
     if (note) item.note = note; else delete item.note;
-    if (no && !(item.no && Math.floor(item.no) === no)) item.no = no; // 「1000-1」などはそのまま
+    if (no && !(typeof item.no === 'number' && Math.abs(item.no - no) < 1e-6)) item.no = no;
+    if (kind) item.kind = kind; else if (['test', 'cloze', 'self'].includes(item.kind)) delete item.kind;
+    if (choices) item.choices = choices; else delete item.choices;
     if (stars) item.stars = stars; else delete item.stars;
     touchCard(item);
     if (_cardModalState.qImage) item.questionImage = _cardModalState.qImage; else delete item.questionImage;
@@ -401,6 +424,8 @@ async function submitCardModal() {
     const newCard = { id: newCardId(), question: q, answer: a, category: _cardModalState.category, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 };
     if (note) newCard.note = note;
     if (no) newCard.no = no;
+    if (kind) newCard.kind = kind;
+    if (choices) newCard.choices = choices;
     if (stars) newCard.stars = stars;
     touchCard(newCard);
     if (_cardModalState.qImage) newCard.questionImage = _cardModalState.qImage;

@@ -1317,7 +1317,23 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 
     <div class="form-group" style="margin-top:15px;">
       <label class="section-label">🔢 問題番号（フォルダー内の並び順・番号順の出題に使います）</label>
-      <input type="number" id="numCardNo" class="form-control" min="1" placeholder="空欄なら最後の番号の次">
+      <input type="text" id="numCardNo" class="form-control" inputmode="text" autocomplete="off" placeholder="空欄なら最後の次（1045-1 も可）">
+    </div>
+
+    <div class="form-group" style="margin-top:15px;">
+      <label class="section-label">🧩 形式</label>
+      <select id="selCardKind" class="form-control" onchange="updateCardKindHint()">
+        <option value="">ふつうの問題</option>
+        <option value="test">テスト（Check!）</option>
+        <option value="cloze">例文（穴埋め）</option>
+        <option value="self">自己申告</option>
+      </select>
+      <div id="lblCardKindHint" class="hint-small" style="margin-top:4px;"></div>
+    </div>
+
+    <div class="form-group" style="margin-top:15px;">
+      <label class="section-label">🔘 選択肢（任意。「 / 」で区切る。答えと同じものを1つ入れる）</label>
+      <input type="text" id="txtCardChoices" class="form-control" autocomplete="off" placeholder="例：goverment / government">
     </div>
 
     <div class="form-group" style="margin-top:15px;">
