@@ -16,7 +16,16 @@ let catStamps = {};   // { フォルダー名: { a: 作成(復活)時刻, d: 削
 let catSubjects = {}; // ★【0.03.07】フォルダーの教科タグ { フォルダー名: '英語' }（'' は「なし（親から引き継がない）」）
 // ★【0.03.30】上のフォルダーから出題するときに出さないフォルダー { フォルダー名: true }（false は「出す」を明示。同期で外せるように）
 let catSkip = {};
-function isCatSkipped(cat) { return !!(catSkip && catSkip[cat] === true); }
+// ★【0.03.96】印が無くても、名前が「例文」「チャンツ」で終わるフォルダー（テキストから作ったもの・共有カテゴリーから取り込んだもの）は、
+// はじめから「上のフォルダーから出題しない」にする（印は自分のデータにしか無く、共有カテゴリーを取り込んだ人には付いていなかった）。
+// 自分で外した（false）・付けた（true）ときはそちらを優先
+const CAT_DEFAULT_SKIP_RE = /(例文|チャンツ)(（[^）]*）)?$/;
+function isCatSkipped(cat) {
+  const v = catSkip ? catSkip[cat] : undefined;
+  if (v === true) return true;
+  if (v === false) return false;
+  return CAT_DEFAULT_SKIP_RE.test(String(cat || '').trim());
+}
 // 出題に使うフォルダー：自分と、その下のフォルダー（ただし「上から出題するときは出さない」フォルダーとその下は除く）
 function getQuizSubcategories(cat, result = []) {
   if (result.includes(cat)) return result;

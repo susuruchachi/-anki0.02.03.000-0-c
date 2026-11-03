@@ -224,7 +224,7 @@ function openCategoryEditor(catName) {
 
 function setCategorySkip(cat, on) {
   catSkip = catSkip || {};
-  if (on) catSkip[cat] = true; else if (catSkip[cat]) catSkip[cat] = false;
+  catSkip[cat] = !!on; // 外したときも「出す」を明示（名前で最初から外しているフォルダーのため）
   saveData(true);
   if (typeof refreshVisibleViews === 'function') refreshVisibleViews(true);
 }
