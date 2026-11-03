@@ -205,8 +205,17 @@ function cardNoText(no) {
 }
 // 番号を表に出すカードか（導入の文・Check! は出さない）
 function showsCardNo(q) { return !!(q && q.no) && q.kind !== 'intro' && q.kind !== 'test'; }
+// ★【0.03.99】「名　進歩　自　進歩する　前進する」「①名 進歩 ②自 進歩する」のように、品詞を1文字（名・他・自・形・副…）で
+// 書いた答えは、「(名詞)進歩/(自動詞)進歩する　前進する」の形として読む（前は「名」「自」も答えの1つとして採点していた）
+const POS_ABBR_ANS_RE = /^\s*(?:[①②③④⑤⑥⑦⑧⑨]\s*)?(名|他|自|形|副|前|接|動|代|助|句)[\s　]+\S/;
+function posAbbrevAnswer(text) {
+  const t = String(text || '');
+  if (!POS_ABBR_ANS_RE.test(t) || /^\s*\(/.test(t) || /[\/／]/.test(t) || typeof vtMeaning !== 'function') return null;
+  try { const r = vtMeaning(t.replace(/[ \t]+/g, '　'), ''); return /^\(/.test(r) ? r : null; } catch (e) { return null; }
+}
 function parseStructuredAnswer(answerText) {
   if (!answerText) return null;
+  { const conv = posAbbrevAnswer(answerText); if (conv) answerText = conv; }
   const rawSegments = splitAnswerAlternatives(answerText, '/');
   if (rawSegments.length < 2) {
     const single = String(rawSegments[0] || '').match(/^\s*\(([^()]*)\)/);
