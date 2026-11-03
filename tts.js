@@ -346,17 +346,20 @@ const ttsReadKey = t => TTS_CACHE_VER + 'r2|' + t; // r2：{ t, k }（0.03.87〜
 async function ttsSpokenParts(segs, share) {
   const rd = await ttsReadings(segs.filter(s => s.ja && ttsNeedsReading(s.t)).map(s => s.t), share);
   const noKanji = t => !/[一-鿿々〆]/.test(t);
-  const ja = s => { const r = rd.get(s.t); return { t: r && r.t ? r.t : s.t, k: r && r.k ? r.k : (noKanji(s.t) ? s.t : '') }; };
+  // ★【0.03.98】かなの無い漢字だけの部分（「保存、保全」「名詞、政治」など）は、声のモデルが中国語として読んでしまうので、ひらがなの読みで頼む
+  const noKana = t => /[一-鿿々〆]/.test(t) && !/[ぁ-ゖァ-ヺ]/.test(t);
+  const ja = s => { const r = rd.get(s.t); const k = r && r.k ? r.k : (noKanji(s.t) ? s.t : ''); return { t: noKana(s.t) && k ? k : r && r.t ? r.t : s.t, k, cn: noKana(s.t) && !k }; };
+  const jpSay = t => `Say in Japanese: ${t}`; // 読みが無いときは、日本語として読むように頼む
   const orig0 = segs.map(x => x.t).join(' ');
   if (!ttsModeWhole() || segs.length <= 1 || ttsSplitTexts().includes(orig0)) {
-    return segs.map(s => { if (!s.ja) return { seg: s, spoken: s.t, expect: '' }; const x = ja(s); return { seg: s, spoken: x.t, expect: x.k }; });
+    return segs.map(s => { if (!s.ja) return { seg: s, spoken: s.t, expect: '' }; const x = ja(s); return { seg: s, spoken: x.cn ? jpSay(x.t) : x.t, expect: x.k }; });
   }
   // ★【0.03.87】まとめて1つの声にする（部分ごとに作ると、「とは？」のような短い部分の抑揚がおかしくなっていた）
   const hasEn = segs.some(s => !s.ja), hasJa = segs.some(s => s.ja);
-  let body = '', orig = '', kana = '', kanaOk = true;
+  let body = '', orig = '', kana = '', kanaOk = true, cn = false;
   segs.forEach((s, i) => {
     const prev = segs[i - 1], sp = prev && (!prev.ja || !s.ja) ? ' ' : '';
-    if (s.ja) { const x = ja(s); body += sp + x.t; if (x.k) kana += x.k; else kanaOk = false; }
+    if (s.ja) { const x = ja(s); body += sp + x.t; if (x.cn) cn = true; if (x.k) kana += x.k; else kanaOk = false; }
     else body += sp + s.t;
     orig += sp + s.t;
   });
@@ -364,7 +367,7 @@ async function ttsSpokenParts(segs, share) {
   // 英語が「of」「to」のような短い語だけなら頼まない（頼むと「読めません」と英語で話し出すことがあった）
   const enWords = segs.filter(x => !x.ja).map(x => x.t).join(' ').split(/\s+/).filter(Boolean);
   const direct = hasEn && hasJa && !(enWords.length <= 2 && enWords.every(w => w.replace(/[^A-Za-z]/g, '').length <= 3));
-  const spoken = direct ? `Read the following aloud naturally. Use natural Japanese intonation for Japanese, and native English pronunciation for English words:\n${body}` : body;
+  const spoken = direct ? `Read the following aloud naturally. Use natural Japanese intonation for Japanese, and native English pronunciation for English words:\n${body}` : cn ? jpSay(body) : body;
   return [{ seg: { ja: hasJa, t: orig }, spoken, expect: hasEn ? '#mix|' + orig0 : (!kanaOk ? '' : kana) }];
 }
 // ★【0.03.87】日本語の部分の「読み上げ用の文」と「読み（ひらがな）」。{ t: 読み間違えやすい漢字だけかなにした文, k: 全部ひらがなの読み }
