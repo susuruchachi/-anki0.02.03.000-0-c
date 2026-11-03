@@ -55,7 +55,8 @@ function drillBuild(cat) {
     }
     if (!g) return;
     groupOf[c] = g;
-    words.forEach(q => g.items.push({ id: q.id, w: q.question, m: q.answer, card: q, o: o++ }));
+    // ★【0.04.00】「名　進歩　自　進歩する」のような品詞1文字の答えは、はじめから (名詞)進歩/(自動詞)… の形にしておく（AI への指示・表示も同じ形に）
+    words.forEach(q => g.items.push({ id: q.id, w: q.question, m: (typeof posAbbrevAnswer === 'function' && posAbbrevAnswer(q.answer)) || q.answer, card: q, o: o++ }));
     checks.forEach(q => g.checks.push(q));
   });
   DI = {}; DCK = {};
@@ -104,7 +105,8 @@ function drillSplitAll(b) { return b.flatMap(x => String(x.t).split('，').map(t
 async function drillGroupSenses(it) {
   if (DS.sp && DS.sp[it.id]) return DS.sp[it.id];
   const cache = drillLoadSenseCache(), c = cache[it.id];
-  if (c && c.a === it.m && Array.isArray(c.s)) return (DS.sp[it.id] = c.s);
+  // 前の版で「名」「自」を意味の1つとして保存したまとめは使わない
+  if (c && c.a === it.m && Array.isArray(c.s) && !c.s.some(x => /^(名|他|自|形|副|前|接|動|代|助|句)$/.test(String(x.t || '').trim()))) return (DS.sp[it.id] = c.s);
   const b = drillSenses(it), cm = b.filter(x => /[，,]/.test(x.t));
   if (!cm.length) return (DS.sp[it.id] = b);
   if (!drillAiOk()) return (DS.sp[it.id] = drillSplitAll(b));

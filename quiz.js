@@ -25,12 +25,13 @@ function getBestVoice(langPrefix) {
 // 読み上げ用に記号を整える（[to be] → to be、空欄 ( ) → 「ブランク」など）
 // ★【0.03.66】1文字だけの大文字（be worth A の A など）は、端末によって「capital A」と読まれるので、文字の名前で読ませる。
 // 文の始めの冠詞の A（A man came.）は小文字に、I（私）はそのまま
-const SPEECH_LETTER_NAMES = { A: 'ay', B: 'bee', C: 'see', D: 'dee', E: 'ee', F: 'eff', G: 'gee', H: 'aitch', J: 'jay', K: 'kay', L: 'el', M: 'em', N: 'en', O: 'oh', P: 'pee', Q: 'cue', R: 'ar', S: 'ess', T: 'tee', U: 'you', V: 'vee', W: 'double you', X: 'ex', Y: 'why', Z: 'zee' };
+const SPEECH_LETTER_NAMES = { A: 'ay', I: 'eye', B: 'bee', C: 'see', D: 'dee', E: 'ee', F: 'eff', G: 'gee', H: 'aitch', J: 'jay', K: 'kay', L: 'el', M: 'em', N: 'en', O: 'oh', P: 'pee', Q: 'cue', R: 'ar', S: 'ess', T: 'tee', U: 'you', V: 'vee', W: 'double you', X: 'ex', Y: 'why', Z: 'zee' };
 // ★【0.03.76】AI の声（tts.js）には、カタカナの文字の名前で渡す（「ay」と渡すと「えーあい」と読まれた）
-const SPEECH_LETTER_KANA = { A: 'エー', B: 'ビー', C: 'シー', D: 'ディー', E: 'イー', F: 'エフ', G: 'ジー', H: 'エイチ', J: 'ジェー', K: 'ケー', L: 'エル', M: 'エム', N: 'エヌ', O: 'オー', P: 'ピー', Q: 'キュー', R: 'アール', S: 'エス', T: 'ティー', U: 'ユー', V: 'ブイ', W: 'ダブリュー', X: 'エックス', Y: 'ワイ', Z: 'ゼット' };
+const SPEECH_LETTER_KANA = { A: 'エー', I: 'アイ', B: 'ビー', C: 'シー', D: 'ディー', E: 'イー', F: 'エフ', G: 'ジー', H: 'エイチ', J: 'ジェー', K: 'ケー', L: 'エル', M: 'エム', N: 'エヌ', O: 'オー', P: 'ピー', Q: 'キュー', R: 'アール', S: 'エス', T: 'ティー', U: 'ユー', V: 'ブイ', W: 'ダブリュー', X: 'エックス', Y: 'ワイ', Z: 'ゼット' };
 function speechLetters(text, kana) {
   return String(text || '').replace(/(^|[^A-Za-z0-9.])([A-Z])(?![A-Za-z0-9]|\.[A-Za-z])/g, (m, pre, L, off, all) => {
-    if (L === 'I') return m;
+    // 「I」は代名詞として読む。ただし、つづりを1文字ずつ並べたもの（P O L I T I C S）の中なら文字の名前
+    if (L === 'I' && !(/(^|[^A-Za-z])[A-Z]\s+$/.test(all.slice(0, off + pre.length)) || /^\s+[A-Z](?![A-Za-z])/.test(all.slice(off + m.length)))) return m;
     if (L === 'A') {
       const before = all.slice(0, off + pre.length), after = all.slice(off + m.length);
       // 文の始めで、すぐ後ろに小文字の単語が続くなら冠詞
@@ -90,7 +91,10 @@ function spoilerSafeSpeech(text) {
   const t = String(text || '');
   if (!isSoundQuestion(t)) return t;
   if (!/[\u3040-\u30ff\u4e00-\u9fff]/.test(t)) return '';
-  return t.replace(/[（(][^）)]*[A-Za-z][^）)]*[）)]/g, '').replace(/[A-Za-z\u00c0-\u024f][A-Za-z\u00c0-\u024f\u0300-\u036f'’\-]*(?:[ \t]+[A-Za-z\u00c0-\u024f][A-Za-z\u00c0-\u024f\u0300-\u036f'’\-]*)*/g, 'この語');
+  // ★【0.04.00】1語（15文字まで）なら、つづりを1文字ずつ読む（「politicsのアクセント位置は？」→「P O L I T I C S のアクセント位置は？」）。
+  //  何の語の問題か分かり、発音（強く読む所）は分からない。長い語・2語以上は「この語」
+  const spell = w => { const b = w.normalize('NFD').replace(/[\u0300-\u036f]/g, ''); return /^[A-Za-z]{2,15}$/.test(b) ? ' ' + b.toUpperCase().split('').join(' ') + ' ' : 'この語'; };
+  return t.replace(/[（(][^）)]*[A-Za-z][^）)]*[）)]/g, '').replace(/[A-Za-z\u00c0-\u024f][A-Za-z\u00c0-\u024f\u0300-\u036f'’\-]*(?:[ \t]+[A-Za-z\u00c0-\u024f][A-Za-z\u00c0-\u024f\u0300-\u036f'’\-]*)*/g, spell).replace(/\s+/g, ' ').trim();
 }
 // ★【0.03.74】iPhone・iPad で、読み上げと音楽（Spotify・YouTube など）を同時に流す。
 // Safari の navigator.audioSession（iOS 17 / iPadOS 17 以降）で、音の扱いを「ゲームの効果音」と同じ種類にする。
