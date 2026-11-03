@@ -290,7 +290,7 @@ function showQuizResults() {
   });
 }
 // ★【0.03.64】振り返りの読み上げ：1問ずつ（問題 → 答え）／表示している問題を全部
-function quizResultSpeech(r) { return `${r.q}。${r.label ? r.label + '。' : ''}${r.a}。`; }
+function quizResultSpeech(r) { return `${r.q}\n${r.label ? r.label + '\n' : ''}${r.a}`; } // ★【0.04.01】問題・答えは別の行（解いたときの声を使い回す）
 function speakQuizResult(i) { const r = _quizSession.results[i]; if (r && typeof speakText === 'function') speakText(quizResultSpeech(r)); }
 function speakQuizResults() {
   const b = document.getElementById('resSpeakAll');
@@ -663,7 +663,7 @@ function loadQuizQuestion() {
   }
   const qEl = document.getElementById('lblQuizQuestion');
     let qDisplay = cur.question, qSpeech = cur.question;
-    if (qStructuredSelf) { qDisplay = formatStructuredAnswerHTML(qStructuredSelf); qSpeech = qStructuredSelf.map(s => s.text).join('。'); }
+    if (qStructuredSelf) { qDisplay = formatStructuredAnswerHTML(qStructuredSelf); qSpeech = qStructuredSelf.map(s => s.text).join('\n'); }
     else if (aStructured) { qDisplay = stripParens(cur.question); qSpeech = qDisplay; }
     // 例文・テスト問題は、問題文（1行目の英文）だけを読み上げる
     if (cur.kind && /\n/.test(cur.question)) qSpeech = cur.question.split('\n')[0];

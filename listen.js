@@ -71,7 +71,8 @@ function listenAnswerSpeech(ans) {
   // (名詞①)価値/(名詞②)価値観/(他動詞)～を重んじる → 名詞、価値、価値観。他動詞、を重んじる
   const groups = [];
   st.forEach(s => { const lb = String(s.label || '').replace(/[①-⑳0-9]/g, '').trim(); const g = groups.find(x => x.lb === lb); if (g) g.t.push(s.text); else groups.push({ lb, t: [s.text] }); });
-  return groups.map(g => (g.lb ? g.lb + '、' : '') + g.t.join('、')).join('。');
+  // ★【0.04.01】品詞・意味を1行ずつ（行ごとの声を、暗記テスト・クイズと使い回す）
+  return groups.map(g => [g.lb, ...g.t].filter(Boolean).join('\n')).join('\n');
 }
 function listenClozeText(q) {
   const lines = String(q.question || '').split('\n');
@@ -86,7 +87,7 @@ async function listenPlayCard(q, token) {
   _ls.phase = 'q'; listenDraw();
   // ★【0.03.65】アクセント・発音の問題は、英語の部分を読まない（読むと答えが分かる）。選択肢も読まない
   const sound = typeof isSoundQuestion === 'function' && isSoundQuestion(q.question);
-  const qs = String(q.question || '').replace(/\n/g, '。');
+  const qs = String(q.question || '');
   if (sound) { const t = spoilerSafeSpeech(qs); if (t) await say(t); } else await say(qs);
   if (!sound && Array.isArray(q.choices) && q.choices.length >= 2) {
     for (let k = 0; k < q.choices.length && _ls && _ls.token === token; k++) await say(`${k + 1}、${q.choices[k]}`);
@@ -94,7 +95,7 @@ async function listenPlayCard(q, token) {
   await listenWait(gap, token);
   if (!_ls || _ls.token !== token) return;
   _ls.phase = 'a'; listenDraw();
-  await say(Array.isArray(q.choices) && q.choices.length >= 2 ? `答え、${getPrimaryAnswer(q.answer)}` : listenAnswerSpeech(q.answer));
+  await say(Array.isArray(q.choices) && q.choices.length >= 2 ? `答え\n${getPrimaryAnswer(q.answer)}` : listenAnswerSpeech(q.answer));
   if (p.note && q.note) { _ls.phase = 'n'; listenDraw(); await listenWait(500, token); await say(String(q.note).replace(/\n/g, '。')); }
 }
 async function listenLoop(token) {
@@ -107,7 +108,7 @@ async function listenLoop(token) {
     listenMedia(q);
     // ★【0.03.75】AI の声のときは、次のカードの声を先に作っておく
     const nx = _ls.list[_ls.i + 1];
-    if (nx && typeof ttsPrefetch === 'function') ttsPrefetch(listenIsCloze(nx) ? listenClozeText(nx) : [String(nx.question || '').replace(/\n/g, '。'), Array.isArray(nx.choices) && nx.choices.length >= 2 ? `答え、${getPrimaryAnswer(nx.answer)}` : listenAnswerSpeech(nx.answer)]);
+    if (nx && typeof ttsPrefetch === 'function') ttsPrefetch(listenIsCloze(nx) ? listenClozeText(nx) : [String(nx.question || ''), Array.isArray(nx.choices) && nx.choices.length >= 2 ? `答え\n${getPrimaryAnswer(nx.answer)}` : listenAnswerSpeech(nx.answer)]);
     await listenPlayCard(q, token);
     if (!_ls || _ls.token !== token || !_ls.playing) return;
     await listenWait(Math.max(800, (Number(listenPrefs().gap) || 0) * 500), token);
@@ -145,7 +146,7 @@ function listenRedoVoice() {
   if (typeof showAppToast === 'function') showAppToast('🔁 このカードの声を作り直します');
   listenPlay();
 }
-function listenCardTexts(q) { return listenIsCloze(q) ? listenClozeText(q) : [String(q.question || '').replace(/\n/g, '。'), Array.isArray(q.choices) && q.choices.length >= 2 ? `答え、${getPrimaryAnswer(q.answer)}` : listenAnswerSpeech(q.answer), q.note && listenPrefs().note ? String(q.note).replace(/\n/g, '。') : ''].filter(Boolean); }
+function listenCardTexts(q) { return listenIsCloze(q) ? listenClozeText(q) : [String(q.question || ''), Array.isArray(q.choices) && q.choices.length >= 2 ? `答え\n${getPrimaryAnswer(q.answer)}` : listenAnswerSpeech(q.answer), q.note && listenPrefs().note ? String(q.note).replace(/\n/g, '。') : ''].filter(Boolean); }
 function listenFixReading() { if (!_ls) return; const q = _ls.list[_ls.i]; if (!q) return; listenPause(); if (typeof ttsOpenFixDialog === 'function') ttsOpenFixDialog(listenCardTexts(q)); }
 // ★【0.03.85】範囲のカードの AI の声を、先に作っておく（1つずつ。無料回数がなくなったら止める）
 let _lpb = null;

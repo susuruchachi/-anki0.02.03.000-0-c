@@ -117,7 +117,7 @@ async function ttsCacheClearAll() {
 // 読み間違えていた文の声を消して、作り直す（次は別のモデルから試す）
 async function ttsForget(texts) {
   for (const t of (texts || []).filter(Boolean)) {
-    const parts = await ttsSpokenParts(ttsSegments(t));
+    const parts = await ttsPartsOf(t);
     for (const x of parts) { const key = TTS_CACHE_VER + ttsVoice() + '|' + x.spoken; _ttsMem.delete(key); await ttsKvDel(key); }
   }
   _ttsRotate = (_ttsRotate + 1) % TTS_AI_MODELS.length;
@@ -215,10 +215,13 @@ async function ttsQueueRun() {
   setTimeout(ttsQueueRun, 400); // 少し間をあける
 }
 // 先に作っておく（次の問題・答えなど）。使えるモデルが無いときや、ほかの頼みが混んでいるときはしない
+// ★【0.04.01】改行で区切った行は、それぞれ別の声にする（同じ行の声は、暗記テスト・クイズ・聞き流し・振り返りで使い回す）
+function ttsUnits(text) { return String(text == null ? '' : text).split(/\n+/).map(x => x.trim()).filter(Boolean); }
+async function ttsPartsOf(text, share) { const out = []; for (const u of ttsUnits(text)) { const segs = ttsSegments(u); if (segs.length) out.push(...await ttsSpokenParts(segs, share)); } return out; }
 function ttsPrefetch(texts) {
   if (!ttsUseAi() || !ttsAnyModelReady() || _ttsQ.hi.length + _ttsQ.lo.length > 2) return;
   const share = _ttsShareCtx;
-  (texts || []).forEach(t => { const segs = ttsSegments(t); ttsSpokenParts(segs, share).then(parts => parts.forEach(x => ttsAudioFor(x.spoken, x.expect, share, true).catch(() => {}))).catch(() => {}); });
+  (texts || []).forEach(t => { ttsPartsOf(t, share).then(parts => parts.forEach(x => ttsAudioFor(x.spoken, x.expect, share, true).catch(() => {}))).catch(() => {}); });
 }
 
 // ---------------- 鳴らす ----------------
@@ -254,14 +257,13 @@ function ttsSpeaking() { return !!_ttsSrc || ('speechSynthesis' in window && spe
 
 // AI の声で読む。終わったら（止めたときも）resolve。使えなければ reject（呼ぶ側でいつもの読み上げにする）
 async function ttsSpeakAi(text, opts = {}) {
-  const segs = ttsSegments(text);
-  if (!segs.length) return;
+  if (!ttsUnits(text).some(u => ttsSegments(u).length)) return;
   ttsStopAll();
   const my = ++_ttsSeq;
   const ctx = ttsContext(); if (!ctx) throw new Error('no audio context');
   // 日本語の部分は読み仮名にしてから（漢字の読み間違いを減らす）、部分ごとの声を一緒に頼んでおき、順に鳴らす
   const share = _ttsShareCtx;
-  const parts = await ttsSpokenParts(segs, share);
+  const parts = await ttsPartsOf(text, share);
   if (my !== _ttsSeq) return;
   const raws = parts.map(x => ttsAudioFor(x.spoken, x.expect, share));
   raws.forEach(p => p.catch(() => {}));
@@ -287,7 +289,7 @@ async function ttsSpeakAi(text, opts = {}) {
 // ★【0.03.85】鳴らさずに声だけ作る（聞き流しの「先に作っておく」）。{ made: 作った数, have: 作ってあった数 }
 async function ttsBuildText(text) {
   const share = _ttsShareCtx;
-  const parts = await ttsSpokenParts(ttsSegments(text), share);
+  const parts = await ttsPartsOf(text, share);
   let made = 0, have = 0;
   for (const x of parts) {
     const key = TTS_CACHE_VER + ttsVoice() + '|' + x.spoken;

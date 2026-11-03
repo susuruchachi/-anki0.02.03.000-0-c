@@ -502,7 +502,7 @@ function drillQText(c) { return c.it ? c.it.w : c.ck.q; }
 function drillAText(c) {
   if (c.ck) return c.ck.ans;
   const seg = parseStructuredAnswer(c.it.m);
-  return seg ? seg.map(x => x.text).join('。') : c.it.m;
+  return seg ? seg.map(x => x.text).join('\n') : c.it.m; // ★【0.04.01】意味ごとに行を分ける（クイズの意味ごとの問題と同じ声を使い回す）
 }
 function drillSpeakQ() { if (dcur && (dcur.it || dcur.ck) && typeof speakText === 'function') speakText(typeof spoilerSafeSpeech === 'function' ? spoilerSafeSpeech(drillQText(dcur)) : drillQText(dcur)); } // ★【0.03.65】アクセント問題はネタバレしないように
 function drillSpeakA() { if (dView !== null && DH[dView]) { if (typeof speakText === 'function') speakText(DH[dView].a); return; } if (dcur && (dcur.it || dcur.ck) && typeof speakText === 'function') speakText(drillAText(dcur)); }
