@@ -462,6 +462,15 @@ function vtSave(parsed, parentCat, section) {
       drop.add(d.id); touchCard(main);
     });
   });
+  // ★【0.04.04】前の版で、1行の2問（「問1 → 答1 ／ 問2 → 答2」）を1枚にくっつけて取り込んだ Check! は消す
+  //  （分けると、どれも今回取り込んだ Check! と同じ問題になるものだけ。自分で作ったテストは消さない）
+  const newTests = new Set(cards.filter(c => c.kind === 'test').map(c => nameMap[c.folder] + '\u0001' + vtQNorm(c.q)));
+  db.forEach(d => {
+    if (d.kind !== 'test' || drop.has(d.id) || !secSet.has(d.category) || newTests.has(d.category + '\u0001' + vtQNorm(d.question))) return;
+    if (d.sharedDocId && getSharedAccess(d.sharedDocId).readOnly) return;
+    const parts = vtSplitChecks(`${d.question} → ${d.answer}`).map(x => x.slice(0, x.lastIndexOf('→')).trim());
+    if (parts.length >= 2 && parts.every(q => newTests.has(d.category + '\u0001' + vtQNorm(q)))) drop.add(d.id);
+  });
   if (drop.size) { tombstoneCards([...drop]); db = db.filter(d => !drop.has(d.id)); removed = drop.size; }
   autoMerge();
   saveData(true);

@@ -428,6 +428,20 @@ function swapQuizEntry(q) {
 
 const ANSWER_SYMBOL_RE = /[\[\]［］【】～〜~…]|\.\.\./g;
 // ［ ］で囲んだ部分（言い換え）を省いた形
+// ★【0.04.04】日本語の答えの中の（ ）：単語帳では「省略できる語」か「言い換え」。どちらの書き方でも正解にする
+//  「根本的（劇的）な変化」→「根本的な変化」「劇的な変化」「根本的劇的な変化」
+const PAREN_JA_RE = /[（(]([^（）()]*[\u3040-\u30ff\u4e00-\u9fff][^（）()]*)[）)]/;
+function parenVariants(str) {
+  const s = String(str || ''); const out = [];
+  if (!PAREN_JA_RE.test(s) || /^\s*\(/.test(s)) return out; // 先頭の (名詞) などの品詞タグは別に扱う
+  out.push(s.replace(new RegExp(PAREN_JA_RE.source, 'g'), ''));           // 省いた形
+  out.push(s.replace(new RegExp(PAREN_JA_RE.source, 'g'), '$1'));         // かっこだけ外した形
+  const m = s.match(PAREN_JA_RE);
+  const before = s.slice(0, m.index), after = s.slice(m.index + m[0].length);
+  const w = before.match(/[\u4e00-\u9fff\u30a0-\u30ffー々]+$/);          // すぐ前の語と入れ替えた形
+  if (w) out.push(before.slice(0, before.length - w[0].length) + m[1] + after.replace(new RegExp(PAREN_JA_RE.source, 'g'), ''));
+  return out.filter(x => x.trim());
+}
 function dropBracketParts(str) { return String(str || '').replace(/[\[［][^\]］]*[\]］]/g, ' '); }
 // ★【0.03.69】「・」も区切り（「過去・詠嘆」は「詠嘆、過去」でも正解）。◯（活用の無い形）を含む答え（活用表）は並び順も見る
 function normalizeAnswer(str, keepOrder) {
@@ -450,7 +464,7 @@ function isAnswerCorrect(input, correctAnswer) {
   const untag = a => String(a).replace(/^\s*(?:\([^()]*\)\s*)+/, '');
   const ord = normalizeAnswer(correctAnswer, true).split(',').includes('○'); // 「（せ）・◯・き・し…」のように ◯ が1つの項目になっている活用表
   const noParen = a => String(a).replace(/[（）]/g, ''); // ★【0.03.69】（せ）の（ ）は書かなくてもよい
-  const norms = splitAnswerAlternatives(correctAnswer).flatMap(a => [normalizeAnswer(a, ord), normalizeAnswer(dropBracketParts(a), ord), normalizeAnswer(untag(a), ord), normalizeAnswer(dropBracketParts(untag(a)), ord), normalizeAnswer(noParen(a), ord)]).filter(x => x !== '');
+  const norms = splitAnswerAlternatives(correctAnswer).flatMap(a => [a, ...parenVariants(a)]).flatMap(a => [normalizeAnswer(a, ord), normalizeAnswer(dropBracketParts(a), ord), normalizeAnswer(untag(a), ord), normalizeAnswer(dropBracketParts(untag(a)), ord), normalizeAnswer(noParen(a), ord)]).filter(x => x !== '');
   const inNorm = normalizeAnswer(input, ord);
   if (ord && norms.includes(normalizeAnswer(noParen(input), true))) return true;
   return norms.includes(inNorm);

@@ -692,7 +692,7 @@ async function drillChk(v) {
   if (n(v) === n(k.ans) || sp(v) === sp(k.ans) || isAnswerCorrect(v, k.ans)) return drillFin(true, k.ans, '');
   if (!drillAiOk()) return drillFin(false, k.ans, '');
   drillBusy();
-  try { const r = await drillAi(`問題:${k.q}\n正解:${k.ans}\n生徒の答え:${v}\n意味が同じなら ok。順序の違い・表記の軽微な違いは許容。JSONのみ：{"v":"ok|x"}`); dlock = false; drillFin(r.v === 'ok', k.ans, ''); }
+  try { const r = await drillAi(`問題:${k.q}\n正解:${k.ans}\n生徒の答え:${v}\n正解の中の（ ）は、省略してよい語か言い換え（「根本的（劇的）な変化」なら「根本的な変化」「劇的な変化」どちらも ok）。意味が同じなら ok。順序の違い・表記の軽微な違いは許容。JSONのみ：{"v":"ok|x"}`); dlock = false; drillFin(r.v === 'ok', k.ans, ''); }
   catch (e) { drillErr(e); }
 }
 
