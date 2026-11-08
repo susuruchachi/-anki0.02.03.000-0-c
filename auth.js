@@ -1,5 +1,6 @@
 // ----------------- Firebase Auth -----------------
 function firebaseLogin() { 
+  if (typeof appGoogleLogin === 'function' && appGoogleLogin()) return; // ★【0.04.03】Android アプリの中では、アプリ側でログイン
   const provider = new firebase.auth.GoogleAuthProvider();
   provider.setCustomParameters({ 'prompt': 'select_account' });
   
@@ -19,6 +20,7 @@ function firebaseLogin() {
 async function firebaseLogout() { 
   // ★【0.03.14】この端末への通知を止めてからログアウトする
   if (typeof removePushTokenBeforeLogout === 'function') await removePushTokenBeforeLogout();
+  if (typeof appGoogleLogout === 'function') appGoogleLogout();
   auth.signOut()
     .then(() => alert("✅ ログアウトしました"))
     .catch(err => alert("⚠️ ログアウトエラー: " + err.message));

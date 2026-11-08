@@ -1,5 +1,6 @@
 # ★【0.03.14】Android アプリ（APK）を作る（手動で実行：Actions → android-apk → Run workflow）
-# 中身はウェブ版をそのまま表示するので、作り直すのはアイコンや名前を変えたいときだけで大丈夫です。
+# 中身はウェブ版をそのまま表示するので、作り直すのはアプリ本体（android/）を変えたときだけで大丈夫です。
+# 作り直した APK を apk/susuruanki.apk に置き、version-info.js の ANDROID_APK_VERSION を上げると、アプリの中で更新を知らせます。
 # 署名鍵：Secrets に ANDROID_KEYSTORE_BASE64（.jks を base64 にしたもの）と ANDROID_KEYSTORE_PASSWORD を入れておく
 #        （無いときは使い捨ての鍵で署名するので、前のアプリを一度アンインストールしないと上書きできません）
 name: android-apk

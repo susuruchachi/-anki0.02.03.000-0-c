@@ -951,8 +951,8 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
     <div class="card">
       <div class="setting-box-title">📲 アプリ・通知</div>
       <div id="notifySettings" class="hint-small">読み込み中...</div>
-      <a class="btn btn-secondary" style="margin-top:10px; text-decoration:none; justify-content:center;" href="apk/susuruanki.apk" download>🤖 Android アプリ（APK）をダウンロード</a>
-      <div class="hint-small" style="margin-top:4px;">Android の端末で開いてインストールします（「提供元不明のアプリ」の許可が必要なことがあります）。中身はこのウェブ版と同じで、学習データも共通です。iPhone・パソコンは上の「アプリとしてインストール」を使ってください。</div>
+      <a class="btn btn-secondary" style="margin-top:10px; text-decoration:none; justify-content:center;" href="apk/susuruanki.apk" download onclick="if(typeof isAndroidApp==='function'&&isAndroidApp()){event.preventDefault();appInstallApk();}">🤖 Android アプリ（APK）をダウンロード</a>
+      <div class="hint-small" style="margin-top:4px;">Android の端末で開いてインストールします（「提供元不明のアプリ」の許可が必要なことがあります）。中身はこのウェブ版と同じで、学習データも共通です。Chrome を使わないので、Chrome に時間制限があっても開けます。アプリの中で押すと、最新のアプリに上書きで入れ直します（新しいアプリがあるときは、開いたときにも知らせます）。iPhone・パソコンは上の「アプリとしてインストール」を使ってください。</div>
     </div>
 
     <div class="card">
@@ -1555,6 +1555,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 
 <script src="config.js"></script>
 <script src="utils.js"></script>
+<script src="app-bridge.js"></script>
 <script src="rich-content.js"></script>
 <script src="rich-editors.js"></script>
 <script src="chem-search.js"></script>

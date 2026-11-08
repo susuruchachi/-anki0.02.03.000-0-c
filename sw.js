@@ -11,7 +11,7 @@ const CORE_CACHE = 'susuru-core-v1';
 const RUNTIME_CACHE = 'susuru-runtime-v1';
 const CORE_FILES = [
   './', './index.html', './manifest.webmanifest', './RULES.md', './notify-kv.js',
-  './version-info.js', './release-notes.js', './config.js', './utils.js', './storage.js', './tree.js', './pages.js', './box.js',
+  './version-info.js', './release-notes.js', './config.js', './utils.js', './app-bridge.js', './storage.js', './tree.js', './pages.js', './box.js',
   './quiz.js', './context-menu.js', './import-export.js', './batch-add.js', './scan-import.js', './shared.js', './stats.js',
   './social.js', './match.js', './safety.js', './updates.js', './auth.js', './main.js', './rich-content.js', './rich-editors.js',
   './chem-search.js', './notify.js', './ai.js', './picker.js', './drill.js', './plan.js', './race.js', './text-import.js', './listen.js', './streak.js', './tts.js',
