@@ -177,6 +177,19 @@ public class MainActivity extends Activity {
     private class Bridge {
         @JavascriptInterface public String version() { return BuildConfig.VERSION_NAME; }
         @JavascriptInterface public int versionCode() { return BuildConfig.VERSION_CODE; }
+        // このアプリの署名の SHA-1（Firebase に登録したものと同じか確かめる）
+        @JavascriptInterface public String signatureSha1() {
+            try {
+                android.content.pm.PackageInfo pi = Build.VERSION.SDK_INT >= 28
+                    ? getPackageManager().getPackageInfo(getPackageName(), android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES)
+                    : getPackageManager().getPackageInfo(getPackageName(), android.content.pm.PackageManager.GET_SIGNATURES);
+                android.content.pm.Signature[] sigs = Build.VERSION.SDK_INT >= 28 ? pi.signingInfo.getApkContentsSigners() : pi.signatures;
+                byte[] d = java.security.MessageDigest.getInstance("SHA-1").digest(sigs[0].toByteArray());
+                StringBuilder sb = new StringBuilder();
+                for (int k = 0; k < d.length; k++) { if (k > 0) sb.append(':'); sb.append(String.format("%02X", d[k])); }
+                return sb.toString();
+            } catch (Exception e) { return ""; }
+        }
 
         // Google でログイン（結果は window.__susuruNativeLogin(idToken, error) で返す）
         @JavascriptInterface public void signInWithGoogle() {
@@ -194,10 +207,11 @@ public class MainActivity extends Activity {
                                 } else sendLogin(null, "Google 以外のログインには対応していません");
                             }
                             @Override public void onError(GetCredentialException e) {
-                                sendLogin(null, e instanceof GetCredentialCancellationException ? "cancel" : String.valueOf(e.getMessage()));
+                                // ★ アカウントを選んだあとに Google に断られたとき（Firebase に Android アプリ・SHA-1 が無いなど）も「キャンセル」で返ってくるので、中身も渡す
+                                sendLogin(null, (e instanceof GetCredentialCancellationException ? "cancel|" : "error|") + e.getClass().getSimpleName() + "|" + e.getType() + "|" + e.getMessage());
                             }
                         });
-                } catch (Exception e) { sendLogin(null, String.valueOf(e.getMessage())); }
+                } catch (Exception e) { sendLogin(null, "error|" + e.getClass().getSimpleName() + "||" + e.getMessage()); }
             });
         }
 

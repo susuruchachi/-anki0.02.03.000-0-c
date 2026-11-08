@@ -14,11 +14,18 @@ function appGoogleLogin() {
 }
 window.__susuruNativeLogin = function (token, err) {
   if (!token) {
-    if (err && err !== 'cancel') alert('⚠️ ログインできませんでした\n' + err + '\n\n（アプリの Google ログインの設定がまだ済んでいないかもしれません）');
+    const p = String(err || '').split('|'), kind = p[0], detail = p.slice(1).filter(Boolean).join(' / ');
+    let sha = ''; try { sha = window.SusuruApp.signatureSha1 ? window.SusuruApp.signatureSha1() : ''; } catch (e) {}
+    // アカウントを選んだのにログインできないとき：多くは Firebase に Android アプリ（パッケージ名と SHA-1）が登録されていない
+    alert(`⚠️ Google ログインができませんでした${kind === 'cancel' ? '（ログインの画面が閉じられました）' : ''}\n\n` +
+      `アカウントを選んだのにこうなるときは、Firebase のコンソールの「プロジェクトの設定」→「マイアプリ」に、Android アプリ（パッケージ名 io.github.susuruchachi.susuruanki）と、このアプリの SHA-1 が登録されているか確かめてください。\n` +
+      (sha ? `\nこのアプリの SHA-1：\n${sha}\n` : '') + (detail ? `\nくわしい内容：${detail}` : ''));
     return;
   }
+  if (typeof showAppToast === 'function') showAppToast('🔐 ログインしています…');
   const cred = firebase.auth.GoogleAuthProvider.credential(token);
-  auth.signInWithCredential(cred).catch(e => alert('⚠️ ログインエラー: ' + e.message));
+  auth.signInWithCredential(cred).then(() => { if (typeof showAppToast === 'function') showAppToast('✅ ログインしました'); })
+    .catch(e => alert('⚠️ ログインエラー（Firebase）: ' + (e.code || '') + '\n' + e.message));
 };
 function appGoogleLogout() { if (isAndroidApp()) { try { window.SusuruApp.signOutGoogle(); } catch (e) {} } }
 
