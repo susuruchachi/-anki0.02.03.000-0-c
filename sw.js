@@ -37,7 +37,10 @@ function networkFirst(req) {
     const fromCache = () => caches.match(req, { ignoreSearch: req.mode === 'navigate' }).then(r => r || (req.mode === 'navigate' ? caches.match('./index.html') : null));
     // 電波が弱いときは 6 秒で保存しておいたものに切り替える
     const timer = setTimeout(() => { fromCache().then(r => { if (r && !done) { done = true; resolve(r); } }); }, 6000);
-    fetch(req).then(res => {
+    // ★【0.04.07】ブラウザの HTTP キャッシュ（GitHub Pages は10分ほど持たせる）を使わず、必ずサーバーに新しいかを確かめる。
+    //  Android（Chrome・アプリ）では、ここで古いファイルが返ってきて「再読み込み」しても新しいバージョンにならなかった（iPad は毎回確かめていた）
+    const fresh = req.mode === 'navigate' ? fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' }) : fetch(req, { cache: 'no-cache' });
+    fresh.then(res => {
       if (res && res.ok) { const copy = res.clone(); caches.open(CORE_CACHE).then(c => c.put(req, copy)).catch(() => {}); }
       if (!done) { done = true; clearTimeout(timer); resolve(res); }
     }).catch(() => {
