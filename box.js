@@ -235,6 +235,7 @@ function buildBoxCard(item) {
       </div>
       ${noteHTML}
       ${senseHTML}
+      ${typeof drillQaListById === 'function' && drillQaListById(item.id).length ? qaPanelWrapHTML(item.id, 'box') : ''}
       <div class="q-card-sub">${badgeHTML}<span>正: ${item.correct} / 誤: ${item.incorrect}</span><span style="font-size:0.75rem; color:var(--text3);">📂 ${escapeHtml(item.category)}${sharedIcon}</span></div>
     `;
     return card;

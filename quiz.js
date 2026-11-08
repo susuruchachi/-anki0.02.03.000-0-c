@@ -660,6 +660,7 @@ function loadQuizQuestion() {
   quizPhase='q'; selectedChoiceIdx=null; window.currentSelfJudge=null;
   _focus = { attempts: 0 }; // ★【0.03.18】重点モードの答え直しの回数
   _multi = null; // ★【0.03.21】意味の聞き直し
+  _qd = null; // ★【0.04.05】暗記テストと同じ採点の途中経過
   const _fs = document.getElementById('lblFocusStatus'); if (_fs) { _fs.style.display = 'none'; _fs.textContent = ''; _fs.classList.remove('multi'); }
   const cur = quizPool[quizIndex];
 
@@ -1296,6 +1297,8 @@ function submitQuizAction() {
     const ok = (area && area._correctText !== undefined && given === area._correctText) || isAnswerCorrect(given, cur.answer);
     return concludeAttempt(cur, ok, { given, kind: 'wrong', choice: true });
   }
+  // ★【0.04.05】単語の記述は、暗記テストと同じ採点（全部の意味・単語帳の訳・品詞の形・言い換えの扱い）
+  if (quizDrillStyle(cur)) { quizDrillJudge(cur); return; }
   // ★【0.03.21】意味をいくつも並べた答え（地域社会、共同体 など）で、一部だけ答えたら、ほかの意味も聞き直す
   if (handleMultiMeaning(cur)) return;
   if (currentStructuredAnswer) {
@@ -1323,7 +1326,9 @@ function submitQuizAction() {
   }
   const given = document.getElementById('txtDescAnswer').value;
   // 意味ごとの問題は、全角スペース・読点で区切った言い換えのどれか1つで正解
-  const ok = (cur._senseKey && !cur._swapped) ? isStructuredSegmentCorrect(given, cur.answer) : isAnswerCorrect(given, cur.answer);
+  let ok = (cur._senseKey && !cur._swapped) ? isStructuredSegmentCorrect(given, cur.answer) : isAnswerCorrect(given, cur.answer);
+  // ★【0.04.05】テスト（Check!）は暗記テストと同じく、並べた答えの順番を問わない
+  if (!ok && cur.kind === 'test' && typeof drillCheckLocal === 'function') ok = drillCheckLocal(given, cur.answer).ok;
   // ★【0.03.15】完全一致しなくても、意味が同じなら正解にする（AI に確かめる）
   if (!ok && given.trim() && aiJudgeEnabled() && !isChoiceCard(cur) && !isBinaryCard(cur)) { // 選択肢から選ぶ問題は、言い換えを認めない
     aiJudgeItems(cur, [{ label: cur._senseLabel && !cur._swapped ? cur._senseLabel : '', expected: cur.answer, given }]).then(r => {
@@ -1533,6 +1538,55 @@ async function startFocusRetry(cur, info) {
 // ★【0.03.15】AI：意味で採点・判定の取り消し・解説・ヒント
 // ================================================================
 let _aiJudging = false;
+// ================================================================
+// ★【0.04.05】クイズの記述の採点を、暗記テストと同じにする（drill.js の drillJudgeCore）
+//  単語帳の訳と同じ言葉は〇・意味は合うが訳と違う言葉は「単語帳の訳で」と聞き直す・品詞の形が違えば×・
+//  意味をいくつも並べた答えは全部そろうまで聞き直す（「その意味はもう答えました」も同じ）
+// ================================================================
+let _qd = null;
+function quizDrillStyle(cur) {
+  return currentRoundMode === 'desc' && typeof drillJudgeCore === 'function' && !window.currentOnlineMatch && !!cur && !cur._swapped && !cur.kind
+    && !isChoiceCard(cur) && !isBinaryCard(cur) && (!currentStructuredAnswer || currentStructuredAnswer.length === 1) && !(typeof hasRichBlock === 'function' && hasRichBlock(cur.answer));
+}
+function quizDrillItem(cur) {
+  const card = db.find(q => q.id === (cur._sourceId || cur.id)) || cur;
+  const m0 = cur._senseLabel ? `(${cur._senseLabel})${cur.answer}` : cur.answer;
+  return { id: 'q:' + card.id + (cur._senseKey ? ':' + cur._senseKey : ''), w: cur.question, m: (typeof posAbbrevAnswer === 'function' && posAbbrevAnswer(m0)) || m0, card };
+}
+async function quizDrillJudge(cur) {
+  const input = document.getElementById(currentStructuredAnswer ? 'structAns_0' : 'txtDescAnswer');
+  const given = String(input.value || '').trim();
+  if (!_qd || _qd.cur !== cur) _qd = { cur, st: {}, given: [], sn: null };
+  const st = _qd.st, names = () => (st.cv || []).map(i => String((_qd.sn[i] || {}).t || '').split('，')[0]).filter(Boolean);
+  if (!given) {
+    if (st.cv && st.cv.length) return concludeAttempt(cur, false, { typed: true, given: _qd.given.join(' ／ '), kind: 'partial', partialFound: names() });
+    return concludeAttempt(cur, false, { typed: true, given: '', kind: 'blank' });
+  }
+  _qd.given.push(given);
+  const btn = document.getElementById('btnQuizAction'), prev = btn ? btn.innerText : '';
+  _aiJudging = true; if (btn) { btn.innerText = '🤖 確認中...'; btn.disabled = true; } input.disabled = true;
+  let res;
+  try { const it = quizDrillItem(cur); _qd.sn = _qd.sn || await drillGetSn(it); res = await drillJudgeCore(it, _qd.sn, st, given); }
+  catch (e) { res = { status: 'error' }; }
+  _aiJudging = false; if (btn) { btn.disabled = false; btn.innerText = prev; } input.disabled = false;
+  if (quizPool[quizIndex] !== cur || quizPhase === 'a') return;
+  const givenAll = _qd.given.join(' ／ ');
+  if (res.status === 'error') return concludeAttempt(cur, isAnswerCorrect(given, cur.answer), { typed: true, given: givenAll, kind: 'wrong' });
+  if (res.status === 'repeat' || res.status === 'more') {
+    if (res.status === 'repeat') _qd.given.pop();
+    const left = Math.max(1, _qd.sn.length - (st.cv || []).length), fs = document.getElementById('lblFocusStatus');
+    if (fs) { fs.style.display = 'block'; fs.classList.add('multi'); fs.textContent = `${names().length ? '⭕ ' + names().join('、') + '　' : ''}${res.status === 'repeat' ? 'その意味はもう答えました。' : res.msg || ''}ほかの意味もあります。答えてください（あと${left}つ）`; }
+    const timerText = document.getElementById('lblQuizTimerText'); if (timerText) timerText.innerText = '🔁';
+    input.value = ''; input.style.borderColor = ''; input.style.background = ''; input.focus();
+    return;
+  }
+  if (res.status === 'wrong') {
+    concludeAttempt(cur, false, { typed: true, given: givenAll, kind: (st.cv || []).length ? 'partial' : 'wrong', partialFound: (st.cv || []).length ? names() : undefined });
+    const fb = document.getElementById('feedbackResultText'); if (fb && res.tip && quizPhase === 'a') fb.innerText += ` — ${res.tip}`;
+    return;
+  }
+  concludeAttempt(cur, true, { typed: true, given: givenAll, label: _qd.sn.length > 1 ? '🎉 全部の意味を正解！' : undefined });
+}
 let _lastEval = null;    // 直前の採点の前の成績（「やっぱり不正解」「正解にする」で戻すため）
 let _aiExplainHold = false;
 function aiJudgeEnabled() {
@@ -1781,6 +1835,10 @@ function evaluateRoundAnswer(isCorrect, head, opts = {}) {
   }
   hydrateRich(fbAnsEl, { chemScale: 1.3 });
   renderAiFeedbackBox(cur, isCorrect, opts); // ★【0.03.15】AI の理由・解説と、採点の直しボタン
+  // ★【0.04.05】この問題の AI への質問（暗記テストと共通。たたんで出す）
+  { const fbq = document.getElementById('quizFeedback'); let box = document.getElementById('quizQaBox');
+    if (fbq && !box) { box = document.createElement('div'); box.id = 'quizQaBox'; box.style.cssText = 'width:100%; text-align:left; margin-top:8px;'; fbq.appendChild(box); }
+    if (box) box.innerHTML = typeof qaPanelWrapHTML === 'function' && !window.currentOnlineMatch ? qaPanelWrapHTML(cur._sourceId || cur.id, 'quiz') : ''; }
   if (!regrade) speakText(getPrimaryAnswer(cur.answer));
   fb.className = `feedback-area ${isCorrect ? 'correct' : isPass ? 'pass' : 'incorrect'}`; fb.style.display = 'flex';
   
