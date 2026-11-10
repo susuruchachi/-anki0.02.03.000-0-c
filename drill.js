@@ -334,8 +334,9 @@ function drillSave() {
   }
   const all = drillLoadAll();
   DS.savedAt = Date.now();
-  all[key] = { cat: DS.cat, r: DS.r, gi: DS.gi, rv: DS.rv, gm: DS.gm.map(x => x.id), miss: [...DS.miss.values()].map(drillSer), ct: DS.ct, rec: DS.rec, hard: DS.hard || {}, N: DS.N, st: (DS.stock || []).map(drillSer), il: !!DS.inLoop, fin: !!DS.final, rest: (DS.rest || []).map(drillSer), Q: [dst.ph === 9 ? null : dcur, ...DQ].filter(Boolean).map(drillSer), hg: DS.hdr ? DG.indexOf(DS.hdr) : -1, at: DS.savedAt, dev: DEVICE_ID };
+  all[key] = { cat: DS.cat, r: DS.r, gi: DS.gi, rv: DS.rv, gm: DS.gm.map(x => x.id), miss: [...DS.miss.values()].map(drillSer), ct: DS.ct, rec: DS.rec, hard: DS.hard || {}, N: DS.N, st: (DS.stock || []).map(drillSer), il: !!DS.inLoop, fin: !!DS.final, rest: (DS.rest || []).map(drillSer), mx: DS.mx || 0, rt: DS.rt || 0, Q: [dst.ph === 9 ? null : dcur, ...DQ].filter(Boolean).map(drillSer), hg: DS.hdr ? DG.indexOf(DS.hdr) : -1, at: DS.savedAt, dev: DEVICE_ID };
   drillStoreAll(all);
+  drillProgSync(false);
 }
 function drillResume(cat) { drillBuild(cat && categories.includes(cat) ? cat : ''); drillOfflineGate(() => drillResumeNow(cat)); }
 function drillResumeNow(cat) {
@@ -343,7 +344,7 @@ function drillResumeNow(cat) {
     const d = drillLoadAll()[cat || ''];
     if (!d) return drillHome();
     drillBuild(d.cat && categories.includes(d.cat) ? d.cat : '');
-    DS = { savedAt: d.at || 0, cat: d.cat || '', r: d.r, gi: d.gi, rv: d.rv, miss: new Map(), gm: (d.gm || []).map(i => DI[i]).filter(Boolean), hdr: d.hg >= 0 ? DG[d.hg] : null, ct: d.ct || {}, sp: {}, rec: d.rec || {}, hard: d.hard || {}, N: d.N, stock: (d.st || []).map(drillDe).filter(Boolean), inLoop: !!d.il, final: !!d.fin, rest: (d.rest || []).map(drillDe).filter(Boolean) };
+    DS = { savedAt: d.at || 0, cat: d.cat || '', r: d.r, gi: d.gi, rv: d.rv, miss: new Map(), gm: (d.gm || []).map(i => DI[i]).filter(Boolean), hdr: d.hg >= 0 ? DG[d.hg] : null, ct: d.ct || {}, sp: {}, rec: d.rec || {}, hard: d.hard || {}, N: d.N, stock: (d.st || []).map(drillDe).filter(Boolean), inLoop: !!d.il, final: !!d.fin, rest: (d.rest || []).map(drillDe).filter(Boolean), mx: d.mx || 0, rt: d.rt || 0 };
     (d.miss || []).map(drillDe).filter(Boolean).forEach(x => DS.miss.set(dKey(x), x));
     DQ = (d.Q || []).map(drillDe).filter(Boolean); DH = drillHistLoad(DS.cat); dView = null;
     drillSetActive(true); drillPop();
@@ -433,10 +434,41 @@ function drillRateRound(round) {
   if (n) { try { saveData(); } catch (e) {} }
   return n;
 }
+// ================================================================
+// ★【0.04.08】暗記テストの進み具合をフレンドに見せる（成績共有がオンのとき）
+//  susuru_anki_category_scores に mode:'drillprog' で、フォルダーごとに1つ（何周目・何番まで・どのグループ・残り・合格）
+// ================================================================
+let _dpTimer = null, _dpLast = '';
+function drillProgDocId(uid, cat) { return 'drillprog_' + uid + '_' + String(cat || 'all').replace(/[\/\s.#$\[\]]+/g, '_').slice(0, 80); }
+function drillProgSync(passed, restN) {
+  if (typeof currentUser === 'undefined' || !currentUser || typeof raceShareOn !== 'function' || !raceShareOn() || !DS || DS.r === undefined) return;
+  const items = DG.flatMap(g => g.items), nos = items.map(x => Number(x.card.no)).filter(n => n > 0);
+  const n = typeof drillLeftCounts === 'function' && !passed ? drillLeftCounts() : { all: 0, gi: DS.gi };
+  const g = DG[Math.max(0, Math.min(DG.length - 1, n.gi >= 0 ? n.gi : DS.gi))];
+  const doc = {
+    mode: 'drillprog', uid: currentUser.uid, name: currentUser.displayName || 'Anonymous', cat: DS.cat || 'すべて',
+    r: DS.r, final: !!DS.final, passed: !!passed, rest: passed ? (restN || 0) : 0,
+    from: nos.length ? cardNoText(Math.min(...nos)) : '', to: DS.r === 1 ? (DS.mx ? cardNoText(DS.mx) : '') : (nos.length ? cardNoText(Math.max(...nos)) : ''),
+    last: nos.length ? cardNoText(Math.max(...nos)) : '', gi: g ? DG.indexOf(g) + 1 : 0, groups: DG.length, group: g ? g.name : '',
+    words: items.length, left: n.all || 0, rt: DS.rt || 0, date: getTodayStr(), updatedAt: Date.now()
+  };
+  const key = JSON.stringify(Object.assign({}, doc, { updatedAt: 0 }));
+  if (key === _dpLast) return;
+  clearTimeout(_dpTimer);
+  _dpTimer = setTimeout(() => { _dpLast = key; firestore.collection('susuru_anki_category_scores').doc(drillProgDocId(currentUser.uid, doc.cat)).set(doc).catch(() => { _dpLast = ''; }); }, passed ? 0 : 4000);
+}
+// 進み具合の文（自分・フレンドの表示に使う）
+function drillProgText(d) {
+  if (!d) return '';
+  if (d.passed) return `✅ 合格（${d.r}周${d.rest ? `・まだ覚えられていない ${d.rest}問` : ''}）`;
+  if (d.r === 1) return `1周目・${d.to ? `No.${d.from}〜${d.to} まで` : 'はじめたところ'}${d.last ? `（全体 No.${d.from}〜${d.last}）` : ''}${d.groups > 1 ? `・グループ ${d.gi}/${d.groups}` : ''}`;
+  return `${d.r}周目${d.final ? '（最終ループ）' : ''}・残り ${d.left}${d.rt ? `/${d.rt}` : ''}問`;
+}
 const DRILL_FINAL_MAX = 21, DRILL_N_KEY = 'susuru_anki_drill_n';
 // 合格（rest：まだ覚えられていない問題）
 function drillPass(rest) {
   const A = document.getElementById('drillApp');
+  drillProgSync(true, rest.length);
   { const all = drillLoadAll(); delete all[DS.cat || '']; drillStoreAll(all); }
   drillSetActive(false);
   DH = []; drillHistStore();
@@ -459,11 +491,11 @@ function drillEndRound() {
     const two = L.filter(x => x.it && (Number(x.it.card.stars) || 0) >= 2);
     DS.rest = L.filter(x => !two.includes(x));
     if (!two.length) return drillPass(DS.rest);
-    DS.r++; DS.final = true; DS.miss = new Map(); DS.stock = []; DS.inLoop = false;
+    DS.r++; DS.final = true; DS.miss = new Map(); DS.stock = []; DS.inLoop = false; DS.rt = two.length;
     DQ = [{ t: 'msg', h: `【最終ループ】残りの間違いが${DRILL_FINAL_MAX}問以下（${L.length}問）になりました。星2つの問題（${two.length}問）を全問正解になるまで復習します。` }, ...two.map(x => ({ t: 'q', it: x.it }))];
     return drillPop();
   }
-  const p = DS.r; DS.r++; DS.miss = new Map();
+  const p = DS.r; DS.r++; DS.miss = new Map(); DS.rt = L.length;
   // ★【0.03.92】何周しても間違える問題は、いつもの成績（ランク）にも出す：3周目にも出る問題は「苦手」、5周してもまだ間違える（6周目に出る）問題は「しっかり」
   const marked = drillMarkHard(L, DS.r);
   // ★【0.03.44】2周目は、グループの切れ目ごとに導入の文（AI があればその文からの4択 → 読む）
@@ -867,6 +899,7 @@ async function drillFin(ok, ans, tip) {
   if (dst.fl) return; dst.fl = 1;
   const c = dcur, k = dKey(c);
   drillRecord(c.it ? c.it.card : c.ck.card, ok);
+  if (DS.r === 1 && c.it && Number(c.it.card.no) > (DS.mx || 0)) DS.mx = Number(c.it.card.no); // ★【0.04.08】1周目に、どの番号まで進んだか
   if (!ok) {
     if (!DS.miss.has(k)) { DS.miss.set(k, c); if (DS.r === 1 && !DS.rv && c.it) DS.gm.push(c.it); if (drillStockOn() && !DS.inLoop && c.it) (DS.stock = DS.stock || []).push({ t: 'q', it: c.it }); }
     DQ.unshift(c.it ? { t: 'q', it: c.it, retry: true } : { t: 'c', ck: c.ck, retry: true });

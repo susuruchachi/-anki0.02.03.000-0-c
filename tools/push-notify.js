@@ -174,8 +174,22 @@ async function sendUpdate() {
 //  プランバトル（同じ単語帳のプラン）で負けていればその差を、そうでなければ今日の正解数で負けていれば知らせる
 function weekKeyOf(dateStr) { const [y, m, d] = dateStr.split('-').map(Number); const x = new Date(Date.UTC(y, m - 1, d)); x.setUTCDate(x.getUTCDate() - (x.getUTCDay() + 6) % 7); return x.toISOString().slice(0, 10); }
 function racePoints(r) { return (r.words ? 30 : 0) + (r.words && r.onTime ? 10 : 0) + (r.chants ? 20 : 0) + (r.examples ? 20 : 0) + (r.sunday ? 15 : 0) + (r.monthly ? 15 : 0) + (Number(r.dc) || 0); }
+// ★【0.04.08】暗記テストの進み具合（アプリの drillProgText と同じ文）。先に進んでいる方が大きい数
+function progText(d) {
+  if (!d) return '';
+  if (d.passed) return `合格（${d.r}周）`;
+  if (d.r === 1) return `1周目・${d.to ? `No.${d.to} まで` : 'はじめたところ'}`;
+  return `${d.r}周目${d.final ? '（最終ループ）' : ''}・残り ${d.left}問`;
+}
+function progRank(d) {
+  if (!d) return -1;
+  if (d.passed) return 1e12;
+  const no = String(d.to || '').split('-').map(Number), n = (no[0] || 0) + (no[1] || 0) / 100 + (no[2] || 0) / 10000;
+  return d.r * 1e8 + (d.r === 1 ? n : (d.rt ? (d.rt - (d.left || 0)) / d.rt * 1e6 : 0));
+}
+const progFor = (who, cat) => (who.progs || []).filter(p => p.cat === cat).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
 function tauntMessage(myName, me, friends) {
-  // me / friends: { name, today, races: [{root, week, points, words, chants}] }
+  // me / friends: { name, today, races: [{root, week, points, words, chants, cur}], progs: [暗記テストの進み具合] }
   let best = null;
   friends.forEach(f => (f.races || []).forEach(r => {
     const mine = (me.races || []).find(x => x.root === r.root);
@@ -185,10 +199,21 @@ function tauntMessage(myName, me, friends) {
   }));
   if (best) {
     const extra = best.r.words && !best.mine.words ? `${best.f.name}さんはもう今週の単語に合格。` : best.r.chants && !best.mine.chants ? `${best.f.name}さんはチャンツまで終わってます。` : '';
-    return { title: `⚔️ ${best.r.root}バトル：${best.f.name}さんに ${best.d}点差`, body: `${extra}このままだと置いていかれるよ？押して巻き返そう` };
+    const fp = progFor(best.f, best.r.cur), mp = progFor(me, best.r.cur);
+    const pg = fp ? `${best.f.name}さんの暗記テストは「${progText(fp)}」${mp ? `、あなたは「${progText(mp)}」` : ''}。` : '';
+    return { title: `⚔️ ${best.r.root}バトル：${best.f.name}さんに ${best.d}点差`, body: `${extra}${pg}このままだと置いていかれるよ？押して巻き返そう` };
   }
+  // 同じフォルダーの暗記テストで、フレンドのほうが先に進んでいる
+  let ahead = null;
+  friends.forEach(f => (f.progs || []).forEach(p => {
+    if (Date.now() - (p.updatedAt || 0) > 3 * 86400000) return; // 3日より前の記録は使わない
+    const mp = progFor(me, p.cat), gap = progRank(p) - progRank(mp);
+    if (gap > 0 && (!ahead || p.updatedAt > ahead.p.updatedAt)) ahead = { f, p, mp };
+  }));
+  if (ahead) return { title: `🧠 ${ahead.f.name}さんは「${ahead.p.cat}」の暗記テストが ${progText(ahead.p)}`, body: ahead.mp ? `あなたは ${progText(ahead.mp)}。押して追いつこう` : 'あなたはまだ始めていません。押して始めよう' };
   const top = friends.filter(f => f.today > me.today && f.today > 0).sort((a, b) => b.today - a.today)[0];
-  if (top) return { title: `🔥 ${top.name}さんは今日もう ${top.today}問 正解！`, body: me.today ? `あなたは ${me.today}問。まだ追いつけます` : 'あなたはまだ0問…1問だけでも始めよう' };
+  if (top) { const tp = (top.progs || []).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
+    return { title: `🔥 ${top.name}さんは今日もう ${top.today}問 正解！`, body: (tp ? `暗記テストは「${tp.cat}」${progText(tp)}。` : '') + (me.today ? `あなたは ${me.today}問。まだ追いつけます` : 'あなたはまだ0問…1問だけでも始めよう') }; }
   return null;
 }
 async function sendTaunts() {
@@ -196,6 +221,7 @@ async function sendTaunts() {
   let sent = 0;
   const cache = {};
   const todayOf = async (uid, date) => { const k = date + '_' + uid; if (!(k in cache)) { const s = await db.collection('susuru_anki_daily_scores').doc(k).get(); const d = s.exists ? s.data() : {}; cache[k] = (Number(d.score) || 0) + (Number(d.drillScore) || 0); } return cache[k]; };
+  const progsOf = async uid => { const k = 'prog:' + uid; if (!(k in cache)) cache[k] = (await db.collection('susuru_anki_category_scores').where('uid', '==', uid).where('mode', '==', 'drillprog').get()).docs.map(d => d.data()); return cache[k]; };
   const racesOf = async (uid, wk) => { const k = 'race:' + uid; if (!(k in cache)) cache[k] = (await db.collection('susuru_anki_category_scores').where('uid', '==', uid).where('mode', '==', 'race').get()).docs.map(d => d.data()); return cache[k].filter(r => r.week === wk).map(r => Object.assign({}, r, { points: racePoints(r) })); };
   for (const doc of snap.docs) {
     const d = doc.data();
@@ -211,11 +237,11 @@ async function sendTaunts() {
     const fl = prof.exists ? (prof.data().friends || []) : [];
     if (!fl.length) continue;
     const wk = weekKeyOf(now.date);
-    const me = { today: await todayOf(doc.id, now.date), races: await racesOf(doc.id, wk) };
+    const me = { today: await todayOf(doc.id, now.date), races: await racesOf(doc.id, wk), progs: await progsOf(doc.id) };
     const friends = [];
     for (const f of fl.slice(0, 30)) {
       const fp = await db.collection('susuru_anki_profiles').doc(f).get();
-      friends.push({ name: (fp.exists && fp.data().displayName) || 'フレンド', today: await todayOf(f, now.date), races: await racesOf(f, wk) });
+      friends.push({ name: (fp.exists && fp.data().displayName) || 'フレンド', today: await todayOf(f, now.date), races: await racesOf(f, wk), progs: await progsOf(f) });
     }
     const msg = tauntMessage(prof.data().displayName, me, friends);
     await doc.ref.update({ lastTauntSlot: slot, lastTauntDate: now.date });

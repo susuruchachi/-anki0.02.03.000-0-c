@@ -438,7 +438,7 @@ async function renderCompareStats() {
 
     const accumulate = (doc, isMe) => {
       const d = doc.data();
-      if (d.mode === 'race') return;
+      if (d.mode === 'race' || d.mode === 'drillprog') return;
       if (catSet && !catSet.has(d.category)) return;
       if ((d.mode === 'drill' ? 'drill' : 'quiz') !== cmpMode) return;
       if (!dateMap[d.date]) dateMap[d.date] = { myScore: 0, myTotal: 0, friendScore: 0, friendTotal: 0, friendName: '?' };
@@ -459,9 +459,27 @@ async function renderCompareStats() {
     const allDates = Object.keys(dateMap).sort();
 
     area.innerHTML = '';
+    // ★【0.04.08】暗記テストの進み具合（何周目・何番まで・残り・合格）を、自分とフレンドで並べる
+    { const progs = [];
+      const inCat = d => !category || d.cat === category || (typeof getAllSubcategories === 'function' && categories.includes(category) && getAllSubcategories(category).includes(d.cat));
+      mySnap.forEach(doc => { const d = doc.data(); if (d.mode === 'drillprog' && inCat(d)) progs.push(Object.assign({ me: true }, d)); });
+      friendSnap.forEach(doc => { const d = doc.data(); if (d.mode === 'drillprog' && inCat(d)) { progs.push(d); friendName = d.name || friendName; } });
+      if (progs.length) {
+        const cats = [...new Set(progs.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).map(d => d.cat))].slice(0, 8);
+        const ago = t => { const m = Math.round((Date.now() - (t || 0)) / 60000); return m < 60 ? `${Math.max(1, m)}分前` : m < 1440 ? `${Math.round(m / 60)}時間前` : `${Math.round(m / 1440)}日前`; };
+        const box = document.createElement('div');
+        box.className = 'card'; box.style.cssText = 'margin-bottom:16px; text-align:left;';
+        box.innerHTML = `<div class="setting-box-title">🧠 暗記テストの進み具合</div>` + cats.map(c => {
+          const mine = progs.find(d => d.me && d.cat === c), fr = progs.find(d => !d.me && d.cat === c);
+          const row = (who, d) => `<div class="cmp-prog-row"><b>${escapeHtml(who)}</b>：${d ? `${escapeHtml(drillProgText(d))} <span class="hint-small">${ago(d.updatedAt)}</span>` : '<span class="hint-small">まだ始めていません</span>'}</div>`;
+          return `<div class="cmp-prog"><div class="hint-small">📁 ${escapeHtml(c)}</div>${row('あなた', mine)}${row(friendName, fr)}</div>`;
+        }).join('');
+        area.appendChild(box);
+      }
+    }
 
     if (allDates.length === 0) {
-      area.innerHTML = '<div style="text-align:center; color:var(--text3); padding:40px;">成績データがありません</div>';
+      area.insertAdjacentHTML('beforeend', '<div style="text-align:center; color:var(--text3); padding:40px;">成績データがありません</div>');
       return;
     }
 
