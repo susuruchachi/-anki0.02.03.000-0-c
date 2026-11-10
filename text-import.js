@@ -247,23 +247,40 @@ function vtCheck(raw) {
 // ★【0.03.97】図を導入の文に付けるときの形：「🗺️ 図（題）」の行のあとに中身の行
 function vtFigText(f) { return [`🗺️ 図${f.title ? `（${f.title}）` : ''}`, ...f.lines].join('\n'); }
 // 「名前動後（名 [prágres] ／ 動 [prəgrés]）」→ 品詞ごとのアクセント問題（発音記号の強く読む母音の位置を、つづりの母音に当てる）
+// ★【0.04.09】品詞によって読み方（アクセント・発音）が変わる語は、品詞ごとの問題にする
+//  メモに「名 [prágres] ／ 動 [prəgrés]」「形 [klous] 動 [klouz]」「名・形 [préznt] 動 [prizént]」のように、品詞ごとの発音記号が2つ以上あれば：
+//   ・強く読む所だけが違う → 「progress（名詞）のアクセント位置は？」（つづりの母音に ´ を付けた選択肢）
+//   ・音そのものが違う → 「close（形容詞）の発音は？」（発音記号の選択肢）
 function vtStressQs(word, note) {
   const out = [], w = String(word || '').trim();
-  if (!/^[A-Za-z]+$/.test(w) || !/名前動後|アクセント/.test(note)) return out;
-  const POS = { '名': '名詞', '動': '動詞', '形': '形容詞', '他': '動詞', '自': '動詞' };
-  const re = /(名|動|形|他|自)\s*[\[［/]([^\]］/]+)[\]］/]/g; let m;
-  const cl = [...w.matchAll(/[aeiouy]+/gi)].map(x => ({ p: x.index, l: x[0].length }));
-  if (cl.length < 2) return out;
-  while ((m = re.exec(note))) {
-    const ipa = m[2].normalize('NFD');
-    const vs = [...ipa.matchAll(/[aeiouæɑɒɔəɛɪʊʌɜɚɝ]+[\u0300-\u036f]*/g)];
-    let k = vs.findIndex(v => v[0].includes('\u0301'));
-    if (k < 0) { const s0 = ipa.indexOf('ˈ'); if (s0 >= 0) k = vs.findIndex(v => v.index > s0); }
-    if (k < 0 || vs.length !== cl.length) continue;
-    const mk = c => (w.slice(0, c.p + 1) + '\u0301' + w.slice(c.p + 1)).normalize('NFC');
-    const choices = cl.map(mk), a = choices[k];
-    out.push({ q: `${w}（${POS[m[1]]}）のアクセント位置は？（強く読む母音に ´ が付いたものを選ぶ）`, a, choices });
+  if (!/^[A-Za-z]+$/.test(w)) return out;
+  const POS = { '名': '名詞', '動': '動詞', '形': '形容詞', '副': '副詞', '他': '動詞', '自': '動詞', '前': '前置詞', '接': '接続詞' };
+  const re = /((?:[名動形副他自前接][・･\/／]?)+)\s*[\[［]([^\]］\n]+)[\]］]/g; let m;
+  const ents = [];
+  while ((m = re.exec(String(note || '')))) {
+    const pos = [...new Set([...m[1]].filter(c => POS[c]).map(c => POS[c]))];
+    if (!pos.length) continue;
+    const ipa = m[2].trim();
+    const e = ents.find(x => x.ipa === ipa);
+    if (e) pos.forEach(p => { if (!e.pos.includes(p)) e.pos.push(p); }); else ents.push({ pos, ipa });
   }
+  if (ents.length < 2) return out; // 品詞で読み方が変わらない（または書いていない）
+  const label = e => e.pos.join('・');
+  // 強く読む所（母音のまとまりの何番目か）
+  const vowels = ipa => [...ipa.normalize('NFD').matchAll(/[aeiouæɑɒɔəɛɪʊʌɜɚɝ]+[̀-ͯ]*/g)];
+  const stressAt = ipa => { const n = ipa.normalize('NFD'), vs = vowels(ipa); let k = vs.findIndex(v => v[0].includes('́')); if (k < 0) { const s0 = n.indexOf('ˈ'); if (s0 >= 0) k = vs.findIndex(v => v.index > s0); } return k; };
+  const cl = [...w.matchAll(/[aeiouy]+/gi)].map(x => ({ p: x.index, l: x[0].length }));
+  const ks = ents.map(e => stressAt(e.ipa));
+  const plain = ipa => ipa.normalize('NFD').replace(/[̀-ͯˈˌ]/g, '');
+  const onlyStress = ents.every(e => plain(e.ipa) === plain(ents[0].ipa) || vowels(e.ipa).length === cl.length);
+  if (cl.length >= 2 && ks.every(k => k >= 0) && new Set(ks).size > 1 && ents.every(e => vowels(e.ipa).length === cl.length) && onlyStress) {
+    const mk = c => (w.slice(0, c.p + 1) + '́' + w.slice(c.p + 1)).normalize('NFC');
+    const choices = cl.map(mk);
+    ents.forEach((e, n) => out.push({ q: `${w}（${label(e)}）のアクセント位置は？（強く読む母音に ´ が付いたものを選ぶ）`, a: choices[ks[n]], choices }));
+    return out;
+  }
+  const choices = ents.map(e => `[${e.ipa}]`);
+  ents.forEach(e => out.push({ q: `${w}（${label(e)}）の発音は？`, a: `[${e.ipa}]`, choices }));
   return out;
 }
 
