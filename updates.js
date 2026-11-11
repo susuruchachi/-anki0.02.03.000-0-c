@@ -54,8 +54,9 @@ async function loadUpdates() {
   }
   // 同じバージョンのお知らせが Firestore にあればそちらを優先し、同梱分は出さない
   const cloudVersions = new Set(items.map(it => String(it.version)));
+  await loadHiddenNotes();
   (typeof BUNDLED_RELEASE_NOTES !== 'undefined' ? BUNDLED_RELEASE_NOTES : []).forEach(n => {
-    if (cloudVersions.has(String(n.version))) return;
+    if (cloudVersions.has(String(n.version)) || _hiddenNotes.has(String(n.version))) return;
     items.push({ title: n.title, version: n.version, content: n.content, date: n.date ? new Date(n.date + 'T00:00:00') : null, fromCloud: false });
   });
   items.sort((x, y) => (y.date ? y.date.getTime() : 0) - (x.date ? x.date.getTime() : 0));
@@ -69,7 +70,8 @@ async function loadUpdates() {
   const html = [];
   items.forEach(it => {
     const dateStr = it.date ? it.date.toLocaleDateString('ja-JP') : '';
-    const delBtn = (isAdmin && it.fromCloud) ? `<button class="btn btn-danger" style="padding:4px 10px; font-size:0.75rem; margin-top:10px; width:auto;" onclick="deleteUpdate(${jsArg(it.id)})">🗑️ このお知らせを削除</button>` : '';
+    const delBtn = !isAdmin ? '' : it.fromCloud ? `<button class="btn btn-danger" style="padding:4px 10px; font-size:0.75rem; margin-top:10px; width:auto;" onclick="deleteUpdate(${jsArg(it.id)})">🗑️ このお知らせを削除</button>`
+      : `<button class="btn btn-danger" style="padding:4px 10px; font-size:0.75rem; margin-top:10px; width:auto;" onclick="hideBundledNote(${jsArg(String(it.version))})">🗑️ このお知らせを消す（全員から）</button>`;
     html.push(`<div class="card" style="margin-bottom:10px;">
       <div class="update-banner-title" style="margin-bottom:8px;">🎉 ${escapeHtml(it.title)} (v${escapeHtml(it.version)}) 
         <span style="font-size:0.7rem; color:var(--text3); margin-left:auto;">${dateStr}</span>
@@ -85,12 +87,35 @@ async function loadUpdates() {
 
 // ★【0.03.00】最新版の同梱お知らせを、まだ見ていない人のホーム画面にバナーで出す
 const SEEN_RELEASE_KEY = 'susuru_anki_seen_release';
+// ★【0.04.12】アプリ同梱のお知らせ（release-notes.js）も、管理者が消せる。消したバージョンは
+//  susuru_anki_updates/_hidden の hidden（全員に効く。管理者だけ書ける）に入れて、一覧・ホームのバナーに出さない
+let _hiddenNotes = new Set();
+try { _hiddenNotes = new Set(JSON.parse(localStorage.getItem('susuru_anki_hidden_notes') || '[]')); } catch (e) {}
+async function loadHiddenNotes() {
+  try {
+    const d = await firestore.collection('susuru_anki_updates').doc('_hidden').get();
+    _hiddenNotes = new Set(((d.exists && d.data().hidden) || []).map(String));
+    try { localStorage.setItem('susuru_anki_hidden_notes', JSON.stringify([..._hiddenNotes])); } catch (e) {}
+  } catch (e) {}
+}
+async function hideBundledNote(version) {
+  if (!currentUser || currentUser.uid !== ADMIN_UID) return alert('管理者のみ使用できます。');
+  if (!confirm(`v${version} のお知らせを消しますか？（全員の一覧・ホームのバナーから消えます）`)) return;
+  try {
+    await firestore.collection('susuru_anki_updates').doc('_hidden').set({ hidden: firebase.firestore.FieldValue.arrayUnion(String(version)) }, { merge: true });
+    _hiddenNotes.add(String(version));
+    try { localStorage.setItem('susuru_anki_hidden_notes', JSON.stringify([..._hiddenNotes])); } catch (e) {}
+    loadUpdates(); showReleaseBannerIfNew();
+  } catch (e) { alert('⚠️ 消せませんでした：' + (e.code || e.message || '')); }
+}
 function getLatestReleaseNote() {
-  return (typeof BUNDLED_RELEASE_NOTES !== 'undefined' && BUNDLED_RELEASE_NOTES.length) ? BUNDLED_RELEASE_NOTES[0] : null;
+  const list = typeof BUNDLED_RELEASE_NOTES !== 'undefined' ? BUNDLED_RELEASE_NOTES.filter(n => !_hiddenNotes.has(String(n.version))) : [];
+  return list.length ? list[0] : null;
 }
 function showReleaseBannerIfNew() {
   const banner = document.getElementById('releaseBanner');
   const note = getLatestReleaseNote();
+  if (banner && !note) { banner.style.display = 'none'; return; }
   if (!banner || !note) return;
   let seen = null;
   try { seen = localStorage.getItem(SEEN_RELEASE_KEY); } catch(e) {}

@@ -26,7 +26,13 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-      - uses: android-actions/setup-android@v3
+      # ★【0.04.12】android-actions/setup-android は、もう無い「tools」を入れようとして失敗するようになったので使わない
+      #  （GitHub の実行環境には Android SDK が入っている。足りない部品は組み立てのときに自動で入る）
+      - name: Use the preinstalled Android SDK
+        run: |
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          echo "sdk.dir=$SDK" > android/local.properties
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.14.3'
