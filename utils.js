@@ -37,10 +37,14 @@ function figHTML(text) {
 }
 
 // ★【0.04.10】エスケープ済みの文の中の URL を、押すと開けるリンクにする（メッセージ・お知らせ・要望・AI の答え）
+// 「google.com」「www.example.co.jp/path」のように https:// が無いものもリンクにする（よく使う末尾だけ。v0.04.11・file.csv などはリンクにしない）
+const LINK_TLDS = 'com|net|org|jp|io|dev|app|me|info|biz|edu|gov|tv|ai|ly|gg|co|us|uk|so|to|xyz|site|online|page|cloud|tech|blog|news|shop|games?';
+const LINK_RE = new RegExp(String.raw`(^|[^A-Za-z0-9@./:_-])((?:https?:\/\/[^\s<>"'（）「」、。]+)|(?:(?:www\.)?(?:[A-Za-z0-9-]*[A-Za-z][A-Za-z0-9-]*\.)+(?:${LINK_TLDS})(?![A-Za-z0-9-])(?:[\/?#][^\s<>"'（）「」、。]*)?))`, 'gi');
 function linkifyHTML(html) {
-  return String(html == null ? '' : html).replace(/(^|[^"'=>])(https?:\/\/[^\s<>"'（）「」、。]+)/g, (m, pre, url) => {
+  return String(html == null ? '' : html).replace(LINK_RE, (m, pre, url) => {
     const tail = (url.match(/[).,!?;:]+$/) || [''])[0], u = tail ? url.slice(0, -tail.length) : url;
-    return `${pre}<a href="${u}" target="_blank" rel="noopener noreferrer" class="msg-link" onclick="event.stopPropagation()">${u}</a>${tail}`;
+    const href = /^https?:\/\//i.test(u) ? u : 'https://' + u;
+    return `${pre}<a href="${href}" target="_blank" rel="noopener noreferrer" class="msg-link" onclick="event.stopPropagation()">${u}</a>${tail}`;
   });
 }
 
