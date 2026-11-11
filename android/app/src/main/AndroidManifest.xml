@@ -35,6 +35,12 @@
                 <data android:scheme="https" android:host="@string/hostName" android:pathPrefix="@string/pathPrefix" />
             </intent-filter>
         </activity>
+        <!-- ★【0.04.12】アプリの中のブラウザ（チャットなどのリンクを開く） -->
+        <activity
+            android:name=".BrowserActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

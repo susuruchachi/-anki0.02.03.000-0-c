@@ -7,6 +7,14 @@ name: android-apk
 
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: '作った APK を apk/susuruanki.apk に置いて、アプリの中で更新を知らせる（ANDROID_APK_VERSION を上げる）'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -36,3 +44,15 @@ jobs:
         with:
           name: susuruanki-apk
           path: android/app/build/outputs/apk/release/app-release.apk
+      # ★【0.04.12】本物の署名鍵で作れたら、APK をリポジトリに置いて、アプリの中の更新のお知らせ（ANDROID_APK_VERSION）を上げる
+      - name: Publish APK to the branch
+        if: ${{ inputs.publish && env.SUSURU_KEYSTORE != '' }}
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk apk/susuruanki.apk
+          V=$(sed -n 's/^const APP_VERSION = "\([^"]*\)".*/\1/p' version-info.js)
+          sed -i "s/^const ANDROID_APK_VERSION = \"[^\"]*\"/const ANDROID_APK_VERSION = \"$V\"/" version-info.js
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apk/susuruanki.apk version-info.js
+          git commit -m "APK $V を公開（アプリの中で更新を知らせる）" || echo "変更なし"
+          git push

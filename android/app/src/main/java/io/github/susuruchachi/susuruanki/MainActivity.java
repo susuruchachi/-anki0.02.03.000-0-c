@@ -94,8 +94,8 @@ public class MainActivity extends Activity {
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
                 Uri u = req.getUrl();
                 if (isOwnPage(u)) return false;
-                // 外のページ（参考のリンクなど）は、端末のほかのアプリで開く
-                try { startActivity(new Intent(Intent.ACTION_VIEW, u)); } catch (ActivityNotFoundException e) { toast("開けるアプリがありません"); }
+                // ★【0.04.12】外のページ（チャットのリンクなど）は、アプリの中のブラウザで開く（Chrome に時間制限があっても見られるように）
+                openInApp(u);
                 return true;
             }
         });
@@ -165,6 +165,15 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onPause() { super.onPause(); CookieManager.getInstance().flush(); }
+
+    private void openInApp(Uri u) {
+        String sc = u.getScheme();
+        if ("http".equals(sc) || "https".equals(sc)) {
+            startActivity(new Intent(this, BrowserActivity.class).putExtra(BrowserActivity.EXTRA_URL, u.toString()));
+            return;
+        }
+        try { startActivity(new Intent(Intent.ACTION_VIEW, u)); } catch (ActivityNotFoundException e) { toast("開けるアプリがありません"); }
+    }
 
     private void toast(String m) { runOnUiThread(() -> Toast.makeText(this, m, Toast.LENGTH_SHORT).show()); }
 
@@ -272,6 +281,7 @@ public class MainActivity extends Activity {
         }
 
         // 外のページを、ほかのアプリ（ブラウザなど）で開く
+        @JavascriptInterface public void openInApp(String url) { runOnUiThread(() -> MainActivity.this.openInApp(Uri.parse(url))); }
         @JavascriptInterface public void openExternal(String url) {
             try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url))); } catch (Exception e) { toast("開けるアプリがありません"); }
         }
