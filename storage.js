@@ -16,13 +16,62 @@ let catStamps = {};   // { フォルダー名: { a: 作成(復活)時刻, d: 削
 let catSubjects = {}; // ★【0.03.07】フォルダーの教科タグ { フォルダー名: '英語' }（'' は「なし（親から引き継がない）」）
 // ★【0.03.30】上のフォルダーから出題するときに出さないフォルダー { フォルダー名: true }（false は「出す」を明示。同期で外せるように）
 let catSkip = {};
-function isCatSkipped(cat) { return !!(catSkip && catSkip[cat] === true); }
+// ★【0.03.96】印が無くても、名前が「例文」「チャンツ」で終わるフォルダー（テキストから作ったもの・共有カテゴリーから取り込んだもの）は、
+// はじめから「上のフォルダーから出題しない」にする（印は自分のデータにしか無く、共有カテゴリーを取り込んだ人には付いていなかった）。
+// 自分で外した（false）・付けた（true）ときはそちらを優先
+const CAT_DEFAULT_SKIP_RE = /(例文|チャンツ)(（[^）]*）)?$/;
+function isCatSkipped(cat) {
+  const v = catSkip ? catSkip[cat] : undefined;
+  if (v === true) return true;
+  if (v === false) return false;
+  return CAT_DEFAULT_SKIP_RE.test(String(cat || '').trim());
+}
 // 出題に使うフォルダー：自分と、その下のフォルダー（ただし「上から出題するときは出さない」フォルダーとその下は除く）
 function getQuizSubcategories(cat, result = []) {
   if (result.includes(cat)) return result;
   result.push(cat);
   (categoryTree[cat] || []).forEach(c => { if (!isCatSkipped(c)) getQuizSubcategories(c, result); });
   return result;
+}
+// ★【0.03.62】連続記録：学習した日 { 'YYYY-MM-DD': その日に答えた数 }（同期では両方を残し、多い方の数）
+let studyDays = {}; // ★【0.03.73】値は { 端末ID: その端末で答えた数 }（前の版は数だけ）。端末ごとに多い方を残して、合計を表示する
+// ★【0.03.73】暗記テストの途中経過 { フォルダー: 途中の状態（at: 保存時刻, dev: 端末）| { deleted: true, at } } と、
+// クイズの「番号順（前回の続きから）」の位置 { 出題範囲: { pos, at } } も同期する
+let drillProgress = {};
+let quizOrderPos = {};
+// ★【0.03.82】読み上げの読み方の辞書 { 書き方: { r: 読み方, at } | { deleted: true, at } }（端末間で同期）
+let ttsDict = {};
+// ★【0.03.91】暗記テストで AI にした質問 { カードID: [{ q, a, at, model } | { at, del: true }] }（端末間で同期。前はこの端末だけ）
+let drillQa = {};
+function mergeDrillQa(a, b) {
+  const o = {}, limit = Date.now() - 60 * 86400e3;
+  [a || {}, b || {}].forEach(m => Object.entries(m).forEach(([id, list]) => {
+    const cur = o[id] = o[id] || {};
+    (list || []).forEach(x => { if (!x || !x.at) return; const k = String(x.at); if (x.del) cur[k] = { at: x.at, del: true, dt: Math.max(x.dt || 0, (cur[k] && cur[k].dt) || 0) || undefined }; else if (!cur[k] || !cur[k].del) cur[k] = x; });
+  }));
+  const out = {};
+  Object.entries(o).forEach(([id, map]) => {
+    const all = Object.values(map).sort((x, y) => x.at - y.at);
+    const live = all.filter(x => !x.del).slice(-10), dead = all.filter(x => x.del && (x.dt || x.at) > limit); // 消した記録は、消した時刻から60日とっておく
+    if (live.length || dead.length) out[id] = [...dead, ...live].sort((x, y) => x.at - y.at);
+  });
+  // 新しく使ったカードから150枚まで
+  const ids = Object.keys(out).sort((x, y) => Math.max(...out[y].map(z => z.at)) - Math.max(...out[x].map(z => z.at)));
+  ids.slice(150).forEach(id => delete out[id]);
+  return out;
+}
+function studyDayCount(v) { return typeof v === 'number' ? v : v && typeof v === 'object' ? Object.values(v).reduce((a, n) => a + (Number(n) || 0), 0) : 0; }
+function mergeStudyDays(a, b) {
+  const asObj = v => typeof v === 'number' ? (v > 0 ? { _: v } : {}) : Object.assign({}, v || {});
+  const o = {};
+  [a || {}, b || {}].forEach(m => Object.entries(m).forEach(([d, v]) => { const x = asObj(v), cur = o[d] || {}; Object.entries(x).forEach(([k, n]) => { cur[k] = Math.max(cur[k] || 0, Number(n) || 0); }); o[d] = cur; }));
+  return o;
+}
+function mergeStampedMap(a, b, keepDays) {
+  const o = {}, limit = Date.now() - (keepDays || 60) * 86400000;
+  [a || {}, b || {}].forEach(m => Object.entries(m).forEach(([k, v]) => { if (!v) return; if (!o[k] || (v.at || 0) > (o[k].at || 0)) o[k] = v; }));
+  Object.keys(o).forEach(k => { if (o[k].deleted && (o[k].at || 0) < limit) delete o[k]; });
+  return o;
 }
 let studyPlan = null; // ★【0.03.27】週間プラン（plan.js）。設定は新しく変えた方、達成の記録は両方を残す
 // ★【0.03.33】週間プランは複数持てる：studyPlan = { v: 2, plans: { id: プラン } }（解除したプランは { deleted: true, planAt }）
@@ -205,6 +254,11 @@ function loadData() {
       if(p.catSubjects) catSubjects=p.catSubjects;
       if(p.catSkip) catSkip=p.catSkip;
       if(p.studyPlan) studyPlan=p.studyPlan;
+      if(p.studyDays) studyDays=p.studyDays;
+      if(p.drillProgress) drillProgress=p.drillProgress;
+      if(p.quizOrderPos) quizOrderPos=p.quizOrderPos;
+      if(p.ttsDict) ttsDict=p.ttsDict;
+      if(p.drillQa) drillQa=p.drillQa;
       if(p.deletedCardsAt) deletedCardsAt=p.deletedCardsAt;
       if(p.docStamps) docStamps=p.docStamps;
       if(p.structAt) structAt=p.structAt;
@@ -284,7 +338,7 @@ function updateStructStamp() {
 }
 
 function buildSyncPayload() {
-  return { db, categories, categoryTree, subscribedDocs, ownedDocs, deletedCards, deletedCardsAt, deletedCats, catStamps, docStamps, structAt, catSubjects, catSkip, studyPlan };
+  return { db, categories, categoryTree, subscribedDocs, ownedDocs, deletedCards, deletedCardsAt, deletedCats, catStamps, docStamps, structAt, catSubjects, catSkip, studyPlan, studyDays, drillProgress, quizOrderPos, ttsDict, drillQa };
 }
 
 let _quotaWarned = false;
@@ -352,8 +406,15 @@ function encodeCloudBody(payload) {
     const gz = pako.gzip(dbJson);
     delete body.db;
     body.dbFormat = 'gzip-json-v1';
-    size = gz.length + utf8Bytes(JSON.stringify(body)) + 2000; // 圧縮データ以外の部分＋圧縮データの大きさ
+    // ★【0.03.73】暗記テストの途中経過も圧縮して入れる
+    let dp = null;
+    if (body.drillProgress && Object.keys(body.drillProgress).length) { dp = pako.gzip(JSON.stringify(body.drillProgress)); delete body.drillProgress; }
+    let qa = null; // ★【0.03.91】暗記テストの質問も縮めて入れる
+    if (body.drillQa && Object.keys(body.drillQa).length) { qa = pako.gzip(JSON.stringify(body.drillQa)); delete body.drillQa; }
+    size = gz.length + (dp ? dp.length : 0) + (qa ? qa.length : 0) + utf8Bytes(JSON.stringify(body)) + 2000; // 圧縮データ以外の部分＋圧縮データの大きさ
     body.dbGz = firebase.firestore.Blob.fromUint8Array(gz);
+    if (dp) body.dpGz = firebase.firestore.Blob.fromUint8Array(dp);
+    if (qa) body.qaGz = firebase.firestore.Blob.fromUint8Array(qa);
   } else {
     body.db = JSON.parse(dbJson);
     size = utf8Bytes(JSON.stringify(body)) + 2000;
@@ -372,6 +433,8 @@ function decodeCloudDoc(r) {
     const out = Object.assign({}, r);
     out.db = JSON.parse(pako.ungzip(bytes, { to: 'string' }));
     delete out.dbGz;
+    if (r.qaGz) { try { const b3 = typeof r.qaGz.toUint8Array === 'function' ? r.qaGz.toUint8Array() : r.qaGz; out.drillQa = JSON.parse(pako.ungzip(b3, { to: 'string' })); } catch (e) { console.warn(e); } delete out.qaGz; }
+    if (r.dpGz) { try { const b2 = typeof r.dpGz.toUint8Array === 'function' ? r.dpGz.toUint8Array() : r.dpGz; out.drillProgress = JSON.parse(pako.ungzip(b2, { to: 'string' })); } catch (e) { console.warn(e); } delete out.dpGz; }
     return out;
   }
   return r;
@@ -534,6 +597,11 @@ function mergeSyncStates(L, C) {
     catSkip: (() => { const o = Object.assign({}, older.catSkip || {}, newer.catSkip || {}); Object.keys(o).forEach(k => { if (!aliveSet.has(k)) delete o[k]; }); return o; })(),
     structAt: Math.max(L.structAt || 0, C.structAt || 0),
     studyPlan: mergeStudyPlans(L.studyPlan, C.studyPlan),
+    studyDays: mergeStudyDays(L.studyDays, C.studyDays),
+    drillProgress: mergeStampedMap(L.drillProgress, C.drillProgress, 30),
+    quizOrderPos: mergeStampedMap(L.quizOrderPos, C.quizOrderPos, 365),
+    ttsDict: mergeStampedMap(L.ttsDict, C.ttsDict, 365),
+    drillQa: mergeDrillQa(L.drillQa, C.drillQa),
     subscribedDocs: subs, ownedDocs: owned
   };
 }
@@ -543,7 +611,7 @@ function mergeIntoLocal(r) {
   const merged = mergeSyncStates(buildSyncPayload(), r);
   db = merged.db; categories = merged.categories; categoryTree = merged.categoryTree;
   deletedCards = merged.deletedCards; deletedCardsAt = merged.deletedCardsAt; deletedCats = merged.deletedCats;
-  catStamps = merged.catStamps; docStamps = merged.docStamps; structAt = merged.structAt; catSubjects = merged.catSubjects || {}; catSkip = merged.catSkip || {}; studyPlan = merged.studyPlan || null;
+  catStamps = merged.catStamps; docStamps = merged.docStamps; structAt = merged.structAt; catSubjects = merged.catSubjects || {}; catSkip = merged.catSkip || {}; studyPlan = merged.studyPlan || null; studyDays = merged.studyDays || {}; drillProgress = merged.drillProgress || {}; quizOrderPos = merged.quizOrderPos || {}; ttsDict = merged.ttsDict || {}; drillQa = merged.drillQa || {};
   subscribedDocs = merged.subscribedDocs; ownedDocs = merged.ownedDocs;
   ensureSystemSanity();
   autoMerge(true);
@@ -573,7 +641,7 @@ function syncFingerprint(p) {
   return stableStringify({
     db: dbSorted, categories: [...(p.categories || [])].sort(), categoryTree: p.categoryTree || {},
     deletedCards: [...(p.deletedCards || [])].sort(), deletedCardsAt: p.deletedCardsAt || {}, deletedCats: [...(p.deletedCats || [])].sort(),
-    catStamps: p.catStamps || {}, docStamps: p.docStamps || {}, structAt: p.structAt || 0, catSubjects: p.catSubjects || {}, catSkip: p.catSkip || {}, studyPlan: p.studyPlan || null,
+    catStamps: p.catStamps || {}, docStamps: p.docStamps || {}, structAt: p.structAt || 0, catSubjects: p.catSubjects || {}, catSkip: p.catSkip || {}, studyPlan: p.studyPlan || null, studyDays: p.studyDays || {}, drillProgress: p.drillProgress || {}, quizOrderPos: p.quizOrderPos || {}, ttsDict: p.ttsDict || {}, drillQa: p.drillQa || {},
     subscribedDocs: [...(p.subscribedDocs || [])].sort(), ownedDocs: [...(p.ownedDocs || [])].sort()
   });
 }
@@ -587,6 +655,7 @@ function refreshVisibleViews(contentChanged = true) {
       if (isActive('pgHome')) { if (typeof buildQuizScopeDropdown === 'function') buildQuizScopeDropdown(); if (typeof renderPlanHome === 'function') renderPlanHome(); }
     }
     if (typeof updateHomeSummary === 'function') updateHomeSummary();
+    if (isActive('pgDrill') && typeof _drillActive !== 'undefined' && !_drillActive && typeof drillHome === 'function') drillHome(); // ほかの端末の途中経過
   } catch (e) { console.warn(e); }
 }
 
@@ -665,6 +734,7 @@ function ensureSystemSanity() {
 function assignCardNumbers() {
   const maxNo = {};
   db.forEach(q => {
+    if (q.kind === 'intro') { if (q.no !== undefined) delete q.no; return; } // ★【0.03.55】導入の文は番号なし
     if (q.no !== undefined && q.no !== null && q.no !== '') {
       const n = Number(q.no);
       // ★【0.03.45】派生語・熟語の 1000.01 / 1000.0001 のような小数の番号はそのまま（「1000-1」と表示）
@@ -673,6 +743,7 @@ function assignCardNumbers() {
     }
   });
   db.forEach(q => {
+    if (q.kind === 'intro' || q.kind === 'test') return; // ★【0.03.55】導入の文・Check! には番号を振らない（ほかのフォルダーの番号と重なって見えていた）
     if (q.no === undefined || q.no === null || q.no === '') { q.no = (maxNo[q.category] || 0) + 1; maxNo[q.category] = q.no; }
   });
 }
@@ -725,7 +796,7 @@ function resolveAccountSwitch() {
     if (!merge) {
       takeSnapshot('アカウント変更（置き換え）');
       db = []; categories = ['未分類']; categoryTree = {}; subscribedDocs = []; ownedDocs = [];
-      deletedCards = []; deletedCardsAt = {}; deletedCats = []; catStamps = {}; docStamps = {}; structAt = 0; catSubjects = {}; catSkip = {}; studyPlan = null;
+      deletedCards = []; deletedCardsAt = {}; deletedCats = []; catStamps = {}; docStamps = {}; structAt = 0; catSubjects = {}; catSkip = {}; studyPlan = null; studyDays = {}; drillProgress = {}; quizOrderPos = {}; ttsDict = {}; drillQa = {};
       sharedDocPermissions = {};
       _structHash = structFingerprint(); writeLocal();
     } else {

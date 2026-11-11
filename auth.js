@@ -1,5 +1,6 @@
 // ----------------- Firebase Auth -----------------
 function firebaseLogin() { 
+  if (typeof appGoogleLogin === 'function' && appGoogleLogin()) return; // ★【0.04.03】Android アプリの中では、アプリ側でログイン
   const provider = new firebase.auth.GoogleAuthProvider();
   provider.setCustomParameters({ 'prompt': 'select_account' });
   
@@ -19,6 +20,7 @@ function firebaseLogin() {
 async function firebaseLogout() { 
   // ★【0.03.14】この端末への通知を止めてからログアウトする
   if (typeof removePushTokenBeforeLogout === 'function') await removePushTokenBeforeLogout();
+  if (typeof appGoogleLogout === 'function') appGoogleLogout();
   auth.signOut()
     .then(() => alert("✅ ログアウトしました"))
     .catch(err => alert("⚠️ ログアウトエラー: " + err.message));
@@ -62,6 +64,7 @@ auth.onAuthStateChanged(user => {
     // ★【0.03.10】招待リンク（オンライン対戦）・対戦途中からの復帰のチェック（ログインが終わってから）
     if (typeof onMatchAuthReady === 'function') onMatchAuthReady();
     if (typeof onNotifyAuthReady === 'function') onNotifyAuthReady(); // ★【0.03.14】プッシュ通知の登録
+    if (typeof streakBackfill === 'function') setTimeout(streakBackfill, 4000); // ★【0.03.62】連続記録の過去分
     if (typeof loadAiKeysFromCloud === 'function') loadAiKeysFromCloud(); // ★【0.03.15】AI のキー（自分の・家族の）
     if (typeof startFriendRequestWatch === 'function') startFriendRequestWatch(); // ★【0.03.25】フレンド申請
   } else {

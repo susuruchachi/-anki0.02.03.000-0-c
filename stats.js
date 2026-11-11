@@ -19,12 +19,10 @@ const STATUS_TESTS = {
 };
 const STATUS_NAMES = { grad: '🎓 卒業', master: '⚡ 得意', normal: '☕ 普通', weak: '⚠️ 苦手', shikkari: '🧱 しっかり', unseen: '💤 未着手' };
 function renderStatsAndCharts() {
-  const sel = document.getElementById('selStatsCategory');
   if (statsCategory && !categories.includes(statsCategory)) statsCategory = '';
-  if (sel) {
-    sel.innerHTML = '<option value="">📚 すべてのフォルダー</option>' + buildCategoryOptionsHTML(new Set(), false);
-    sel.value = statsCategory;
-  }
+  // ★【0.03.81】フォルダーはフォルダーを選ぶ画面で
+  const pk = document.getElementById('statsCatPick');
+  if (pk) pk.innerHTML = folderPickFieldHTML('selStatsCategory', statsCategory, { title: '🥧 ランク分布のフォルダー', allLabel: '📚 すべてのフォルダー', hint: '選んだフォルダー（下のフォルダーも含む）だけの分布にします', onChange: v => setStatsCategory(v) });
   const cards = statsCards(statsCategory);
   const t = cards.length;
   document.getElementById('statTotal').innerText = t;
@@ -51,11 +49,6 @@ function renderStatsAndCharts() {
       onClick: (e, els) => { if (els && els.length) filterBoxByStatus(['grad', 'master', 'normal', 'weak', 'shikkari'][els[0].index]); } }
   });
 
-  const hc = document.getElementById('heatmapContainer'); hc.innerHTML='';
-  for(let i=0; i<30; i++) {
-    const c = document.createElement('div'); c.className='heatmap-cell';
-    const lvl = i===29 ? (todayCorrectCount>10?4:todayCorrectCount>5?3:todayCorrectCount>0?2:0) : Math.floor(Math.random()*2);
-    c.setAttribute('data-level', lvl); hc.appendChild(c);
-  }
+  renderStudyHeatmap(); // ★【0.03.62】学習した日の記録（studyDays）から。以前は過去の日がでたらめだった
 }
 

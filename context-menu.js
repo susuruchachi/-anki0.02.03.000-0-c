@@ -224,7 +224,7 @@ function openCategoryEditor(catName) {
 
 function setCategorySkip(cat, on) {
   catSkip = catSkip || {};
-  if (on) catSkip[cat] = true; else if (catSkip[cat]) catSkip[cat] = false;
+  catSkip[cat] = !!on; // 外したときも「出す」を明示（名前で最初から外しているフォルダーのため）
   saveData(true);
   if (typeof refreshVisibleViews === 'function') refreshVisibleViews(true);
 }
@@ -282,7 +282,7 @@ function renderBulkDelete() {
     <div id="bulkDelList" class="bulkdel-list">${cards.map(q => {
       const ok = bulkDelCanDelete(q);
       return `<label class="bulkdel-row${ok ? '' : ' ro'}"><input type="checkbox" data-id="${escAttr(q.id)}" ${st.sel.has(q.id) ? 'checked' : ''} ${ok ? '' : 'disabled'}>
-        <div style="min-width:0; flex:1;"><div class="bulkdel-q">${q.no ? `<span class="card-no">No.${cardNoText(q.no)}</span>` : ''}${escapeHtml(String(q.question).slice(0, 120))}</div>
+        <div style="min-width:0; flex:1;"><div class="bulkdel-q">${showsCardNo(q) ? `<span class="card-no">No.${cardNoText(q.no)}</span>` : ''}${escapeHtml(String(q.question).slice(0, 120))}</div>
         <div class="hint-small">${escapeHtml(String(q.answer).slice(0, 80))}${st.sub && q.category !== st.cat ? `　📂 ${escapeHtml(q.category)}` : ''}${ok ? '' : '　🔒 閲覧専用'}</div></div></label>`;
     }).join('') || '<div class="hint-small" style="padding:12px;">問題がありません。</div>'}</div>
     <div class="plan-btns" style="margin-top:10px;">
@@ -456,7 +456,7 @@ function runCategoryAction(catName, act, info) {
       const parent = getCategoryParent(catName);
       const panel = showCategoryPanel(`
         <label class="section-label">移動先（この中に入れます）</label>
-        <select id="catEditSelect" class="form-control">${buildCategoryOptionsHTML(exclude, !!parent)}</select>
+        ${folderPickFieldHTML('catEditSelect', '', Object.assign({ title: '📂 移動先（この中に入れます）', emptyLabel: '移動先を選ぶ', selectable: c => !exclude.has(c) }, parent ? { allLabel: '🔝 一番上の階層', topValue: '__top__' } : {}))}
         <div class="hint-small">今の場所: ${parent ? escapeHtml(parent) : '一番上の階層'}</div>
         <div class="form-row" style="margin-top:8px;"><button type="button" class="btn" id="catEditOk">移動</button></div>`);
       panel.querySelector('#catEditOk').onclick = () => {
@@ -472,7 +472,7 @@ function runCategoryAction(catName, act, info) {
       const exclude = new Set(getAllSubcategories(catName));
       const panel = showCategoryPanel(`
         <label class="section-label">統合先のフォルダー</label>
-        <select id="catEditSelect" class="form-control">${buildCategoryOptionsHTML(exclude, false)}</select>
+        ${folderPickFieldHTML('catEditSelect', '', { title: '🔀 統合先のフォルダー', emptyLabel: '統合先を選ぶ', selectable: c => !exclude.has(c) })}
         <div class="hint-small">「${escapeHtml(catName)}」の問題とサブフォルダーをすべて統合先へ移し、「${escapeHtml(catName)}」は削除します。同じ問題・答えのカードは1枚にまとめます（成績は良い方を残します）。</div>
         <div class="form-row" style="margin-top:8px;"><button type="button" class="btn" id="catEditOk">統合する</button></div>`);
       panel.querySelector('#catEditOk').onclick = () => {

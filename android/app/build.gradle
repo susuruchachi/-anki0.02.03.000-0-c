@@ -1,5 +1,6 @@
-// ★【0.03.14】すするanki の Android アプリ（Trusted Web Activity）
-// 中身はウェブ版（GitHub Pages）をそのまま Chrome で全画面表示する。アプリの更新はウェブ版を更新するだけで届く
+// ★【0.04.03】すするanki の Android アプリ（WebView 版。前の版は Trusted Web Activity で、中で Chrome を使っていた）
+// 中身はウェブ版（GitHub Pages）を Android の内蔵部品（Android System WebView）で表示する。Chrome は使わないので、Chrome の時間制限の影響を受けない。
+// アプリの中身の更新はウェブ版を更新するだけで届く（APK を作り直すのは、アプリ本体（MainActivity.java など）を変えたときだけ）
 plugins {
     id 'com.android.application'
 }
@@ -16,7 +17,7 @@ android {
 
     defaultConfig {
         applicationId 'io.github.susuruchachi.susuruanki'
-        minSdk 21
+        minSdk 24
         targetSdk 35
         versionCode Math.max(code, 1)
         versionName appVersion
@@ -25,11 +26,11 @@ android {
         def path = '/-anki0.02.03.000-0-c/'
         resValue 'string', 'appName', 'すするanki'
         resValue 'string', 'launcherName', 'すするanki'
-        resValue 'string', 'launchUrl', "https://${host}${path}?source=twa"
+        resValue 'string', 'launchUrl', "https://${host}${path}?source=app"
         resValue 'string', 'hostName', host
         resValue 'string', 'pathPrefix', path
-        resValue 'string', 'providerAuthority', 'io.github.susuruchachi.susuruanki.fileprovider'
-        resValue 'string', 'assetStatements', "[{ \\\"relation\\\": [\\\"delegate_permission/common.handle_all_urls\\\"], \\\"target\\\": {\\\"namespace\\\": \\\"web\\\", \\\"site\\\": \\\"https://${host}\\\"}}]"
+        // Google ログインに使う、Firebase プロジェクトの「ウェブ クライアント ID」（秘密ではない）
+        resValue 'string', 'webClientId', '926791749187-pq139a7m09tnp8pupfineqp8ibruhu9v.apps.googleusercontent.com'
     }
 
     signingConfigs {
@@ -52,6 +53,10 @@ android {
         }
     }
 
+    buildFeatures {
+        buildConfig true
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
@@ -59,5 +64,8 @@ android {
 }
 
 dependencies {
-    implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.5.0'
+    implementation 'androidx.core:core:1.13.1'
+    implementation 'androidx.credentials:credentials:1.3.0'
+    implementation 'androidx.credentials:credentials-play-services-auth:1.3.0'
+    implementation 'com.google.android.libraries.identity.googleid:googleid:1.1.1'
 }

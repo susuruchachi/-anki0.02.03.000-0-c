@@ -56,19 +56,27 @@ async function sendToUser(docRef, data, payload) {
   return res.successCount;
 }
 
+// ★【0.04.10】催促・週間プラン・煽りの通知の間隔（時間。設定の「通知の間隔」、はじめは1時間）。
+//  通知の時刻から、その間隔ごとに1回まで（その日の 23:59 まで）。24 なら1日1回
+function nudgeSlot(d, now) {
+  const [h, m] = String(d.time || '20:00').split(':').map(Number), start = h * 60 + m;
+  if (now.minutes < start) return null;
+  const every = [1, 2, 3, 4, 6, 12, 24].includes(Number(d.every)) ? Number(d.every) : 1;
+  return `${now.date}#${every}h#${Math.floor((now.minutes - start) / (every * 60))}`;
+}
 async function sendReminders() {
   const snap = await db.collection(PUSH_COL).where('reminder', '==', true).get();
   let sent = 0;
   for (const doc of snap.docs) {
     const d = doc.data();
     const now = localNow(d.tzOffset);
-    const [h, m] = String(d.time || '20:00').split(':').map(Number);
-    if (now.minutes < h * 60 + m) continue;          // まだ時刻になっていない
+    const slot = nudgeSlot(d, now);
+    if (!slot) continue;                              // まだ時刻になっていない
     if (d.lastStudyDate === now.date) continue;       // 今日はもう学習した
-    if (d.lastRemindDate === now.date) continue;      // 今日はもう知らせた
+    if (d.lastRemindSlot === slot) continue;          // この間隔の中ではもう知らせた
     const body = d.weakCount > 0 ? `苦手なカードが ${d.weakCount} 枚あります。1問だけでも解いてみませんか？` : '1問だけでも解いてみませんか？';
     const n = await sendToUser(doc.ref, d, { kind: 'reminder', tag: 'reminder', title: '📚 今日の学習がまだです', body, url: APP_URL });
-    await doc.ref.update({ lastRemindDate: now.date });
+    await doc.ref.update({ lastRemindDate: now.date, lastRemindSlot: slot });
     sent += n;
   }
   console.log(`催促: ${sent} 件送信（対象 ${snap.size} 人）`);
@@ -102,19 +110,19 @@ async function sendPlanReminders() {
     const plans = Array.isArray(d.plans) ? d.plans : (d.plan ? [d.plan] : []); // ★【0.03.33】複数のプラン
     if (!plans.length) continue;
     const now = localNow(d.tzOffset);
-    const [h, m] = String(d.time || '20:00').split(':').map(Number);
-    if (now.minutes < h * 60 + m) continue;
+    const slot = nudgeSlot(d, now);
+    if (!slot) continue;
     const dow = new Date(Date.now() - (Number.isFinite(d.tzOffset) ? d.tzOffset : -540) * 60000).getUTCDay();
     const done = Object.assign({}, d.planReminded || {});
-    Object.keys(done).forEach(k => { if (done[k] !== now.date) delete done[k]; }); // 前の日の記録は消す
+    Object.keys(done).forEach(k => { if (!String(done[k]).startsWith(now.date)) delete done[k]; }); // 前の日の記録は消す
     let changed = false;
     for (const pl of plans) {
       for (const msg of planTaskMessages(pl, Date.now(), dow)) {
         const k = `${pl.planId || 'p'}:${msg.key}`;
-        if (done[k] === now.date) continue; // 今日はもう知らせた
+        if (done[k] === slot) continue; // この間隔の中ではもう知らせた
         const url = pl.planId ? `${APP_URL}?plantask=${encodeURIComponent(pl.planId + ':' + msg.key)}` : APP_URL;
         sent += await sendToUser(doc.ref, d, { kind: 'plan', tag: 'plan-' + k, title: msg.title, body: msg.body, url });
-        done[k] = now.date; changed = true;
+        done[k] = slot; changed = true;
       }
     }
     if (changed) await doc.ref.update({ planReminded: done, lastPlanRemindDate: now.date });
@@ -174,8 +182,22 @@ async function sendUpdate() {
 //  プランバトル（同じ単語帳のプラン）で負けていればその差を、そうでなければ今日の正解数で負けていれば知らせる
 function weekKeyOf(dateStr) { const [y, m, d] = dateStr.split('-').map(Number); const x = new Date(Date.UTC(y, m - 1, d)); x.setUTCDate(x.getUTCDate() - (x.getUTCDay() + 6) % 7); return x.toISOString().slice(0, 10); }
 function racePoints(r) { return (r.words ? 30 : 0) + (r.words && r.onTime ? 10 : 0) + (r.chants ? 20 : 0) + (r.examples ? 20 : 0) + (r.sunday ? 15 : 0) + (r.monthly ? 15 : 0) + (Number(r.dc) || 0); }
+// ★【0.04.08】暗記テストの進み具合（アプリの drillProgText と同じ文）。先に進んでいる方が大きい数
+function progText(d) {
+  if (!d) return '';
+  if (d.passed) return `合格（${d.r}周）`;
+  if (d.r === 1) return `1周目・${d.to ? `No.${d.to} まで` : 'はじめたところ'}`;
+  return `${d.r}周目${d.final ? '（最終ループ）' : ''}・残り ${d.left}問`;
+}
+function progRank(d) {
+  if (!d) return -1;
+  if (d.passed) return 1e12;
+  const no = String(d.to || '').split('-').map(Number), n = (no[0] || 0) + (no[1] || 0) / 100 + (no[2] || 0) / 10000;
+  return d.r * 1e8 + (d.r === 1 ? n : (d.rt ? (d.rt - (d.left || 0)) / d.rt * 1e6 : 0));
+}
+const progFor = (who, cat) => (who.progs || []).filter(p => p.cat === cat).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
 function tauntMessage(myName, me, friends) {
-  // me / friends: { name, today, races: [{root, week, points, words, chants}] }
+  // me / friends: { name, today, races: [{root, week, points, words, chants, cur}], progs: [暗記テストの進み具合] }
   let best = null;
   friends.forEach(f => (f.races || []).forEach(r => {
     const mine = (me.races || []).find(x => x.root === r.root);
@@ -185,10 +207,21 @@ function tauntMessage(myName, me, friends) {
   }));
   if (best) {
     const extra = best.r.words && !best.mine.words ? `${best.f.name}さんはもう今週の単語に合格。` : best.r.chants && !best.mine.chants ? `${best.f.name}さんはチャンツまで終わってます。` : '';
-    return { title: `⚔️ ${best.r.root}バトル：${best.f.name}さんに ${best.d}点差`, body: `${extra}このままだと置いていかれるよ？押して巻き返そう` };
+    const fp = progFor(best.f, best.r.cur), mp = progFor(me, best.r.cur);
+    const pg = fp ? `${best.f.name}さんの暗記テストは「${progText(fp)}」${mp ? `、あなたは「${progText(mp)}」` : ''}。` : '';
+    return { title: `⚔️ ${best.r.root}バトル：${best.f.name}さんに ${best.d}点差`, body: `${extra}${pg}このままだと置いていかれるよ？押して巻き返そう` };
   }
+  // 同じフォルダーの暗記テストで、フレンドのほうが先に進んでいる
+  let ahead = null;
+  friends.forEach(f => (f.progs || []).forEach(p => {
+    if (Date.now() - (p.updatedAt || 0) > 3 * 86400000) return; // 3日より前の記録は使わない
+    const mp = progFor(me, p.cat), gap = progRank(p) - progRank(mp);
+    if (gap > 0 && (!ahead || p.updatedAt > ahead.p.updatedAt)) ahead = { f, p, mp };
+  }));
+  if (ahead) return { title: `🧠 ${ahead.f.name}さんは「${ahead.p.cat}」の暗記テストが ${progText(ahead.p)}`, body: ahead.mp ? `あなたは ${progText(ahead.mp)}。押して追いつこう` : 'あなたはまだ始めていません。押して始めよう' };
   const top = friends.filter(f => f.today > me.today && f.today > 0).sort((a, b) => b.today - a.today)[0];
-  if (top) return { title: `🔥 ${top.name}さんは今日もう ${top.today}問 正解！`, body: me.today ? `あなたは ${me.today}問。まだ追いつけます` : 'あなたはまだ0問…1問だけでも始めよう' };
+  if (top) { const tp = (top.progs || []).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
+    return { title: `🔥 ${top.name}さんは今日もう ${top.today}問 正解！`, body: (tp ? `暗記テストは「${tp.cat}」${progText(tp)}。` : '') + (me.today ? `あなたは ${me.today}問。まだ追いつけます` : 'あなたはまだ0問…1問だけでも始めよう') }; }
   return null;
 }
 async function sendTaunts() {
@@ -196,26 +229,25 @@ async function sendTaunts() {
   let sent = 0;
   const cache = {};
   const todayOf = async (uid, date) => { const k = date + '_' + uid; if (!(k in cache)) { const s = await db.collection('susuru_anki_daily_scores').doc(k).get(); const d = s.exists ? s.data() : {}; cache[k] = (Number(d.score) || 0) + (Number(d.drillScore) || 0); } return cache[k]; };
+  const progsOf = async uid => { const k = 'prog:' + uid; if (!(k in cache)) cache[k] = (await db.collection('susuru_anki_category_scores').where('uid', '==', uid).where('mode', '==', 'drillprog').get()).docs.map(d => d.data()); return cache[k]; };
   const racesOf = async (uid, wk) => { const k = 'race:' + uid; if (!(k in cache)) cache[k] = (await db.collection('susuru_anki_category_scores').where('uid', '==', uid).where('mode', '==', 'race').get()).docs.map(d => d.data()); return cache[k].filter(r => r.week === wk).map(r => Object.assign({}, r, { points: racePoints(r) })); };
   for (const doc of snap.docs) {
     const d = doc.data();
     if (d.taunt === false || !Object.keys(d.tokens || {}).length) continue;
     const now = localNow(d.tzOffset);
-    const [h, m] = String(d.time || '20:00').split(':').map(Number);
-    // ★【0.03.53】通知の時刻から4時間ごと（その日の 23:59 まで）。例：8:00 なら 8時・12時・16時・20時、20:00 なら 20時だけ
-    const start = h * 60 + m;
-    if (now.minutes < start) continue;
-    const slot = `${now.date}#${Math.floor((now.minutes - start) / 240)}`;
+    // ★【0.04.10】通知の時刻から、設定の間隔ごと（はじめは1時間ごと。その日の 23:59 まで）
+    const slot = nudgeSlot(d, now);
+    if (!slot) continue;
     if (d.lastTauntSlot === slot) continue;
     const prof = await db.collection('susuru_anki_profiles').doc(doc.id).get();
     const fl = prof.exists ? (prof.data().friends || []) : [];
     if (!fl.length) continue;
     const wk = weekKeyOf(now.date);
-    const me = { today: await todayOf(doc.id, now.date), races: await racesOf(doc.id, wk) };
+    const me = { today: await todayOf(doc.id, now.date), races: await racesOf(doc.id, wk), progs: await progsOf(doc.id) };
     const friends = [];
     for (const f of fl.slice(0, 30)) {
       const fp = await db.collection('susuru_anki_profiles').doc(f).get();
-      friends.push({ name: (fp.exists && fp.data().displayName) || 'フレンド', today: await todayOf(f, now.date), races: await racesOf(f, wk) });
+      friends.push({ name: (fp.exists && fp.data().displayName) || 'フレンド', today: await todayOf(f, now.date), races: await racesOf(f, wk), progs: await progsOf(f) });
     }
     const msg = tauntMessage(prof.data().displayName, me, friends);
     await doc.ref.update({ lastTauntSlot: slot, lastTauntDate: now.date });
@@ -240,6 +272,27 @@ async function rebuildPublicIndex() {
   let removed = 0;
   for (const id of Object.keys(have)) if (!alive.has(id)) { await idxCol.doc(id).delete(); removed++; }
   console.log(`公開カテゴリーの目次: ${snap.size} 件中 ${wrote} 件を書き直し、${removed} 件を削除`);
+}
+
+// ★【0.04.10】要望・報告が届いたら、管理者だけに知らせる（管理者の UID は updates.js の ADMIN_UID）
+async function sendReportNotices() {
+  const adminUid = (fs.readFileSync(path.join(ROOT, 'updates.js'), 'utf8').match(/ADMIN_UID\s*=\s*["']([^"']+)["']/) || [])[1];
+  if (!adminUid) return console.log('管理者の UID が分かりません');
+  const metaRef = db.doc(META_DOC);
+  const meta = (await metaRef.get()).data() || {};
+  const since = Number(meta.lastReportAt) || 0;
+  if (!since) { await metaRef.set({ lastReportAt: Date.now() }, { merge: true }); return console.log('要望・報告：今から届いたものを知らせます'); }
+  const snap = await db.collection('susuru_anki_reports').where('date', '>', admin.firestore.Timestamp.fromMillis(since)).orderBy('date', 'asc').limit(20).get();
+  if (snap.empty) return;
+  const pref = await db.collection(PUSH_COL).doc(adminUid).get();
+  let sent = 0, last = since;
+  for (const doc of snap.docs) {
+    const d = doc.data(), at = d.date && d.date.toMillis ? d.date.toMillis() : Date.now();
+    last = Math.max(last, at);
+    if (pref.exists) sent += await sendToUser(pref.ref, pref.data(), { kind: 'report', tag: 'report-' + doc.id, title: `📮 要望・報告：${d.name || '名無し'}（v${d.version || '?'}）`, body: String(d.content || '').slice(0, 120), url: APP_URL + '?page=pgBackup' });
+  }
+  await metaRef.set({ lastReportAt: last }, { merge: true });
+  console.log(`要望・報告のお知らせ（管理者）: ${sent} 件送信`);
 }
 
 async function sendFriendNotices() {
@@ -272,6 +325,7 @@ async function sendFriendNotices() {
 }
 
 (async () => {
+  if (MODE === 'all' || MODE === 'friends' || MODE === 'reports') await sendReportNotices().catch(e => console.log('要望・報告のお知らせに失敗:', e.message));
   if (MODE === 'all' || MODE === 'friends') await sendFriendNotices().catch(e => console.log('フレンド申請のお知らせに失敗:', e.message));
   if (MODE === 'all' || MODE === 'reminders') await sendReminders();
   if (MODE === 'all' || MODE === 'plan') await sendPlanReminders().catch(e => console.log('週間プランの通知に失敗:', e.message));

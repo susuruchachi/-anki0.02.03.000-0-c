@@ -23,11 +23,42 @@ function getBestVoice(langPrefix) {
 }
 
 // 読み上げ用に記号を整える（[to be] → to be、空欄 ( ) → 「ブランク」など）
-function cleanTextForSpeech(text) {
-  return String(text || '')
+// ★【0.03.66】1文字だけの大文字（be worth A の A など）は、端末によって「capital A」と読まれるので、文字の名前で読ませる。
+// 文の始めの冠詞の A（A man came.）は小文字に、I（私）はそのまま
+const SPEECH_LETTER_NAMES = { A: 'ay', I: 'eye', B: 'bee', C: 'see', D: 'dee', E: 'ee', F: 'eff', G: 'gee', H: 'aitch', J: 'jay', K: 'kay', L: 'el', M: 'em', N: 'en', O: 'oh', P: 'pee', Q: 'cue', R: 'ar', S: 'ess', T: 'tee', U: 'you', V: 'vee', W: 'double you', X: 'ex', Y: 'why', Z: 'zee' };
+// ★【0.03.76】AI の声（tts.js）には、カタカナの文字の名前で渡す（「ay」と渡すと「えーあい」と読まれた）
+const SPEECH_LETTER_KANA = { A: 'エー', I: 'アイ', B: 'ビー', C: 'シー', D: 'ディー', E: 'イー', F: 'エフ', G: 'ジー', H: 'エイチ', J: 'ジェー', K: 'ケー', L: 'エル', M: 'エム', N: 'エヌ', O: 'オー', P: 'ピー', Q: 'キュー', R: 'アール', S: 'エス', T: 'ティー', U: 'ユー', V: 'ブイ', W: 'ダブリュー', X: 'エックス', Y: 'ワイ', Z: 'ゼット' };
+function speechLetters(text, kana) {
+  return String(text || '').replace(/(^|[^A-Za-z0-9.])([A-Z])(?![A-Za-z0-9]|\.[A-Za-z])/g, (m, pre, L, off, all) => {
+    // 「I」は代名詞として読む。ただし、つづりを1文字ずつ並べたもの（P O L I T I C S）の中なら文字の名前
+    if (L === 'I' && !(/(^|[^A-Za-z])[A-Z]\s+$/.test(all.slice(0, off + pre.length)) || /^\s+[A-Z](?![A-Za-z])/.test(all.slice(off + m.length)))) return m;
+    if (L === 'A') {
+      const before = all.slice(0, off + pre.length), after = all.slice(off + m.length);
+      // 文の始めで、すぐ後ろに小文字の単語が続くなら冠詞
+      if (/(^|[.!?。！？「『"“]\s*)$/.test(before.replace(/\s+$/, '')) && /^\s+[a-z]/.test(after) && !/^\s+(or|and|to|with|of|in|on|at|for|from|as|than|by|into|is|are|was|were|and|nor)\b/.test(after)) return pre + 'a';
+    }
+    return pre + (kana ? SPEECH_LETTER_KANA[L] : SPEECH_LETTER_NAMES[L]);
+  });
+}
+// ★【0.03.82】読み方の辞書（「読み方を直す」で登録）の書き方を読み方に置き換える（長い書き方から）
+function applyTtsDict(text) {
+  let t = String(text || '');
+  const d = typeof ttsDict === 'object' && ttsDict ? ttsDict : {};
+  Object.keys(d).filter(k => k && d[k] && !d[k].deleted && d[k].r).sort((a, b) => b.length - a.length).forEach(k => { if (t.includes(k)) t = t.split(k).join(d[k].r); });
+  return t;
+}
+function cleanTextForSpeech(text, opts = {}) {
+  text = applyTtsDict(typeof markPlain === 'function' ? markPlain(text) : text); // ★【0.03.97】取り消し線の語は読まない
+  return (opts.noLetters ? String(text || '') : speechLetters(String(text || ''), !!opts.kana))
     .replace(/[\[\]［］]/g, ' ')
-    .replace(/\(\s*\)|（\s*）|\(　+\)|（　+）|_{2,}|＿{2,}/g, ' blank ')
+    .replace(/\(\s*\)|（\s*）|\(　+\)|（　+）|_{2,}|＿{2,}/g, (m, off, all) => /[\u3040-\u30ff\u4e00-\u9fff]/.test(all.slice(Math.max(0, off - 2), off) + all.slice(off + m.length, off + m.length + 2)) ? '、空欄、' : ' blank ') // ★【0.03.69】日本語の文の空欄は「空欄」と読む
     .replace(/[～〜~]/g, ' ')
+    .replace(/…|\.\.\./g, ' ')
+    // ★【0.03.89】辞書の書き方を読みやすく：(形容詞) → 形容詞、 ／ 短い補い（～の）（of ～）（to ...）は読まない ／ 長い補いはかっこを外す ／ 「/」は「、」
+    .replace(/[(（]\s*((?:他|自)?動詞|名詞|形容詞|副詞|前置詞|接続詞|代名詞|助動詞|熟語|成句|句|間投詞)\s*[①-⑳0-9]*\s*[)）]/g, ' $1、')
+    .replace(/[(（]([^()（）]*)[)）]/g, (m, inner, off, all) => { const t = inner.replace(/\s+/g, ' ').trim(); if (!t) return m; const jaBefore = /[\u3040-\u30ff\u4e00-\u9fff」）]\s*$/.test(all.slice(Math.max(0, off - 3), off)); if (/^[A-Za-z' .,-]*$/.test(t) && t.split(' ').filter(Boolean).length <= 2 && (jaBefore || off === 0)) return ' '; if (!/[A-Za-z]/.test(t) && t.replace(/[^\u3040-\u30ff\u4e00-\u9fff]/g, '').length <= 2) return ' '; return /[A-Za-z]/.test(t) && !/[\u3040-\u30ff\u4e00-\u9fff]/.test(t) ? ` ${t} ` : `、${t}、`; })
+    .replace(/\s*[/／]\s*/g, '、')
+    .replace(/、\s*、+/g, '、').replace(/([。．！？!?])\s*、/g, '$1').replace(/^\s*、|、\s*$/g, '')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -52,9 +83,52 @@ function splitSpeechSegments(text) {
   return merged.filter(sg => sg.t.trim() !== '' && /[^\s.,。、・()（）\-]/.test(sg.t));
 }
 
+// ★【0.03.65】アクセント・発音の問題は、問題文を読み上げると答え（読み方）が分かってしまうので、英語の部分を「この語」と読む
+// （英語だけの問題文なら読み上げない）。答えは答え合わせのあとに読むのでそのまま
+const SOUND_QUESTION_RE = /アクセント|発音|強勢|音節|accent|stress|pronunciation|syllable/i;
+function isSoundQuestion(q) { return SOUND_QUESTION_RE.test(String(q || '')); }
+function spoilerSafeSpeech(text) {
+  const t = String(text || '');
+  if (!isSoundQuestion(t)) return t;
+  if (!/[\u3040-\u30ff\u4e00-\u9fff]/.test(t)) return '';
+  // ★【0.04.00】1語（15文字まで）なら、つづりを1文字ずつ読む（「politicsのアクセント位置は？」→「P O L I T I C S のアクセント位置は？」）。
+  //  何の語の問題か分かり、発音（強く読む所）は分からない。長い語・2語以上は「この語」
+  const spell = w => { const b = w.normalize('NFD').replace(/[\u0300-\u036f]/g, ''); return /^[A-Za-z]{2,15}$/.test(b) ? ' ' + b.toUpperCase().split('').join(' ') + ' ' : 'この語'; };
+  return t.replace(/[（(][^）)]*[A-Za-z][^）)]*[）)]/g, '').replace(/[A-Za-z\u00c0-\u024f][A-Za-z\u00c0-\u024f\u0300-\u036f'’\-]*(?:[ \t]+[A-Za-z\u00c0-\u024f][A-Za-z\u00c0-\u024f\u0300-\u036f'’\-]*)*/g, spell).replace(/\s+/g, ' ').trim();
+}
+// ★【0.03.74】iPhone・iPad で、読み上げと音楽（Spotify・YouTube など）を同時に流す。
+// Safari の navigator.audioSession（iOS 17 / iPadOS 17 以降）で、音の扱いを「ゲームの効果音」と同じ種類にする。
+//  duck：音楽を少し小さくして読む（transient） / mix：音楽にそのまま重ねる（ambient。マナーモードでは鳴らない） / stop：音楽を止める（前と同じ）
+const TTS_MIX_KEY = 'susuru_anki_tts_mix';
+function ttsMixPref() { try { return localStorage.getItem(TTS_MIX_KEY) || 'duck'; } catch (e) { return 'duck'; } }
+function applyTtsAudioSession() {
+  try { if (navigator.audioSession) navigator.audioSession.type = { duck: 'transient', mix: 'ambient', stop: 'playback' }[ttsMixPref()] || 'transient'; } catch (e) {}
+}
+function setTtsMixPref(v) { try { localStorage.setItem(TTS_MIX_KEY, v); } catch (e) {} applyTtsAudioSession(); renderTtsMixSetting(); }
+function renderTtsMixSetting() {
+  const r = document.getElementById('chkTtsReading'); if (r && typeof ttsReadingOn === 'function') r.checked = ttsReadingOn();
+  const vs = document.getElementById('selTtsVoice'); if (vs && typeof TTS_VOICES !== 'undefined') { vs.innerHTML = TTS_VOICES.map(([v, l]) => `<option value="${v}">${l}（${v}）</option>`).join(''); vs.value = ttsVoice(); }
+  const ms = document.getElementById('selTtsMode'); if (ms && typeof ttsModeWhole === 'function') ms.value = ttsModeWhole() ? 'whole' : 'split';
+  const v = document.getElementById('chkTtsVerify'); if (v && typeof ttsVerifyOn === 'function') v.checked = ttsVerifyOn();
+  const sel = document.getElementById('selTtsMix'); if (!sel) return;
+  sel.value = ttsMixPref();
+  const note = document.getElementById('lblTtsMixNote');
+  if (note) note.textContent = navigator.audioSession ? '' : '⚠️ このブラウザはこの設定に対応していません（iPhone・iPad の iOS 17 以降の Safari・ホーム画面アプリで使えます。Android は設定しなくても音楽と一緒に流れることが多いです）';
+}
+applyTtsAudioSession();
 function speakText(text, options = {}) {
-  if (!('speechSynthesis' in window) || localStorage.getItem('muteTTS') === 'true') return;
-  window.speechSynthesis.cancel();
+  if (localStorage.getItem('muteTTS') === 'true') return;
+  // ★【0.03.75】iPhone・iPad で音楽と一緒に流す設定なら、AI の声で（tts.js）。使えなければいつもの読み上げ
+  if (typeof ttsUseAi === 'function' && ttsUseAi() && text && String(text).trim()) {
+    ttsSpeakAi(text, options).catch(() => { if (typeof ttsNoticeFallback === 'function') ttsNoticeFallback(); speakTextNative(text, Object.assign({}, options, { fallback: true })); });
+    return;
+  }
+  speakTextNative(text, options);
+}
+function speakTextNative(text, options = {}) {
+  if (!('speechSynthesis' in window)) return;
+  if (options.fallback && typeof ttsPrepareNative === 'function') ttsPrepareNative(); // AI の声がだめだったとき：ふつうの再生にしてから
+  else { applyTtsAudioSession(); window.speechSynthesis.cancel(); }
   if (!text || text.trim() === "") return;
 
   const div = document.createElement('div');
@@ -148,6 +222,7 @@ let currentRoundMode = 'desc';
 // ★【0.03.37】クイズの結果の画面（解いた問題ごとに、正誤・レベルの変化・今のランク）
 // ================================================================
 let _quizSession = { results: [], startedAt: 0 };
+let _quizOrigin = null, _quizSessionCarry = null; // ★【0.03.64】どこから始めたか（{k:'home', m} / {k:'plan'}）・間違い直しでも元の問題を覚えておく
 const SRS_STATUS = { grad: { n: '🎓 卒業', c: 'var(--success)' }, master: { n: '⚡ 得意', c: 'var(--primary)' }, normal: { n: '☕ 普通', c: 'var(--warn)' }, weak: { n: '⚠️ 苦手', c: 'var(--danger)' }, shikkari: { n: '🧱 しっかり', c: '#9aa0a6' }, unseen: { n: '💤 未着手', c: 'var(--text3)' } };
 function srsStatusOf(t) {
   if (!t) return 'unseen';
@@ -189,21 +264,24 @@ function showQuizResults() {
       <div class="res-stats"><div><b style="color:var(--success);">⬆ ${up}</b><span>レベルアップ</span></div><div><b style="color:var(--danger);">⬇ ${down}</b><span>レベルダウン</span></div><div><b style="color:var(--success);">🎓 ${grad}</b><span>卒業</span></div></div>
       <div class="res-status">${Object.keys(SRS_STATUS).filter(s => statusCount[s]).map(s => `${chip(s)} ${statusCount[s]}`).join('　')}</div>
     </div>
-    <div class="res-filter"><button class="chip active" data-f="all">すべて ${res.length}</button><button class="chip" data-f="ng">✕ 間違い ${res.filter(r => !r.correct).length}</button><button class="chip" data-f="chg">↕ 変化あり ${res.filter(r => r.before && r.after && r.before.level !== r.after.level || (r.after && r.before && r.after.status !== r.before.status)).length}</button></div>
+    <div class="res-filter"><button class="chip" id="resSpeakAll" onclick="speakQuizResults()">🔊 読み上げ</button><button class="chip active" data-f="all">すべて ${res.length}</button><button class="chip" data-f="ng">✕ 間違い ${res.filter(r => !r.correct).length}</button><button class="chip" data-f="chg">↕ 変化あり ${res.filter(r => r.before && r.after && r.before.level !== r.after.level || (r.after && r.before && r.after.status !== r.before.status)).length}</button></div>
     <div id="quizResultList">${res.map((r, i) => {
       const changed = r.before && r.after && (r.before.level !== r.after.level || r.before.status !== r.after.status);
       const arrow = !r.before || !r.after ? '' : r.after.level > r.before.level || (r.after.status === 'grad' && r.before.status !== 'grad') ? '<b class="res-up">⬆</b>' : r.after.level < r.before.level ? '<b class="res-down">⬇</b>' : '<span class="res-same">→</span>';
-      return `<div class="res-row ${r.correct ? 'ok' : 'ng'}" data-ng="${r.correct ? 0 : 1}" data-chg="${changed ? 1 : 0}">
+      return `<div class="res-row ${r.correct ? 'ok' : 'ng'}" data-i="${i}" data-ng="${r.correct ? 0 : 1}" data-chg="${changed ? 1 : 0}">
         <div class="res-mark">${r.pass ? '🏳️' : r.correct ? '⭕' : '✕'}</div>
         <div class="res-body"><div class="res-q">${renderRichText(r.q, { escape: true })}${r.label ? ` <span class="res-label">[${escapeHtml(r.label)}]</span>` : ''}${r.stars ? ` <span class="card-stars">${starsText(r.stars)}</span>` : ''}</div>
           <div class="res-a">${renderRichText(r.a, { escape: true })}</div></div>
+        <button class="chip res-speak" onclick="speakQuizResult(${i})" title="問題と答えを読み上げる">🔊</button>
         <div class="res-lv">${r.after ? `<div>${lvText(r.before)} ${arrow} <b>${lvText(r.after)}</b></div>${chip(r.after.status)}${r.after.status !== 'grad' && r.after.level >= 5 ? `<div class="hint-small">卒業まで ${Math.max(0, Math.ceil(getGradThreshold() - r.after.l5))}</div>` : ''}` : ''}</div>
       </div>`; }).join('')}</div>
-    <div class="plan-btns" style="margin-top:12px;">
+    <div class="res-actions">
       ${res.some(r => !r.correct) ? '<button class="btn btn-accent" onclick="retryQuizMistakes()">🔁 間違えた問題をもう一度</button>' : ''}
+      ${(_quizSession.pool || []).length ? `<button class="btn btn-secondary" onclick="replayQuizSession()">🔄 同じ範囲をもう一回（${_quizSession.pool.length}問）</button>` : ''}
+      ${quizNextLabel() ? `<button class="btn btn-primary" onclick="startNextQuiz()">${quizNextLabel()}</button>` : ''}
       <button class="btn btn-secondary" onclick="openPage(\'pgHome\')">🏠 ホーム</button>
-    </div>
-    <button class="btn btn-secondary" style="margin-top:8px;" onclick="openPage('pgStats')">📊 実績を見る</button>`;
+      <button class="btn btn-secondary" onclick="openPage(\'pgStats\')">📊 実績を見る</button>
+    </div>`;
   hydrateRich(box);
   box.querySelectorAll('.res-filter .chip').forEach(b => b.onclick = () => {
     box.querySelectorAll('.res-filter .chip').forEach(x => x.classList.toggle('active', x === b));
@@ -211,6 +289,48 @@ function showQuizResults() {
     box.querySelectorAll('.res-row').forEach(row => { row.style.display = f === 'all' || (f === 'ng' && row.dataset.ng === '1') || (f === 'chg' && row.dataset.chg === '1') ? '' : 'none'; });
   });
 }
+// ★【0.03.64】振り返りの読み上げ：1問ずつ（問題 → 答え）／表示している問題を全部
+function quizResultSpeech(r) { return `${r.q}\n${r.label ? r.label + '\n' : ''}${r.a}`; } // ★【0.04.01】問題・答えは別の行（解いたときの声を使い回す）
+function speakQuizResult(i) { const r = _quizSession.results[i]; if (r && typeof speakText === 'function') speakText(quizResultSpeech(r)); }
+function speakQuizResults() {
+  const b = document.getElementById('resSpeakAll');
+  if (typeof ttsSpeaking === 'function' ? ttsSpeaking() : ('speechSynthesis' in window && speechSynthesis.speaking)) { if (typeof ttsStopAll === 'function') ttsStopAll(); else speechSynthesis.cancel(); if (b) b.textContent = '🔊 読み上げ'; return; }
+  const rows = [...document.querySelectorAll('#quizResultList .res-row')].filter(x => x.style.display !== 'none');
+  const txt = rows.map(x => quizResultSpeech(_quizSession.results[Number(x.dataset.i)])).join('\n');
+  if (!txt || typeof speakText !== 'function') return;
+  speakText(txt);
+  if (b) { b.textContent = '⏹ 止める'; let n = 0; const t = setInterval(() => { if (++n > 10 && !(typeof ttsSpeaking === 'function' ? ttsSpeaking() : speechSynthesis.speaking)) { clearInterval(t); b.textContent = '🔊 読み上げ'; } }, 500); }
+}
+// ★【0.03.64】同じ問題をもう一回（成績は今のものから作り直す）
+function quizRebuildEntry(e) {
+  if (e._attrQ) return e;
+  const card = db.find(q => q.id === (e._sourceId || e.id)); if (!card) return null;
+  let x = card;
+  if (e._senseKey) x = expandSenses([card]).find(y => y._senseKey === e._senseKey) || card;
+  return e._swapped ? swapQuizEntry(x) : x;
+}
+function replayQuizSession() {
+  const pool = (_quizSession.pool || []).map(quizRebuildEntry).filter(Boolean);
+  if (!pool.length) return alert('もう一度出せる問題がありません。');
+  currentCombo = 0; todayCorrectCount = 0; currentQuizOrderScope = null;
+  _quizSessionCarry = { pool: _quizSession.pool, mode: _quizSession.mode, origin: _quizSession.origin };
+  _quizModeOverride = _quizSession.mode || null;
+  quizPool = pool; quizIndex = 0;
+  openPage('pgQuizPlayer'); loadQuizQuestion();
+}
+// 次を始める：ホームから始めたら同じ設定で次の問題（番号順なら続きから）、週間プランからなら残っている次の課題
+function quizNextTarget() {
+  const o = _quizSession.origin;
+  if (!o) return null;
+  if (o.k === 'home') return { label: '▶️ 次の問題を始める', go: () => startQuiz(o.m, { next: true }) };
+  if (o.k === 'plan' && typeof planUrgentTask === 'function') {
+    const t = planUrgentTask();
+    if (t) return { label: `▶️ 次の課題：${t.title.split('：')[0]}`, go: () => planStartTask(t.planId, t.key) };
+  }
+  return null;
+}
+function quizNextLabel() { const t = quizNextTarget(); return t ? escapeHtml(t.label) : ''; }
+function startNextQuiz() { const t = quizNextTarget(); if (t) t.go(); }
 // 間違えた問題だけでもう一度
 function retryQuizMistakes() {
   const wrong = _quizSession.results.filter(r => !r.correct);
@@ -224,6 +344,8 @@ function retryQuizMistakes() {
   });
   if (!pool.length) return alert('もう一度出せる問題がありません。');
   currentCombo = 0; todayCorrectCount = 0; currentQuizOrderScope = null;
+  _quizSessionCarry = { pool: _quizSession.pool, mode: _quizSession.mode, origin: _quizSession.origin };
+  _quizModeOverride = _quizSession.mode || null;
   quizPool = pool; quizIndex = 0;
   openPage('pgQuizPlayer'); loadQuizQuestion();
 }
@@ -254,13 +376,19 @@ function sortCardsByNumber(arr) {
     naturalCompare(a.question, b.question));
 }
 function quizOrderKey(scope) { return 'susuru_anki_order_pos_' + (scope || 'all'); }
-function loadQuizOrderPosition(scope) { try { return localStorage.getItem(quizOrderKey(scope)); } catch (e) { return null; } }
+// ★【0.03.73】「前回の続きから」の位置は quizOrderPos（storage.js）に持ち、端末間で同期する
+function loadQuizOrderPosition(scope) {
+  const k = scope || 'all', e = (quizOrderPos || {})[k];
+  let legacy = null; try { legacy = localStorage.getItem(quizOrderKey(scope)); } catch (er) {}
+  if (legacy && !e) { quizOrderPos[k] = { pos: legacy, at: 1 }; try { localStorage.removeItem(quizOrderKey(scope)); } catch (er) {} return legacy; }
+  return e ? e.pos : legacy;
+}
 // 番号順（続きから）で解いた最後のカードを覚えておく
 function recordQuizOrderProgress(cur) {
   if (!currentQuizOrderScope || !cur || window.currentOnlineMatch) return;
   // ★【0.03.17】意味ごとの問題なら、どの意味まで解いたかも覚える（「カードID\u0001意味」）
   const pos = (cur._sourceId || cur.id) + (cur._senseKey ? '\u0001' + cur._senseKey : '');
-  try { localStorage.setItem(quizOrderKey(currentQuizOrderScope), pos); } catch (e) {}
+  quizOrderPos[currentQuizOrderScope || 'all'] = { pos, at: Date.now() }; // 保存は解答の保存（saveData）と一緒に
 }
 
 const QUIZ_PREF_KEY = 'susuru_anki_quiz_prefs';
@@ -300,21 +428,45 @@ function swapQuizEntry(q) {
 
 const ANSWER_SYMBOL_RE = /[\[\]［］【】～〜~…]|\.\.\./g;
 // ［ ］で囲んだ部分（言い換え）を省いた形
+// ★【0.04.04】日本語の答えの中の（ ）：単語帳では「省略できる語」か「言い換え」。どちらの書き方でも正解にする
+//  「根本的（劇的）な変化」→「根本的な変化」「劇的な変化」「根本的劇的な変化」
+const PAREN_JA_RE = /[（(]([^（）()]*[\u3040-\u30ff\u4e00-\u9fff][^（）()]*)[）)]/;
+function parenVariants(str) {
+  const s = String(str || ''); const out = [];
+  if (!PAREN_JA_RE.test(s) || /^\s*\(/.test(s)) return out; // 先頭の (名詞) などの品詞タグは別に扱う
+  out.push(s.replace(new RegExp(PAREN_JA_RE.source, 'g'), ''));           // 省いた形
+  out.push(s.replace(new RegExp(PAREN_JA_RE.source, 'g'), '$1'));         // かっこだけ外した形
+  const m = s.match(PAREN_JA_RE);
+  const before = s.slice(0, m.index), after = s.slice(m.index + m[0].length);
+  const w = before.match(/[\u4e00-\u9fff\u30a0-\u30ffー々]+$/);          // すぐ前の語と入れ替えた形
+  if (w) out.push(before.slice(0, before.length - w[0].length) + m[1] + after.replace(new RegExp(PAREN_JA_RE.source, 'g'), ''));
+  return out.filter(x => x.trim());
+}
 function dropBracketParts(str) { return String(str || '').replace(/[\[［][^\]］]*[\]］]/g, ' '); }
-function normalizeAnswer(str) {
+// ★【0.03.69】「・」も区切り（「過去・詠嘆」は「詠嘆、過去」でも正解）。◯（活用の無い形）を含む答え（活用表）は並び順も見る
+function normalizeAnswer(str, keepOrder) {
   if(!str) return '';
+  if (typeof markPlain === 'function') str = markPlain(str); // ★【0.03.97】~~使わない語~~ は答えに含めない
   let s = foldKana(String(str).replace(/[Ａ-Ｚａ-ｚ０-９]/g, c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0)).toLowerCase().trim());
   s = s.replace(/擦/g, 'こす');
   // ★【0.03.06】［ ］・～・… などの記号は入力しなくてよい（中身だけ合っていれば正解）
   s = s.replace(ANSWER_SYMBOL_RE, ' ');
-  s = s.replace(/[、，＼＼ \u3000]+/g, ',');
-  return s.split(',').map(x=>x.trim()).filter(x=>x!=='').sort().join(',');
+  s = s.replace(/[◯○〇⚪]/g, '○');
+  s = s.replace(/[①-⑨]/g, c => String(c.charCodeAt(0) - 0x245F)); // ★【0.03.72】①は「1」と書いても正解
+  s = s.replace(/[、，＼＼ \u3000・]+/g, ',');
+  const parts = s.split(',').map(x=>x.trim()).filter(x=>x!=='');
+  return (keepOrder ? parts : parts.sort()).join(',');
 }
 function isAnswerCorrect(input, correctAnswer) {
   // ★【0.03.00】構造式(SMILESの「/」)や漢文ブロックを区切り文字として誤分割しないようにマスクしてから分割する
   // ［ ］の中身まで書いた答え・［ ］の部分を省いた答えのどちらでも正解
-  const norms = splitAnswerAlternatives(correctAnswer).flatMap(a => [normalizeAnswer(a), normalizeAnswer(dropBracketParts(a))]).filter(x => x !== '');
-  const inNorm = normalizeAnswer(input);
+  // ★【0.03.58】先頭の品詞タグ「(名詞)」などを外した形も正解（4択の選択肢はタグを外して出すので、正しいものを選んでも×になっていた）
+  const untag = a => String(a).replace(/^\s*(?:\([^()]*\)\s*)+/, '');
+  const ord = normalizeAnswer(correctAnswer, true).split(',').includes('○'); // 「（せ）・◯・き・し…」のように ◯ が1つの項目になっている活用表
+  const noParen = a => String(a).replace(/[（）]/g, ''); // ★【0.03.69】（せ）の（ ）は書かなくてもよい
+  const norms = splitAnswerAlternatives(correctAnswer).flatMap(a => [a, ...parenVariants(a)]).flatMap(a => [normalizeAnswer(a, ord), normalizeAnswer(dropBracketParts(a), ord), normalizeAnswer(untag(a), ord), normalizeAnswer(dropBracketParts(untag(a)), ord), normalizeAnswer(noParen(a), ord)]).filter(x => x !== '');
+  const inNorm = normalizeAnswer(input, ord);
+  if (ord && norms.includes(normalizeAnswer(noParen(input), true))) return true;
   return norms.includes(inNorm);
 }
 
@@ -356,8 +508,9 @@ function expandStructuredForChoiceModes(cards) {
   return result;
 }
 
-async function startQuiz(modeType = 'normal') {
+async function startQuiz(modeType = 'normal', opts = {}) {
   currentCombo = 0; todayCorrectCount = 0; _quizModeOverride = null;
+  _quizOrigin = window.currentOnlineMatch ? null : { k: 'home', m: modeType };
   if (selectedScopePath.length === 0 && lastQuizScopePath.length > 0) selectedScopePath = [...lastQuizScopePath];
   let scope = "all";
   if (selectedScopePath.length > 0 && selectedScopePath[0] !== "all") scope = "cat:" + selectedScopePath[selectedScopePath.length - 1];
@@ -415,7 +568,8 @@ async function startQuiz(modeType = 'normal') {
 
   // 以下通常のソロプレイ処理
   if(subset.length === 0) return alert("⚠️ 条件に合致する問題が見つかりませんでした。");
-  const order = modeType === 'review' ? 'srs' : (document.getElementById('selQuizOrder') ? document.getElementById('selQuizOrder').value : 'srs');
+  let order = modeType === 'review' ? 'srs' : (document.getElementById('selQuizOrder') ? document.getElementById('selQuizOrder').value : 'srs');
+  if (opts.next && order === 'number') order = 'continue'; // ★【0.03.64】結果の画面の「次の問題を始める」は、番号順なら続きから
   if (order === 'number' || order === 'continue') {
     // ★【0.03.03】問題番号順に出題（フォルダーの番号順→カードの番号順）
     sortCardsByNumber(subset);
@@ -498,10 +652,15 @@ function arrangeVerbFlow(pool) {
 
 let _quizModeOverride = null; // ★【0.03.44】このクイズだけ形式を決める（planStartQuiz から）
 function loadQuizQuestion() {
-  if (quizIndex === 0) _quizSession = { results: [], startedAt: Date.now() }; // ★【0.03.37】結果の画面用
+  if (quizIndex === 0) { // ★【0.03.37】結果の画面用。★【0.03.64】もう一回・次を始める用に、出した問題と始め方も覚える
+    const carry = _quizSessionCarry; _quizSessionCarry = null;
+    _quizSession = { results: [], startedAt: Date.now(), pool: carry ? carry.pool : quizPool.slice(), mode: carry ? carry.mode : _quizModeOverride, origin: carry ? carry.origin : _quizOrigin };
+    _quizOrigin = null;
+  }
   quizPhase='q'; selectedChoiceIdx=null; window.currentSelfJudge=null;
   _focus = { attempts: 0 }; // ★【0.03.18】重点モードの答え直しの回数
   _multi = null; // ★【0.03.21】意味の聞き直し
+  _qd = null; // ★【0.04.05】暗記テストと同じ採点の途中経過
   const _fs = document.getElementById('lblFocusStatus'); if (_fs) { _fs.style.display = 'none'; _fs.textContent = ''; _fs.classList.remove('multi'); }
   const cur = quizPool[quizIndex];
 
@@ -513,9 +672,13 @@ function loadQuizQuestion() {
   currentStructuredAnswer = aStructured;
 
   document.getElementById('lblQuizProgress').innerText = `Q ${quizIndex+1}/${quizPool.length}`;
+  { // ★【0.03.68】解いているときも問題番号を出す
+    const nEl = document.getElementById('lblQuizCardNo'), src = cur && (db.find(q => q.id === (cur._sourceId || cur.id)) || cur);
+    if (nEl) { const on = src && showsCardNo(src); nEl.style.display = on ? '' : 'none'; nEl.textContent = on ? `No.${cardNoText(src.no)}` : ''; }
+  }
   const qEl = document.getElementById('lblQuizQuestion');
     let qDisplay = cur.question, qSpeech = cur.question;
-    if (qStructuredSelf) { qDisplay = formatStructuredAnswerHTML(qStructuredSelf); qSpeech = qStructuredSelf.map(s => s.text).join('。'); }
+    if (qStructuredSelf) { qDisplay = formatStructuredAnswerHTML(qStructuredSelf); qSpeech = qStructuredSelf.map(s => s.text).join('\n'); }
     else if (aStructured) { qDisplay = stripParens(cur.question); qSpeech = qDisplay; }
     // 例文・テスト問題は、問題文（1行目の英文）だけを読み上げる
     if (cur.kind && /\n/.test(cur.question)) qSpeech = cur.question.split('\n')[0];
@@ -541,11 +704,16 @@ function loadQuizQuestion() {
   currentNoteCardId = cur._sourceId || cur.id;
   const noteHint = document.getElementById('lblNoteTyping'); if (noteHint) noteHint.style.display = 'none';
 
+  if (typeof ttsSetShareCard === 'function') ttsSetShareCard(cur); // ★【0.03.86】共有・公開カテゴリーの声は分け合う
   if(document.getElementById('chkTTS').checked) {
-    speakText(qSpeech);
+    speakText(spoilerSafeSpeech(qSpeech));
+    // ★【0.03.75】AI の声のときは、答えと次の問題の声を先に作っておく
+    if (typeof ttsPrefetch === 'function') { const nx = quizPool[quizIndex + 1]; ttsPrefetch([getPrimaryAnswer(cur.answer), nx ? spoilerSafeSpeech(nx.kind && /\n/.test(nx.question) ? nx.question.split('\n')[0] : nx.question) : '']); }
   }
   // ★【0.03.02】テスト形式で選択肢があるカードは、記述式でも選択肢を問題文の下に表示する
-  if (Array.isArray(cur.choices) && cur.choices.length && !cur._attrQ) {
+  // ★【0.03.72】長い問題文（例文を並べた選択問題など）は左寄せ・少し小さく。①②③… だけの選択肢は問題文の中にあるので下に並べない
+  qEl.classList.toggle('q-long', String(cur.question || '').length > 60 && /\n/.test(String(cur.question || '')));
+  if (Array.isArray(cur.choices) && cur.choices.length && !cur._attrQ && !cur.choices.every(o => /^\s*[①-⑳0-9０-９]\s*$/.test(o))) {
     const chDiv = document.createElement('div');
     chDiv.className = 'quiz-card-choices';
     chDiv.innerText = cur.choices.join(' ／ ');
@@ -852,7 +1020,7 @@ function buildChoiceCandidates(cur, correctPrimary) {
     const t = info.t;
     if (!t) return;
     const n = info.n;
-    if (seen.has(n)) return; seen.add(n);
+    if (seen.has(n)) return; // 正解と同じ
     const sh = info.sh;
     let score = 0;
     if (sh.latin === want.latin) score += 8;           // 英語なら英語、日本語なら日本語
@@ -861,7 +1029,10 @@ function buildChoiceCandidates(cur, correctPrimary) {
     if (Math.abs(sh.words - want.words) <= 1) score += 2;
     if (q.kind === cur.kind) score += 1;
     const tier = q.category === cat ? 0 : near.has(q.category) ? 1 : 2;
-    pool.push({ t, tier, score: score + (tier === 0 ? 3 : 0) + Math.random() * 1.5 });
+    // ★【0.03.72】同じ答えのカードがいくつもあるときは、近いフォルダーのものを使う（前は先に見つかった遠いフォルダーのものになり、近いフォルダーの選択肢が出なかった）
+    const it = { n, t, tier, score: score + (tier === 0 ? 3 : 0) + Math.random() * 1.5 };
+    const prev = pool.find(p => p.n === n);
+    if (!prev) pool.push(it); else if (it.tier < prev.tier || (it.tier === prev.tier && it.score > prev.score)) Object.assign(prev, it);
   });
   const nearPool = pool.filter(p => p.tier < 2).sort((a, b) => b.score - a.score);
   const far = pool.filter(p => p.tier === 2).sort((a, b) => b.score - a.score);
@@ -880,8 +1051,11 @@ function buildFourChoices(cur) {
     options = [correctPrimary, ...buildChoiceCandidates(cur, correctPrimary).slice(0, 3)];
     while (options.length < 4) options.push(`選択肢_${Math.floor(Math.random()*1000)}`);
   }
-  if (!cur._attrQ) options.sort(() => Math.random() - 0.5); // 自動詞・他動詞は決まった順
-
+  // ★【0.03.72】①②③… だけの選択肢（問題文に並べた文を番号で選ぶ）も、決まった順のまま
+  if (!cur._attrQ && !options.every(o => /^\s*[①-⑳0-9０-９ア-ンa-zA-Z]\s*$/.test(o))) options.sort(() => Math.random() - 0.5); // 自動詞・他動詞は決まった順
+  // ★【0.03.58】正解の選択肢は作ったときに覚えておく（選んだ文字を答えと比べ直すと、タグや記号の違いで×になることがあった）
+  const nc = normalizeAnswer(correctPrimary);
+  area._correctText = options.find(o => o === correctPrimary) || options.find(o => normalizeAnswer(o) === nc) || correctPrimary;
   options.forEach((text, i) => {
     const btn = document.createElement('button'); btn.className = 'choice-btn';
     btn.innerHTML = `<div class="choice-idx">${i+1}</div><div style="flex:1;">${renderRichText(text, { escape: true, kanbunRows: 8 })}</div>`;
@@ -902,6 +1076,22 @@ function sideCharsPool(cur) {
   return db.map(q => choiceSideText(q, swapped).replace(RICH_BLOCK_RE, ''));
 }
 
+// 文字の種類（みんはや・文字タップのダミーをそろえる）
+function charClassOf(c) {
+  if (/[a-z]/.test(c)) return 'lower'; if (/[A-Z]/.test(c)) return 'upper'; if (/[0-9０-９]/.test(c)) return 'digit';
+  if (/[ぁ-ゖ]/.test(c)) return 'hira'; if (/[ァ-ヺー]/.test(c)) return 'kata'; if (/[一-鿿々〆]/.test(c)) return 'kanji';
+  return 'other';
+}
+const CHAR_FALLBACK = { lower: 'abcdefghijklmnopqrstuvwxyz', upper: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', digit: '0123456789', hira: 'あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん', kata: 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモラリルレロ', kanji: '日月火水木金土山川田人口目耳手足力学校年時間国語文字', other: '' };
+// 正解の文字 c と同じ種類のダミーを n 個（近いフォルダーの答え → ほかの答え → 決まった文字の順に探す）
+function pickSameClassChars(cur, c, exclude, n) {
+  const cls = charClassOf(c), out = [], ex = new Set(exclude || []);
+  const take = s => { for (const ch of [...String(s || '').replace(RICH_BLOCK_RE, '')].sort(() => Math.random() - 0.5)) { if (out.length >= n) return; if (ch !== c && !ex.has(ch) && !out.includes(ch) && charClassOf(ch) === cls) out.push(ch); } };
+  try { buildChoiceCandidates(cur, getPrimaryAnswer(cur.answer)).slice(0, 12).forEach(take); } catch (e) {}
+  if (out.length < n) sideCharsPool(cur).sort(() => Math.random() - 0.5).slice(0, 300).forEach(take);
+  if (out.length < n) take(CHAR_FALLBACK[cls] || CHAR_FALLBACK.hira);
+  return out.slice(0, n);
+}
 let minhayaTarget = ""; let minhayaPos = 0;
 // ★【0.03.03】みんはや：スペース・読点・スラッシュ・カッコなどの区切り文字は自動で埋めて飛ばす
 const MINHAYA_SKIP_RE = /[\s\u3000、，,・／/()（）～〜~\[\]［］【】…]/;
@@ -935,23 +1125,10 @@ function renderMinhayaDisplay(cur) {
 
   // ★ みんはや重複防止の完全版
   const correctChar = minhayaTarget[minhayaPos];
-  let distChars = [];
   const targetChars = minhayaTarget.split('');
-  
-  // ★【0.03.00】構造式・漢文などの埋め込みブロックの記号を選択肢の文字に混ぜない
-  sideCharsPool(cur).forEach(t => t.split('').forEach(c => { 
-    if (!/[\s,、，。・/|]/.test(c) && !targetChars.includes(c)) distChars.push(c); 
-  }));
-  distChars = [...new Set(distChars)].sort(() => Math.random() - 0.5);
-  
+  // ★【0.03.59】ダミーの文字は正解の文字と同じ種類（英字・ひらがな・カタカナ・漢字・数字）から、4択と同じく近いフォルダーの答えを先に使う
   let choices = [correctChar];
-  for (let c of distChars) {
-      if (choices.length < 4 && !choices.includes(c)) choices.push(c);
-  }
-  const fallbacks = 'あいうえおかきくけこさしすせそ'.split('').sort(() => Math.random() - 0.5);
-  for (let c of fallbacks) {
-      if (choices.length < 4 && !targetChars.includes(c) && !choices.includes(c)) choices.push(c);
-  }
+  pickSameClassChars(cur, correctChar, targetChars, 3).forEach(c => { if (choices.length < 4 && !choices.includes(c)) choices.push(c); });
   choices.sort(() => Math.random() - 0.5);
 
   const choicesDiv = document.createElement('div'); choicesDiv.style.cssText = 'display:grid; grid-template-columns:1fr 1fr; gap:10px;';
@@ -979,10 +1156,9 @@ function buildTapChoices(cur) {
   inArea.innerHTML = ''; chArea.innerHTML = '';
   
   let chars = currentTapTarget.split('');
-  const latinTarget = /[A-Za-z]/.test(currentTapTarget) && !JA_CHAR_RE.test(currentTapTarget);
-  let allChars = sideCharsPool(cur).join('').replace(latinTarget ? /[^A-Za-z]/g : /[、，／/ \u3000,\da-zA-Z|]/g, '').split('');
-  if(allChars.length===0) allChars=(latinTarget ? 'abcdefghijklmnopqrstuvwxyz' : 'あいうえおかきくけこ').split('');
-  for(let i=0;i<2;i++) chars.push(allChars[Math.floor(Math.random()*allChars.length)]);
+  // ★【0.03.59】ダミーは答えの中の文字と同じ種類から（英語なら英字、日本語なら同じかな・漢字）
+  const letters = chars.filter(c => charClassOf(c) !== 'other');
+  for (let i = 0; i < 2 && letters.length; i++) { const base = letters[Math.floor(Math.random() * letters.length)]; const d = pickSameClassChars(cur, base, chars, 1)[0]; if (d) chars.push(d); }
   chars.sort(() => Math.random() - 0.5);
   
   chars.forEach((c, idx) => {
@@ -990,28 +1166,61 @@ function buildTapChoices(cur) {
     btn.onclick = () => {
       if (quizPhase !== 'q') return;
       currentTapInput.push({ char: c, id: btn.id }); btn.style.display = 'none'; renderTapInput();
-      if (currentTapInput.length === currentTapTarget.length) {
-        stopQuizTimer();
-        const inputStr = currentTapInput.map(x => x.char).join('');
-        evaluateRoundAnswer(inputStr === currentTapTarget, inputStr === currentTapTarget ? "🎉 正解！" : "❌ 不正解");
-      }
+      // ★【0.03.59】全部そろって正しければすぐ〇。違っていたら、ドラッグで並べ替えてから「確定する」
+      if (currentTapInput.length === currentTapTarget.length && currentTapInput.map(x => x.char).join('') === currentTapTarget) submitTapAnswer();
     };
     chArea.appendChild(btn);
   });
 }
+function submitTapAnswer() {
+  if (quizPhase !== 'q') return;
+  stopQuizTimer();
+  const inputStr = currentTapInput.map(x => x.char).join('');
+  const ok = inputStr === currentTapTarget;
+  evaluateRoundAnswer(ok, ok ? "🎉 正解！" : "❌ 不正解");
+}
 function renderTapInput() {
   const inArea = document.getElementById('tapInputArea'); inArea.innerHTML = '';
+  const full = currentTapInput.length === currentTapTarget.length;
+  const act = document.getElementById('btnQuizAction'); if (act && currentRoundMode === 'tap') act.style.display = full ? 'inline-flex' : 'none';
   if (currentTapInput.length === 0) { inArea.innerHTML = '<span style="color:var(--text3); font-size:0.85rem;">順番にタップしてください</span>'; return; }
   currentTapInput.forEach((item, index) => {
     const box = document.createElement('div');
-    box.style.cssText = 'background:var(--primary); color:#fff; width:36px; height:36px; border-radius:6px; display:flex; align-items:center; justify-content:center; font-size:1.2rem; font-weight:bold; cursor:pointer;';
+    box.className = 'tap-tile';
     box.innerText = item.char;
+    // ★【0.03.59】タップで取り消し、ドラッグで並べ替え（1文字飛ばしたときに、正しい位置へずらせる）
+    box.addEventListener('pointerdown', e => tapDragStart(e, index, box));
     box.onclick = (e) => {
-      e.stopPropagation(); if (quizPhase !== 'q') return;
+      e.stopPropagation(); if (quizPhase !== 'q' || box._dragged) return;
       const removed = currentTapInput.splice(index, 1)[0]; document.getElementById(removed.id).style.display = 'inline-flex'; renderTapInput();
     };
     inArea.appendChild(box);
   });
+  if (full) inArea.insertAdjacentHTML('beforeend', '<div class="hint-small" style="width:100%; text-align:center; margin-top:4px;">文字をドラッグして並べ替えられます。よければ「確定する」</div>');
+}
+// ドラッグ：指の位置にいちばん近い文字の場所へ移す
+function tapDragStart(e, index, box) {
+  if (quizPhase !== 'q') return;
+  const sx = e.clientX, sy = e.clientY; let moved = false, to = index;
+  const tiles = () => [...document.querySelectorAll('#tapInputArea .tap-tile')];
+  const move = ev => {
+    if (!moved && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 8) return;
+    moved = true; box._dragged = true; ev.preventDefault();
+    box.style.transform = `translate(${ev.clientX - sx}px, ${ev.clientY - sy}px)`; box.style.zIndex = 5; box.style.opacity = '.85';
+    let best = index, bd = Infinity;
+    tiles().forEach((t, i) => { const r = t.getBoundingClientRect(); const d = Math.hypot(ev.clientX - (r.left + r.width / 2), ev.clientY - (r.top + r.height / 2)); if (d < bd) { bd = d; best = i; } });
+    to = best;
+    tiles().forEach((t, i) => t.classList.toggle('tap-target', moved && i === to && i !== index));
+  };
+  const up = () => {
+    document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', up);
+    if (!moved) return;
+    window._tapDraggedAt = Date.now(); // ドラッグの直後のクリックで1文字消さないように
+    const [it] = currentTapInput.splice(index, 1); currentTapInput.splice(to, 0, it);
+    renderTapInput();
+    if (currentTapInput.length === currentTapTarget.length && currentTapInput.map(x => x.char).join('') === currentTapTarget) submitTapAnswer();
+  };
+  document.addEventListener('pointermove', move, { passive: false }); document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up);
 }
 
 function buildSelfMode(cur) { document.getElementById('btnShowAnswer').style.display = 'inline-flex'; document.getElementById('selfJudgeArea').style.display = 'none'; }
@@ -1080,11 +1289,16 @@ function submitQuizAction() {
   stopQuizTimer();
   const cur = quizPool[quizIndex];
   const mode = currentRoundMode;
+  if (mode === 'tap') { if (currentTapInput.length === currentTapTarget.length) submitTapAnswer(); return; }
   if (mode === 'choice') {
     if (!selectedChoiceIdx) return;
     const given = selectedChoiceIdx;
-    return concludeAttempt(cur, isAnswerCorrect(given, cur.answer), { given, kind: 'wrong', choice: true });
+    const area = document.getElementById('boxChoiceArea');
+    const ok = (area && area._correctText !== undefined && given === area._correctText) || isAnswerCorrect(given, cur.answer);
+    return concludeAttempt(cur, ok, { given, kind: 'wrong', choice: true });
   }
+  // ★【0.04.05】単語の記述は、暗記テストと同じ採点（全部の意味・単語帳の訳・品詞の形・言い換えの扱い）
+  if (quizDrillStyle(cur)) { quizDrillJudge(cur); return; }
   // ★【0.03.21】意味をいくつも並べた答え（地域社会、共同体 など）で、一部だけ答えたら、ほかの意味も聞き直す
   if (handleMultiMeaning(cur)) return;
   if (currentStructuredAnswer) {
@@ -1112,7 +1326,9 @@ function submitQuizAction() {
   }
   const given = document.getElementById('txtDescAnswer').value;
   // 意味ごとの問題は、全角スペース・読点で区切った言い換えのどれか1つで正解
-  const ok = (cur._senseKey && !cur._swapped) ? isStructuredSegmentCorrect(given, cur.answer) : isAnswerCorrect(given, cur.answer);
+  let ok = (cur._senseKey && !cur._swapped) ? isStructuredSegmentCorrect(given, cur.answer) : isAnswerCorrect(given, cur.answer);
+  // ★【0.04.05】テスト（Check!）は暗記テストと同じく、並べた答えの順番を問わない
+  if (!ok && cur.kind === 'test' && typeof drillCheckLocal === 'function') ok = drillCheckLocal(given, cur.answer).ok;
   // ★【0.03.15】完全一致しなくても、意味が同じなら正解にする（AI に確かめる）
   if (!ok && given.trim() && aiJudgeEnabled() && !isChoiceCard(cur) && !isBinaryCard(cur)) { // 選択肢から選ぶ問題は、言い換えを認めない
     aiJudgeItems(cur, [{ label: cur._senseLabel && !cur._swapped ? cur._senseLabel : '', expected: cur.answer, given }]).then(r => {
@@ -1273,6 +1489,7 @@ async function startFocusRetry(cur, info) {
   const kind = info.kind || 'wrong', given = info.given || '';
   let hint = typeof recallAiHint === 'function' ? recallAiHint(cur, kind, given) : null; // 前に同じ状況で出したヒント
   if (!hint && info.hint) { hint = typeof maskAnswerInText === 'function' ? maskAnswerInText(info.hint, cur.answer) : info.hint; rememberAiHint(cur, kind, given, info.hint); }
+  const t0 = Date.now();
   if (!hint && typeof aiAvailable === 'function' && aiAvailable() && navigator.onLine !== false) {
     try { hint = await aiRetryHint(cur, kind, given); if (hint) rememberAiHint(cur, kind, given, hint); } catch (e) { console.warn(e); }
   }
@@ -1284,6 +1501,7 @@ async function startFocusRetry(cur, info) {
   const already = hint && [...hb.querySelectorAll('.hint-focus, .hint-ai')].some(el => el.textContent.replace(/^\S+\s/, '') === hint);
   if (hint && !already) {
     const line = document.createElement('div'); line.className = 'hint-focus'; line.textContent = `🎯 ${hint}`;
+    if (typeof aiModelSince === 'function' && aiModelSince(t0)) line.insertAdjacentHTML('beforeend', ' ' + aiModelTag(aiModelSince(t0)));
     hb.appendChild(line); hb.style.display = 'block';
   } else {
     // AI が使えないときは、いつものヒントを1段階（ヒントをオフにしていても、重点モードでは出す）
@@ -1320,6 +1538,55 @@ async function startFocusRetry(cur, info) {
 // ★【0.03.15】AI：意味で採点・判定の取り消し・解説・ヒント
 // ================================================================
 let _aiJudging = false;
+// ================================================================
+// ★【0.04.05】クイズの記述の採点を、暗記テストと同じにする（drill.js の drillJudgeCore）
+//  単語帳の訳と同じ言葉は〇・意味は合うが訳と違う言葉は「単語帳の訳で」と聞き直す・品詞の形が違えば×・
+//  意味をいくつも並べた答えは全部そろうまで聞き直す（「その意味はもう答えました」も同じ）
+// ================================================================
+let _qd = null;
+function quizDrillStyle(cur) {
+  return currentRoundMode === 'desc' && typeof drillJudgeCore === 'function' && !window.currentOnlineMatch && !!cur && !cur._swapped && !cur.kind
+    && !isChoiceCard(cur) && !isBinaryCard(cur) && (!currentStructuredAnswer || currentStructuredAnswer.length === 1) && !(typeof hasRichBlock === 'function' && hasRichBlock(cur.answer));
+}
+function quizDrillItem(cur) {
+  const card = db.find(q => q.id === (cur._sourceId || cur.id)) || cur;
+  const m0 = cur._senseLabel ? `(${cur._senseLabel})${cur.answer}` : cur.answer;
+  return { id: 'q:' + card.id + (cur._senseKey ? ':' + cur._senseKey : ''), w: cur.question, m: (typeof posAbbrevAnswer === 'function' && posAbbrevAnswer(m0)) || m0, card };
+}
+async function quizDrillJudge(cur) {
+  const input = document.getElementById(currentStructuredAnswer ? 'structAns_0' : 'txtDescAnswer');
+  const given = String(input.value || '').trim();
+  if (!_qd || _qd.cur !== cur) _qd = { cur, st: {}, given: [], sn: null };
+  const st = _qd.st, names = () => (st.cv || []).map(i => String((_qd.sn[i] || {}).t || '').split('，')[0]).filter(Boolean);
+  if (!given) {
+    if (st.cv && st.cv.length) return concludeAttempt(cur, false, { typed: true, given: _qd.given.join(' ／ '), kind: 'partial', partialFound: names() });
+    return concludeAttempt(cur, false, { typed: true, given: '', kind: 'blank' });
+  }
+  _qd.given.push(given);
+  const btn = document.getElementById('btnQuizAction'), prev = btn ? btn.innerText : '';
+  _aiJudging = true; if (btn) { btn.innerText = '🤖 確認中...'; btn.disabled = true; } input.disabled = true;
+  let res;
+  try { const it = quizDrillItem(cur); _qd.sn = _qd.sn || await drillGetSn(it); res = await drillJudgeCore(it, _qd.sn, st, given); }
+  catch (e) { res = { status: 'error' }; }
+  _aiJudging = false; if (btn) { btn.disabled = false; btn.innerText = prev; } input.disabled = false;
+  if (quizPool[quizIndex] !== cur || quizPhase === 'a') return;
+  const givenAll = _qd.given.join(' ／ ');
+  if (res.status === 'error') return concludeAttempt(cur, isAnswerCorrect(given, cur.answer), { typed: true, given: givenAll, kind: 'wrong' });
+  if (res.status === 'repeat' || res.status === 'more') {
+    if (res.status === 'repeat') _qd.given.pop();
+    const left = Math.max(1, _qd.sn.length - (st.cv || []).length), fs = document.getElementById('lblFocusStatus');
+    if (fs) { fs.style.display = 'block'; fs.classList.add('multi'); fs.textContent = `${names().length ? '⭕ ' + names().join('、') + '　' : ''}${res.status === 'repeat' ? 'その意味はもう答えました。' : res.msg || ''}ほかの意味もあります。答えてください（あと${left}つ）`; }
+    const timerText = document.getElementById('lblQuizTimerText'); if (timerText) timerText.innerText = '🔁';
+    input.value = ''; input.style.borderColor = ''; input.style.background = ''; input.focus();
+    return;
+  }
+  if (res.status === 'wrong') {
+    concludeAttempt(cur, false, { typed: true, given: givenAll, kind: (st.cv || []).length ? 'partial' : 'wrong', partialFound: (st.cv || []).length ? names() : undefined });
+    const fb = document.getElementById('feedbackResultText'); if (fb && res.tip && quizPhase === 'a') fb.innerText += ` — ${res.tip}`;
+    return;
+  }
+  concludeAttempt(cur, true, { typed: true, given: givenAll, label: _qd.sn.length > 1 ? '🎉 全部の意味を正解！' : undefined });
+}
 let _lastEval = null;    // 直前の採点の前の成績（「やっぱり不正解」「正解にする」で戻すため）
 let _aiExplainHold = false;
 function aiJudgeEnabled() {
@@ -1365,7 +1632,7 @@ function renderAiFeedbackBox(cur, isCorrect, opts) {
   const parts = [];
   if (ai && ai.results && ai.results.length) {
     const reasons = ai.results.map(r => r.reason).filter(Boolean);
-    if (reasons.length) parts.push(`<div>🤖 ${escapeHtml(reasons.join(' ／ '))}</div>`);
+    if (reasons.length) parts.push(`<div>🤖 ${escapeHtml(reasons.join(' ／ '))} ${typeof aiModelTag === 'function' ? aiModelTag(ai.model) : ''}</div>`);
   } else if (ai && ai.error) parts.push(`<div class="ai-muted">🤖 AI の判定は使えませんでした（${escapeHtml(ai.error)}）</div>`);
   if (!isCorrect && ai && ai.tip) { parts.push(`<div>💡 ${escapeHtml(ai.tip)}</div>`); _aiExplainHold = true; }
   // ★【0.03.18】足りない・違うときの手がかり（次に同じ問題で迷ったときにも出す）
@@ -1376,6 +1643,7 @@ function renderAiFeedbackBox(cur, isCorrect, opts) {
   if (!isCorrect && opts.typed && !opts.focusLate && String(opts.given || '').trim()) btns.push(`<button type="button" class="chip" onclick="regradeLastAnswer(true)">🙆 合っているので正解にする</button>`);
   const canExplain = !isCorrect && !opts.pass && typeof aiAvailable === 'function' && aiAvailable() && getAiPrefs().hint && !window.currentOnlineMatch && !(ai && ai.tip);
   if (canExplain) btns.push(`<button type="button" class="chip" id="btnAiExplain" onclick="showAiExplanation()">🤖 AIの解説</button>`);
+  if (document.getElementById('chkTTS') && document.getElementById('chkTTS').checked && typeof ttsOpenFixDialog === 'function') btns.push(`<button type="button" class="chip" onclick="ttsOpenFixDialog([quizPool[quizIndex].question, getPrimaryAnswer(quizPool[quizIndex].answer)])">🗣️ 読み方を直す</button>`);
   box.innerHTML = parts.join('') + (btns.length ? `<div class="ai-btns">${btns.join('')}</div>` : '') + '<div id="aiExplainArea"></div>';
   box.style.display = (parts.length || btns.length) ? 'block' : 'none';
   if (canExplain && getAiPrefs().explainAuto) showAiExplanation();
@@ -1392,7 +1660,7 @@ async function showAiExplanation() {
     // ★【0.03.18】次に同じ問題で迷ったときのヒントとして覚えておく
     if (r.hint && typeof rememberAiHint === 'function') rememberAiHint(cur, String(given || '').trim() ? 'wrong' : 'blank', given, r.hint);
     if (quizPool[quizIndex] !== cur) return;
-    area.innerHTML = (r.explain ? `<div>🤖 ${escapeHtml(r.explain)}</div>` : '') + (r.tip ? `<div>💡 ${escapeHtml(r.tip)}</div>` : '');
+    area.innerHTML = (r.explain ? `<div>🤖 ${escapeHtml(r.explain)}</div>` : '') + (r.tip ? `<div>💡 ${escapeHtml(r.tip)}</div>` : '') + aiModelTag(r.model);
   } catch (e) { area.innerHTML = `<div class="ai-muted">⚠️ ${escapeHtml(e.message)}</div>`; }
 }
 // 解いている途中の AI ヒント
@@ -1402,11 +1670,13 @@ async function showAiHint() {
   if (btn) { btn.disabled = true; btn.innerText = '🤖 考え中...'; }
   try {
     let h = typeof recallAiHint === 'function' ? recallAiHint(cur, 'hint', '') : null;
+    const t0 = Date.now();
     if (!h) { h = await aiHintFor({ id: (cur._swapped ? 'swap:' : '') + (cur._sourceId || cur.id) + (cur._senseLabel ? ':' + cur._senseLabel : ''), question: cur.question + (cur._senseLabel ? `（${cur._senseLabel}）` : ''), answer: getPrimaryAnswer(cur.answer), note: cur.note }); rememberAiHint(cur, 'hint', '', h); }
     if (quizPool[quizIndex] !== cur || quizPhase !== 'q') return;
     quizHintState.aiUsed = true; // ヒントを見たのでレベルは上がりにくくなる
     const hb = document.getElementById('lblQuizHint');
     const line = document.createElement('div'); line.className = 'hint-ai'; line.textContent = '🤖 ' + h;
+    if (aiModelSince(t0)) line.insertAdjacentHTML('beforeend', ' ' + aiModelTag(aiModelSince(t0)));
     hb.appendChild(line); hb.style.display = 'block';
     if (btn) btn.style.display = 'none';
   } catch (e) {
@@ -1565,6 +1835,10 @@ function evaluateRoundAnswer(isCorrect, head, opts = {}) {
   }
   hydrateRich(fbAnsEl, { chemScale: 1.3 });
   renderAiFeedbackBox(cur, isCorrect, opts); // ★【0.03.15】AI の理由・解説と、採点の直しボタン
+  // ★【0.04.05】この問題の AI への質問（暗記テストと共通。たたんで出す）
+  { const fbq = document.getElementById('quizFeedback'); let box = document.getElementById('quizQaBox');
+    if (fbq && !box) { box = document.createElement('div'); box.id = 'quizQaBox'; box.style.cssText = 'width:100%; text-align:left; margin-top:8px;'; fbq.appendChild(box); }
+    if (box) box.innerHTML = typeof qaPanelWrapHTML === 'function' && !window.currentOnlineMatch ? qaPanelWrapHTML(cur._sourceId || cur.id, 'quiz') : ''; }
   if (!regrade) speakText(getPrimaryAnswer(cur.answer));
   fb.className = `feedback-area ${isCorrect ? 'correct' : isPass ? 'pass' : 'incorrect'}`; fb.style.display = 'flex';
   
@@ -1667,6 +1941,7 @@ async function recordDailyLogAdjust(delta) {
 // ★【0.03.39】opts.drill：暗記テストの答え（ランキングの正解数は暗記テストの分を別に数える：drillScore）
 async function recordDailyLog(isCorrect, opts = {}) {
   if (typeof notifyMarkStudied === 'function') notifyMarkStudied(); // ★【0.03.14】今日は学習済み（催促しない）
+  if (typeof markStudyDay === 'function') markStudyDay(); // ★【0.03.62】連続記録
   if(!currentUser) return;
   const d = getTodayStr(); 
   const inc = firebase.firestore.FieldValue.increment;
@@ -1686,6 +1961,7 @@ async function recordDailyLog(isCorrect, opts = {}) {
 // ★【0.03.02】文字タップモード：入力欄をタップすると最後の1文字を取り消す（以前は関数が無くエラーになっていた）
 function removeLastTap() {
   if (quizPhase !== 'q' || currentTapInput.length === 0) return;
+  if (Date.now() - (window._tapDraggedAt || 0) < 500) return;
   const removed = currentTapInput.pop();
   const btn = document.getElementById(removed.id);
   if (btn) btn.style.display = 'inline-flex';

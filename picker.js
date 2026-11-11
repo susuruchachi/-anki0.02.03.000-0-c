@@ -40,10 +40,11 @@ function fpRowHTML(c, depth, flat) {
   const n = p.count ? p.count(c) : (p.total[c] || 0);
   const note = p.note ? p.note(c) : '';
   const label = flat ? getCategoryPath(c).map(escapeHtml).join(' <span class="fp-sep">›</span> ') : escapeHtml(c);
+  // ★【0.03.62】中にフォルダーがあるものは、名前を押すと開く（決めるのは「これにする」）。中が無いものは名前を押すと決まる
   return `<div class="fp-row${cur ? ' cur' : ''}${can ? '' : ' off'}" style="padding-left:${8 + depth * 18}px;">
     ${kids.length ? `<button type="button" class="fp-tog" data-tog="${escAttr(c)}">${isOpen ? '▾' : '▸'}</button>` : '<span class="fp-tog"></span>'}
-    <button type="button" class="fp-name" data-pick="${escAttr(c)}">${kids.length ? (isOpen ? '📂' : '📁') : '📄'} ${label}</button>
-    <span class="fp-meta">${note ? escapeHtml(note) + ' ・ ' : ''}${n}問</span>
+    <button type="button" class="fp-name" ${kids.length && !flat ? `data-tog="${escAttr(c)}"` : `data-pick="${escAttr(c)}"`}>${kids.length ? (isOpen ? '📂' : '📁') : '📄'} ${label}<span class="fp-meta-in">${note ? escapeHtml(note) + ' ・ ' : ''}${n}問</span></button>
+    ${can && kids.length && !flat ? `<button type="button" class="chip fp-pick" data-pick="${escAttr(c)}">これにする</button>` : ''}
   </div>` + (isOpen ? kids.map(k => fpRowHTML(k, depth + 1)).join('') : '');
 }
 function renderFolderPicker() {
@@ -65,7 +66,7 @@ function renderFolderPicker() {
       ${p.allLabel ? `<div class="fp-row${!p.current ? ' cur' : ''}" style="padding-left:8px;"><span class="fp-tog"></span><button type="button" class="fp-name" data-pick="">${escapeHtml(p.allLabel)}</button></div>` : ''}
       ${list}
     </div>
-    <div class="hint-small" style="margin-top:6px;">▸ で中のフォルダーを開く・名前を押すとそのフォルダーに決まります</div>
+    <div class="hint-small" style="margin-top:6px;">📁 を押すと中のフォルダーが開きます。そのフォルダー（とその中ぜんぶ）にするときは「これにする」、📄 は押すとそれに決まります</div>
     <button type="button" class="btn btn-secondary" style="margin-top:8px;" onclick="closeFolderPicker()">閉じる</button>`;
   const L = document.getElementById('fpList'); L.scrollTop = keep;
   L.querySelectorAll('[data-tog]').forEach(b => b.onclick = () => { const c = b.dataset.tog; if (p.open.has(c)) p.open.delete(c); else p.open.add(c); renderFolderPicker(); });
@@ -82,4 +83,36 @@ function folderPickButtonHTML(cat, emptyLabel, onclick, extra) {
   const path = cat ? getCategoryPath(cat) : [];
   const label = path.length ? path.map(escapeHtml).join(' <span class="fp-sep">›</span> ') : escapeHtml(emptyLabel || 'フォルダーを選ぶ');
   return `<button type="button" class="fp-btn" onclick="${onclick}"><span class="fp-btn-ico">${path.length ? '📁' : '🌐'}</span><span class="fp-btn-txt">${label}${extra ? `<span class="fp-btn-sub">${extra}</span>` : ''}</span><span class="fp-btn-chg">変更 ▾</span></button>`;
+}
+
+// ================================================================
+// ★【0.03.81】プルダウンの代わりに置く「フォルダーを選ぶ」欄（いろいろな画面で共通）
+// folderPickFieldHTML(id, 今の値, { title, emptyLabel, allLabel, topValue, selectable, note, count, hint, extra, onChange })
+//  ・id の hidden input に選んだフォルダー名が入る（いままでの select と同じように .value で読める）
+//  ・allLabel を付けると「すべて／いちばん上」の行が出る（選ぶと topValue。既定は ''）
+//  ・setFolderField(id, 値) で外から変えられる
+// ================================================================
+const _fpFields = {};
+function folderPickFieldHTML(id, value, o = {}) {
+  _fpFields[id] = Object.assign({}, o, { value: value || '' });
+  return `<input type="hidden" id="${escAttr(id)}" value="${escAttr(value || '')}"><div id="${escAttr(id)}_fpbtn">${fpFieldButton(id)}</div>`;
+}
+function fpFieldButton(id) {
+  const f = _fpFields[id]; if (!f) return '';
+  const isTop = f.allLabel && f.value === (f.topValue || '');
+  const cat = isTop || !categories.includes(f.value) ? '' : f.value;
+  const extra = f.extra ? f.extra(cat) : '';
+  return folderPickButtonHTML(cat, isTop ? f.allLabel.replace(/^\S+\s/, '') : (f.emptyLabel || 'フォルダーを選ぶ'), `pickFolderField(${jsArg(id)})`, extra);
+}
+function pickFolderField(id) {
+  const f = _fpFields[id]; if (!f) return;
+  openFolderPicker({ title: f.title, current: categories.includes(f.value) ? f.value : '', allLabel: f.allLabel, selectable: f.selectable, visible: f.visible, note: f.note, count: f.count, hint: f.hint,
+    onPick: c => setFolderField(id, c ? c : (f.topValue || '')) });
+}
+function setFolderField(id, value) {
+  const f = _fpFields[id]; if (!f) return;
+  f.value = value || '';
+  const inp = document.getElementById(id); if (inp) inp.value = f.value;
+  const b = document.getElementById(id + '_fpbtn'); if (b) b.innerHTML = fpFieldButton(id);
+  if (f.onChange) f.onChange(f.value);
 }

@@ -11,7 +11,8 @@
 // ================================================================
 const DRILL_KEY = 'susuru_anki_drill';
 let DG = [], DS = {}, DQ = [], dcur = null, dst = {}, dlock = false, DI = {}, DCK = {}, DP = {};
-const dE = s => escapeHtml(String(s == null ? '' : s));
+let DH = [], dView = null; // ★【0.03.64】解いた問題の解説の履歴と、見返している位置（null は今の問題）
+const dE = s => markHTML(escapeHtml(String(s == null ? '' : s))); // ★【0.03.97】~~取り消し線~~・++下線++ も表示
 const dShuffle = a => a.map(x => [Math.random(), x]).sort((p, q) => p[0] - q[0]).map(x => x[1]);
 const dOrd = s => s.it ? s.it.o : s.ck.o;
 const dKey = s => s.it ? s.it.id : 'c:' + s.ck.key;
@@ -54,7 +55,8 @@ function drillBuild(cat) {
     }
     if (!g) return;
     groupOf[c] = g;
-    words.forEach(q => g.items.push({ id: q.id, w: q.question, m: q.answer, card: q, o: o++ }));
+    // ★【0.04.00】「名　進歩　自　進歩する」のような品詞1文字の答えは、はじめから (名詞)進歩/(自動詞)… の形にしておく（AI への指示・表示も同じ形に）
+    words.forEach(q => g.items.push({ id: q.id, w: q.question, m: (typeof posAbbrevAnswer === 'function' && posAbbrevAnswer(q.answer)) || q.answer, card: q, o: o++ }));
     checks.forEach(q => g.checks.push(q));
   });
   DI = {}; DCK = {};
@@ -82,11 +84,17 @@ function drillSenses(it) {
   drillSegs(it).forEach((seg, c) => {
     const p = drillPos(seg.label);
     const ch = String(seg.text).replace(/\s*[（(]\s*[=＝↔][^)）]*[)）]/g, '').trim();
-    const parts = /[①②③④⑤⑥]/.test(ch) ? ch.split(/[①②③④⑤⑥]/) : ch.split(/[；;]/);
+    const parts = /[①②③④⑤⑥]/.test(ch) ? ch.split(/[①②③④⑤⑥]/) : drillSplitTop(ch, '；;'); // ★【0.03.69】カッコの中の「；」では分けない
     // ★【0.03.47】元の試作と同じく、①②・；で分けた1つの意味の中に並べた訳は「，」でつないでおき、AI がまとめる（drillGroupSenses）
-    parts.forEach(x => { x = x.trim(); if (!x) return; const ws = splitAnswerMeanings(x); out.push({ p, t: (ws.length ? ws : [x]).join('，'), c }); });
+    // ★【0.03.69】「、」で区切った部分が長い（説明の文。「…が続き、かつ…」など）ときは、区切らずに1つの意味にする
+    parts.forEach(x => { x = x.trim(); if (!x) return; let ws = splitAnswerMeanings(x); if (ws.some(w => normalizeStructuredToken(w).length > 15)) ws = splitAnswerMeanings(x.replace(/、/g, '\u0002')).map(w => w.replace(/\u0002/g, '、')); out.push({ p, t: (ws.length ? ws : [x]).join('，'), c }); });
   });
   return out;
+}
+function drillSplitTop(s, seps) {
+  const out = []; let cur = '', d = 0;
+  for (const ch of String(s)) { if ('（(「［['.includes(ch)) d++; else if ('）)」］]'.includes(ch)) d = Math.max(0, d - 1); if (d === 0 && seps.includes(ch)) { out.push(cur); cur = ''; continue; } cur += ch; }
+  out.push(cur); return out;
 }
 function drillGetSn(it) { return DP[it.id] || (DP[it.id] = drillGroupSenses(it)); }
 // 「，」でつないだ訳を、ニュアンスの違う意味ごとに AI に分けてもらう（元の試作と同じ指示。結果は端末に保存して使い回す）。
@@ -94,13 +102,17 @@ function drillGetSn(it) { return DP[it.id] || (DP[it.id] = drillGroupSenses(it))
 const DRILL_SENSE_CACHE = 'susuru_anki_drill_senses_v3';
 function drillLoadSenseCache() { try { return JSON.parse(localStorage.getItem(DRILL_SENSE_CACHE) || '{}') || {}; } catch (e) { return {}; } }
 function drillSplitAll(b) { return b.flatMap(x => String(x.t).split('，').map(t => ({ p: x.p, c: x.c, t }))); }
+// クイズからも使う（暗記テストをしていないときは、この画面だけのまとめ）
+const _drillSpQuiz = {};
+function drillSpMap() { return DS && DS.sp ? DS.sp : _drillSpQuiz; }
 async function drillGroupSenses(it) {
-  if (DS.sp && DS.sp[it.id]) return DS.sp[it.id];
+  if (drillSpMap()[it.id]) return drillSpMap()[it.id];
   const cache = drillLoadSenseCache(), c = cache[it.id];
-  if (c && c.a === it.m && Array.isArray(c.s)) return (DS.sp[it.id] = c.s);
+  // 前の版で「名」「自」を意味の1つとして保存したまとめは使わない
+  if (c && c.a === it.m && Array.isArray(c.s) && !c.s.some(x => /^(名|他|自|形|副|前|接|動|代|助|句)$/.test(String(x.t || '').trim()))) return (drillSpMap()[it.id] = c.s);
   const b = drillSenses(it), cm = b.filter(x => /[，,]/.test(x.t));
-  if (!cm.length) return (DS.sp[it.id] = b);
-  if (!drillAiOk()) return (DS.sp[it.id] = drillSplitAll(b));
+  if (!cm.length) return (drillSpMap()[it.id] = b);
+  if (!drillAiOk()) return (drillSpMap()[it.id] = drillSplitAll(b));
   try {
     const r = await drillAi(`日本語訳の分類。各行の「，」で区切られた訳について、日本語としてニュアンスが異なり別の意味として覚えるべきものは別グループに、ほぼ同義の言い換えは同じグループにする。迷う場合は同じグループにする。\n${cm.map((x, i) => `${i}: ${x.t}`).join('\n')}\nJSONのみ。行ごとのグループ配列を並べる。例：{"r":[[["社交的な"],["愛想のいい"]],[["親しい","親密な"]]]}`);
     let k = 0; const out = [];
@@ -110,7 +122,7 @@ async function drillGroupSenses(it) {
       if (Array.isArray(gr) && gr.length && gr.every(Array.isArray)) gr.forEach(g => out.push({ p: x.p, c: x.c, t: g.join('，') }));
       else out.push(x);
     });
-    DS.sp[it.id] = out;
+    drillSpMap()[it.id] = out;
     cache[it.id] = { a: it.m, s: out }; const ks = Object.keys(cache); if (ks.length > 3000) delete cache[ks[0]];
     try { localStorage.setItem(DRILL_SENSE_CACHE, JSON.stringify(cache)); } catch (e) {}
     return out;
@@ -139,15 +151,20 @@ function drillPartHits(v, sn) {
   const whole = normalizeStructuredToken(v);
   const parts = String(v).split(/[、,，\s　・／/]+/).filter(p => normalizeStructuredToken(p) !== '');
   if (!parts.length) return null;
-  const forms = sn.map(x => new Set(String(x.t).split(/[，,]/).flatMap(w => structuredTokenForms(w))));
+  // ★【0.03.72】「仮定／婉曲」のように「／」で並べた訳は、どれか1つでもその意味に当たる（クイズと同じ）
+  const forms = sn.map(x => new Set([...String(x.t).split(/[，,]/).flatMap(w => [w, ...(/／/.test(w) ? w.split('／') : [])]).flatMap(w => structuredTokenForms(w)), ...structuredTokenForms(String(x.t).replace(/[，,]/g, '、'))]));
   const wi = forms.findIndex(f => f.has(whole)); // 区切りを含む訳（「現在の伝聞、婉曲」など）をそのまま書いたとき
   if (wi >= 0) return { hits: [wi], unknown: [] };
   const hits = [], unknown = [];
-  for (const p of parts) {
-    const n = normalizeStructuredToken(p);
-    const i = forms.findIndex(f => f.has(n));
-    const is = i >= 0 ? [i] : drillSplitJoined(n, forms);
-    if (!is) { unknown.push(p); continue; }
+  const find = p => { const n = normalizeStructuredToken(p); const i = forms.findIndex(f => f.has(n)); return i >= 0 ? [i] : drillSplitJoined(n, forms); };
+  // ★【0.03.69】まず「、」・空白で区切ったまとまりで探し（「体言・連体形に下接し」のように「・」「／」を含む訳があるため）、無ければ「・」「／」でも分ける
+  for (const big of String(v).split(/[、,，\s　]+/).filter(p => normalizeStructuredToken(p) !== '')) {
+    let is = find(big);
+    if (!is) {
+      const small = big.split(/[・／/]+/).filter(p => normalizeStructuredToken(p) !== '');
+      if (small.length > 1) { const rs = small.map(find); if (rs.every(Boolean)) is = rs.flat(); else { small.forEach((p, k) => { if (rs[k]) rs[k].forEach(x => { if (!hits.includes(x)) hits.push(x); }); else unknown.push(p); }); continue; } }
+    }
+    if (!is) { unknown.push(big); continue; }
     is.forEach(k => { if (!hits.includes(k)) hits.push(k); });
   }
   return { hits, unknown };
@@ -170,7 +187,9 @@ function drillSplitJoined(n, forms) {
 // ---------------- AI ----------------
 function drillAiOk() { return typeof aiAvailable === 'function' && aiAvailable() && navigator.onLine !== false; }
 async function drillAi(p) {
+  const t0 = Date.now();
   const text = await aiRequest('あなたは英単語・暗記テストの採点と出題の係です。指示どおりに、JSONだけを出力します。', [{ text: p }], { json: true, maxTokens: 700, timeout: 15000, totalTimeout: 30000 });
+  if (dst) { const m = aiModelSince(t0); if (m) dst.aiModels = [...new Set([...(dst.aiModels || []), m])]; } // ★【0.03.79】この問題で答えたモデル
   return parseAiJson(text);
 }
 function drillBusy() { dlock = true; const a = document.getElementById('drillApp'); if (a) a.insertAdjacentHTML('beforeend', '<p class="hint-small drill-busy">🤖 AI処理中…</p>'); }
@@ -187,13 +206,28 @@ function drillScopeCategory() {
 }
 function drillSetCategory(c) { try { localStorage.setItem(DRILL_CAT_KEY, c || ''); } catch (e) {} if (!_drillActive) drillHome(); }
 // ★【0.03.29】途中経過はフォルダーごとに保存する { フォルダー名（すべては ''）: 状態 }
+// ★【0.03.73】途中経過は storage.js の drillProgress に持ち、アカウントで同期する（前はこの端末の localStorage だけ）
 function drillLoadAll() {
-  let all = {};
-  try { all = JSON.parse(localStorage.getItem(DRILL_KEY + '_v2') || '{}') || {}; } catch (e) {}
-  try { const old = JSON.parse(localStorage.getItem(DRILL_KEY)); if (old && !all[old.cat || '']) { all[old.cat || ''] = old; localStorage.setItem(DRILL_KEY + '_v2', JSON.stringify(all)); } localStorage.removeItem(DRILL_KEY); } catch (e) {}
+  // 前の版の保存（この端末だけ）を一度だけ移す
+  try {
+    let legacy = JSON.parse(localStorage.getItem(DRILL_KEY + '_v2') || 'null');
+    const old = JSON.parse(localStorage.getItem(DRILL_KEY) || 'null'); if (old) { legacy = legacy || {}; if (!legacy[old.cat || '']) legacy[old.cat || ''] = old; }
+    if (legacy) {
+      Object.entries(legacy).forEach(([k, v]) => { if (v && (!drillProgress[k] || (drillProgress[k].at || 0) < (v.at || 0))) drillProgress[k] = Object.assign({ dev: DEVICE_ID }, v); });
+      localStorage.removeItem(DRILL_KEY + '_v2'); localStorage.removeItem(DRILL_KEY);
+      try { saveData(); } catch (e) {}
+    }
+  } catch (e) {}
+  const all = {};
+  Object.entries(drillProgress || {}).forEach(([k, v]) => { if (v && !v.deleted) all[k] = v; });
   return all;
 }
-function drillStoreAll(all) { try { localStorage.setItem(DRILL_KEY + '_v2', JSON.stringify(all)); } catch (e) {} }
+function drillStoreAll(all) {
+  const now = Date.now();
+  Object.keys(drillProgress || {}).forEach(k => { if (!all[k] && drillProgress[k] && !drillProgress[k].deleted) drillProgress[k] = { deleted: true, at: now, dev: DEVICE_ID }; });
+  Object.entries(all).forEach(([k, v]) => { drillProgress[k] = v; });
+  try { saveData(); } catch (e) {}
+}
 // ★【0.03.27】暗記テストは専用のタブ。ほかの画面に行っても（一時離脱）、タブに戻るとその問題から続く
 let _drillActive = false;
 function openDrill() { openPage('pgDrill'); }
@@ -279,21 +313,30 @@ function drillStartNow() {
   const cat = drillScopeCategory();
   const all = drillLoadAll();
   if (all[cat] && !confirm('このフォルダーの途中経過を消して、最初から始めますか？')) return;
-  DS = { cat, r: 1, gi: 0, miss: new Map(), gm: [], rv: false, hdr: null, ct: {}, sp: {}, rec: {} };
-  DQ = []; drillSetActive(true); drillPop();
+  DS = { savedAt: Date.now(), cat, r: 1, gi: 0, miss: new Map(), gm: [], rv: false, hdr: null, ct: {}, sp: {}, rec: {} };
+  DQ = []; DH = []; dView = null; drillHistStore(); drillSetActive(true); drillPop();
 }
-function drillSer(s) { return s.t === 'q' ? { t: 'q', id: s.it.id, retry: s.retry } : s.t === 'c' ? { t: 'c', key: s.ck.key, retry: s.retry } : s.t === 'msg' ? { t: 'msg', h: s.h } : { t: s.t, g: DG.indexOf(s.g) }; }
+function drillSer(s) { return s.t === 'askN' || s.t === 'loopend' ? { t: s.t } : s.t === 'q' ? { t: 'q', id: s.it.id, retry: s.retry } : s.t === 'c' ? { t: 'c', key: s.ck.key, retry: s.retry } : s.t === 'msg' ? { t: 'msg', h: s.h } : { t: s.t, g: DG.indexOf(s.g) }; }
 function drillDe(o) {
   if (o.t === 'q') return DI[o.id] ? { t: 'q', it: DI[o.id], retry: o.retry } : null;
   if (o.t === 'c') return DCK[o.key] ? { t: 'c', ck: DCK[o.key], retry: o.retry } : null;
   if (o.t === 'msg') return o;
+  if (o.t === 'askN' || o.t === 'loopend') return { t: o.t };
   return DG[o.g] ? { t: o.t, g: DG[o.g] } : null;
 }
 function drillSave() {
   if (!DS || DS.r === undefined) return;
+  // ★【0.03.73】ほかの端末でこのフォルダーが先に進んでいたら、そちらに切り替えるか聞く（黙って上書きしない）
+  const key = DS.cat || '', other = (drillProgress || {})[key];
+  if (other && !other.deleted && other.dev && other.dev !== DEVICE_ID && (other.at || 0) > (DS.savedAt || 0) && !DS.askedOther) {
+    DS.askedOther = true;
+    if (confirm('このフォルダーの暗記テストは、ほかの端末で先に進んでいます。\n\nOK：ほかの端末の続きにする\nキャンセル：この端末の続きのまま（ほかの端末の分は上書き）')) { setTimeout(() => drillResumeNow(key), 0); return; }
+  }
   const all = drillLoadAll();
-  all[DS.cat || ''] = { cat: DS.cat, r: DS.r, gi: DS.gi, rv: DS.rv, gm: DS.gm.map(x => x.id), miss: [...DS.miss.values()].map(drillSer), ct: DS.ct, rec: DS.rec, Q: [dst.ph === 9 ? null : dcur, ...DQ].filter(Boolean).map(drillSer), hg: DS.hdr ? DG.indexOf(DS.hdr) : -1, at: Date.now() };
+  DS.savedAt = Date.now();
+  all[key] = { cat: DS.cat, r: DS.r, gi: DS.gi, rv: DS.rv, gm: DS.gm.map(x => x.id), miss: [...DS.miss.values()].map(drillSer), ct: DS.ct, rec: DS.rec, hard: DS.hard || {}, N: DS.N, st: (DS.stock || []).map(drillSer), il: !!DS.inLoop, fin: !!DS.final, rest: (DS.rest || []).map(drillSer), mx: DS.mx || 0, rt: DS.rt || 0, Q: [dst.ph === 9 ? null : dcur, ...DQ].filter(Boolean).map(drillSer), hg: DS.hdr ? DG.indexOf(DS.hdr) : -1, at: DS.savedAt, dev: DEVICE_ID };
   drillStoreAll(all);
+  drillProgSync(false);
 }
 function drillResume(cat) { drillBuild(cat && categories.includes(cat) ? cat : ''); drillOfflineGate(() => drillResumeNow(cat)); }
 function drillResumeNow(cat) {
@@ -301,18 +344,32 @@ function drillResumeNow(cat) {
     const d = drillLoadAll()[cat || ''];
     if (!d) return drillHome();
     drillBuild(d.cat && categories.includes(d.cat) ? d.cat : '');
-    DS = { cat: d.cat || '', r: d.r, gi: d.gi, rv: d.rv, miss: new Map(), gm: (d.gm || []).map(i => DI[i]).filter(Boolean), hdr: d.hg >= 0 ? DG[d.hg] : null, ct: d.ct || {}, sp: {}, rec: d.rec || {} };
+    DS = { savedAt: d.at || 0, cat: d.cat || '', r: d.r, gi: d.gi, rv: d.rv, miss: new Map(), gm: (d.gm || []).map(i => DI[i]).filter(Boolean), hdr: d.hg >= 0 ? DG[d.hg] : null, ct: d.ct || {}, sp: {}, rec: d.rec || {}, hard: d.hard || {}, N: d.N, stock: (d.st || []).map(drillDe).filter(Boolean), inLoop: !!d.il, final: !!d.fin, rest: (d.rest || []).map(drillDe).filter(Boolean), mx: d.mx || 0, rt: d.rt || 0 };
     (d.miss || []).map(drillDe).filter(Boolean).forEach(x => DS.miss.set(dKey(x), x));
-    DQ = (d.Q || []).map(drillDe).filter(Boolean);
+    DQ = (d.Q || []).map(drillDe).filter(Boolean); DH = drillHistLoad(DS.cat); dView = null;
     drillSetActive(true); drillPop();
   } catch (e) { alert('保存データを読み込めませんでした'); drillHome(); }
 }
 
 // ---------------- 出題の順番 ----------------
+// ★【0.03.97】2周目以降：この周で初めてまちがえた問題（ストック）が N 問たまったら、新しい出題を止めて、その N 問を全問〇まで復習する
+function drillStockLoop() {
+  const L = DS.stock || []; DS.stock = []; DS.inLoop = true;
+  DQ.unshift({ t: 'msg', h: `【復習ループ】間違えた問題が${L.length}問溜まりました。この${L.length}問を全問正解になるまで復習します。` }, ...L.map(x => x.it ? { t: 'q', it: x.it } : { t: 'c', ck: x.ck }), { t: 'loopend' });
+}
+function drillSetN() {
+  const el = document.getElementById('drillNInput'); const n = Math.max(0, Math.min(99, parseInt(el && el.value, 10) || 0));
+  DS.N = n; try { localStorage.setItem(DRILL_N_KEY, String(n)); } catch (e) {}
+  drillPop();
+}
+function drillStockOn() { return DS.r >= 2 && !DS.final && DS.N > 0; }
 function drillPop() {
+  if (drillStockOn() && !DS.inLoop && (DS.stock || []).length >= DS.N && !(DQ[0] && DQ[0].retry)) drillStockLoop();
   if (!DQ.length) return drillRefill();
   dcur = DQ.shift(); dst = { ans: [], ph: 0 };
   if (dcur.t === 'intro') { DS.hdr = dcur.g; return drillPop(); }
+  if (dcur.t === 'loopend') { DS.inLoop = false; return drillPop(); }
+  if (dcur.t === 'askN') { drillSave(); return drillDraw(); }
   if (dcur.t === 'gend') {
     // グループの最後：このグループで間違えた単語の復習 → Check!
     const g = dcur.g; DS.rv = true; DS.gi++;
@@ -323,25 +380,124 @@ function drillPop() {
   if (dcur.t === 'c' && dcur.ck.choices) dst.op = dShuffle(dcur.ck.choices.slice());
   [dcur, ...DQ].filter(x => x.t === 'q').slice(0, 2).forEach(x => drillGetSn(x.it)); // 次の単語の意味のまとめを先に
   drillSave(); drillDraw();
-  if (drillTtsOn()) drillSpeakQ();
+  if (typeof ttsSetShareCard === 'function') ttsSetShareCard(dcur.it ? dcur.it.card : dcur.ck ? dcur.ck.card : null);
+  if (drillTtsOn()) { drillSpeakQ(); if (typeof ttsPrefetch === 'function' && (dcur.it || dcur.ck)) ttsPrefetch([drillAText(dcur)]); }
 }
 function drillRefill() {
+  // 周の最後に残ったストックは、N 問未満でも全問〇まで復習してから周を終える
+  if (DS.r > 1 && !DS.final && (DS.stock || []).length) { drillStockLoop(); return drillPop(); }
   if (DS.r > 1 || DS.gi >= DG.length) return drillEndRound();
   const g = DG[DS.gi]; DS.rv = false;
   DQ = [{ t: 'intro', g }, ...g.items.map(it => ({ t: 'q', it })), { t: 'gend', g }];
   drillPop();
 }
+// 周回で残った問題のカードを「苦手」（Lv0）・「しっかり」（Lv-1）にする（意味ごとの成績も）。今より良い評価のときだけ下げる
+function drillMarkHard(list, round) {
+  const target = round >= 6 ? -1 : round >= 3 ? 0 : null;
+  if (target === null) return 0;
+  DS.hard = DS.hard || {};
+  let n = 0;
+  list.forEach(x => {
+    const card = x.it ? x.it.card : x.ck ? x.ck.card : null; if (!card) return;
+    const m = db.find(q => q.id === card.id); if (!m) return;
+    if (DS.hard[m.id] !== undefined && DS.hard[m.id] <= target) return; // もうその評価にした
+    const lower = t => { if (!t) return false; if (t.level === -1 && target === 0) return false; if (target === -1) { if (t.level === -1) return false; t.level = -1; t.shikkariStreak = 0; } else { if (t.level <= 0 && !(isGraduated(t))) { if ((t.correct || 0) + (t.incorrect || 0) > 0) return false; } t.level = 0; } t.level5Correct = 0; t.streak = 0; t.incorrect = Math.max(1, t.incorrect || 0); return true; };
+    let ch = lower(m);
+    if (m.senses && typeof m.senses === 'object') Object.values(m.senses).forEach(sn => { if (lower(sn)) ch = true; });
+    DS.hard[m.id] = target;
+    if (ch) { touchStats(m); n++; }
+  });
+  if (n) { try { saveData(); } catch (e) {} }
+  return n;
+}
+// ★【0.03.93】周の終わりに、その周で答えた問題のランクを決める
+//  1周目に一発で正解：得意に入りやすい「普通」（Lv2。もっと上ならそのまま）
+//  1周目はまちがえたが2周目で正解：「普通」（Lv1。得意・卒業だったものも普通にする）
+function drillRateRound(round) {
+  if (round > 2) return 0;
+  const missIds = new Set([...DS.miss.values()].map(x => (x.it ? x.it.card : x.ck.card).id));
+  const ids = Object.keys(DS.rec || {}).filter(k => k.startsWith(round + ':')).map(k => k.slice(String(round).length + 1)).filter(id => !missIds.has(id));
+  let n = 0;
+  const set = (t, lv) => {
+    if (!t) return false;
+    if (round === 1) { if (t.level >= 2 || isGraduated(t)) return false; t.level = 2; t.shikkariStreak = 0; t.wrongStreak = 0; return true; }
+    if (t.level === 1 || (t.level === 2 && !isGraduated(t))) return false;
+    t.level = 1; t.level5Correct = 0; t.shikkariStreak = 0; t.wrongStreak = 0; return true;
+  };
+  ids.forEach(id => {
+    const m = db.find(q => q.id === id); if (!m) return;
+    if (DS.hard && DS.hard[id] !== undefined) return;
+    let ch = set(m);
+    if (m.senses && typeof m.senses === 'object') Object.values(m.senses).forEach(sn => { if (set(sn)) ch = true; });
+    if (ch) { touchStats(m); n++; }
+  });
+  if (n) { try { saveData(); } catch (e) {} }
+  return n;
+}
+// ================================================================
+// ★【0.04.08】暗記テストの進み具合をフレンドに見せる（成績共有がオンのとき）
+//  susuru_anki_category_scores に mode:'drillprog' で、フォルダーごとに1つ（何周目・何番まで・どのグループ・残り・合格）
+// ================================================================
+let _dpTimer = null, _dpLast = '';
+function drillProgDocId(uid, cat) { return 'drillprog_' + uid + '_' + String(cat || 'all').replace(/[\/\s.#$\[\]]+/g, '_').slice(0, 80); }
+function drillProgSync(passed, restN) {
+  if (typeof currentUser === 'undefined' || !currentUser || typeof raceShareOn !== 'function' || !raceShareOn() || !DS || DS.r === undefined) return;
+  const items = DG.flatMap(g => g.items), nos = items.map(x => Number(x.card.no)).filter(n => n > 0);
+  const n = typeof drillLeftCounts === 'function' && !passed ? drillLeftCounts() : { all: 0, gi: DS.gi };
+  const g = DG[Math.max(0, Math.min(DG.length - 1, n.gi >= 0 ? n.gi : DS.gi))];
+  const doc = {
+    mode: 'drillprog', uid: currentUser.uid, name: currentUser.displayName || 'Anonymous', cat: DS.cat || 'すべて',
+    r: DS.r, final: !!DS.final, passed: !!passed, rest: passed ? (restN || 0) : 0,
+    from: nos.length ? cardNoText(Math.min(...nos)) : '', to: DS.r === 1 ? (DS.mx ? cardNoText(DS.mx) : '') : (nos.length ? cardNoText(Math.max(...nos)) : ''),
+    last: nos.length ? cardNoText(Math.max(...nos)) : '', gi: g ? DG.indexOf(g) + 1 : 0, groups: DG.length, group: g ? g.name : '',
+    words: items.length, left: n.all || 0, rt: DS.rt || 0, date: getTodayStr(), updatedAt: Date.now()
+  };
+  const key = JSON.stringify(Object.assign({}, doc, { updatedAt: 0 }));
+  if (key === _dpLast) return;
+  clearTimeout(_dpTimer);
+  _dpTimer = setTimeout(() => { _dpLast = key; firestore.collection('susuru_anki_category_scores').doc(drillProgDocId(currentUser.uid, doc.cat)).set(doc).catch(() => { _dpLast = ''; }); }, passed ? 0 : 4000);
+}
+// 進み具合の文（自分・フレンドの表示に使う）
+function drillProgText(d) {
+  if (!d) return '';
+  if (d.passed) return `✅ 合格（${d.r}周${d.rest ? `・まだ覚えられていない ${d.rest}問` : ''}）`;
+  if (d.r === 1) return `1周目・${d.to ? `No.${d.from}〜${d.to} まで` : 'はじめたところ'}${d.last ? `（全体 No.${d.from}〜${d.last}）` : ''}${d.groups > 1 ? `・グループ ${d.gi}/${d.groups}` : ''}`;
+  return `${d.r}周目${d.final ? '（最終ループ）' : ''}・残り ${d.left}${d.rt ? `/${d.rt}` : ''}問`;
+}
+const DRILL_FINAL_MAX = 21, DRILL_N_KEY = 'susuru_anki_drill_n';
+// 合格（rest：まだ覚えられていない問題）
+function drillPass(rest) {
+  const A = document.getElementById('drillApp');
+  drillProgSync(true, rest.length);
+  { const all = drillLoadAll(); delete all[DS.cat || '']; drillStoreAll(all); }
+  drillSetActive(false);
+  DH = []; drillHistStore();
+  if (typeof planOnDrillPassed === 'function') planOnDrillPassed(DS.cat); // ★【0.03.27】週間プランの「単語」達成
+  const row = x => x.it ? `<li>${showsCardNo(x.it.card) ? `No.${dE(cardNoText(x.it.card.no))} ` : ''}<b>${dE(x.it.w)}</b>：${dE(String(x.it.m).replace(/\([^()]*\)/g, ' ').replace(/\//g, '／').trim())}</li>` : `<li>Check!：${dE(x.ck.q)} → <b>${dE(x.ck.ans)}</b></li>`;
+  A.innerHTML = `<div class="card"><b>🎉 ${rest.length ? `${DS.r}周目の最終ループを終えました` : `${DS.r}周目で全問〇になりました`}</b><p>【合格】おめでとうございます。</p>
+    ${rest.length ? `<div class="drill-rest"><b>【まだ覚えられていない単語】</b>（${rest.length}問）<ul>${rest.map(row).join('')}</ul></div>` : ''}
+    <button class="btn btn-secondary" onclick="drillHome()">戻る</button></div>`;
+}
 function drillEndRound() {
+  drillRateRound(DS.r);
   const L = [...DS.miss.values()].sort((a, b) => dOrd(a) - dOrd(b));
   const A = document.getElementById('drillApp');
-  if (!L.length) {
-    { const all = drillLoadAll(); delete all[DS.cat || '']; drillStoreAll(all); }
-    drillSetActive(false);
-    if (typeof planOnDrillPassed === 'function') planOnDrillPassed(DS.cat); // ★【0.03.27】週間プランの「単語」達成
-    A.innerHTML = `<div class="card"><b>🎉 ${DS.r}周目で全問〇になりました</b><p>【合格】おめでとうございます。</p><button class="btn btn-secondary" onclick="drillHome()">戻る</button></div>`;
-    return;
+  // ★【0.03.97】最終ループ（★★の問題をその場で〇になるまで）を終えたら合格。最終ループで出さなかった問題は「まだ覚えられていない単語」に
+  if (DS.final) return drillPass(DS.rest || []);
+  if (!L.length) return drillPass([]);
+  // ★【0.03.97】3周目以降の周の終わりに、残りが21問以下なら最終ループ（★★の問題だけ）
+  if (DS.r >= 3 && L.length <= DRILL_FINAL_MAX) {
+    drillMarkHard(L, DS.r + 1);
+    const two = L.filter(x => x.it && (Number(x.it.card.stars) || 0) >= 2);
+    DS.rest = L.filter(x => !two.includes(x));
+    if (!two.length) return drillPass(DS.rest);
+    DS.r++; DS.final = true; DS.miss = new Map(); DS.stock = []; DS.inLoop = false; DS.rt = two.length;
+    DQ = [{ t: 'msg', h: `【最終ループ】残りの間違いが${DRILL_FINAL_MAX}問以下（${L.length}問）になりました。星2つの問題（${two.length}問）を全問正解になるまで復習します。` }, ...two.map(x => ({ t: 'q', it: x.it }))];
+    return drillPop();
   }
-  const p = DS.r; DS.r++; DS.miss = new Map();
+  const p = DS.r; DS.r++; DS.miss = new Map(); DS.rt = L.length;
+  // ★【0.03.92】何周しても間違える問題は、いつもの成績（ランク）にも出す：3周目にも出る問題は「苦手」、5周してもまだ間違える（6周目に出る）問題は「しっかり」
+  const marked = drillMarkHard(L, DS.r);
   // ★【0.03.44】2周目は、グループの切れ目ごとに導入の文（AI があればその文からの4択 → 読む）
   const seq = []; let lastG = -1;
   L.forEach(s => {
@@ -350,7 +506,8 @@ function drillEndRound() {
     lastG = gi;
     seq.push(s.it ? { t: 'q', it: s.it } : { t: 'c', ck: s.ck });
   });
-  DQ = [{ t: 'msg', h: `【${DS.r}周目開始】${p}周目で間違えた${L.length}問の復習に入ります。` }, ...seq];
+  if (DS.r === 2 && DS.N === undefined) seq.unshift({ t: 'askN' }); // ★【0.03.97】2周目のはじめに、何問たまったら復習ループに入るか聞く
+  DQ = [{ t: 'msg', h: `【${DS.r}周目開始】${p}周目で間違えた${L.length}問の復習に入ります。${marked ? ` （${DS.r >= 6 ? '5周しても覚えられなかった' : '3周目まで残った'}${marked}問を「${DS.r >= 6 ? '🧱 しっかり' : '⚠️ 苦手'}」にしました）` : ''}` }, ...seq];
   drillPop();
 }
 
@@ -375,34 +532,96 @@ function drillGiPick(i) { if (dst.ph !== 'gq' || !dst.giq) return; dst.gpick = i
 // ---------------- 読み上げ ----------------
 // ★【0.03.28】問題（単語・Check! の問題文）は出たときに、答えは結果の画面で読み上げる。🔊 でもう一度
 function drillTtsOn() { try { return localStorage.getItem('susuru_anki_drill_tts') !== 'off'; } catch (e) { return true; } }
-function drillToggleTts() { try { localStorage.setItem('susuru_anki_drill_tts', drillTtsOn() ? 'off' : 'on'); } catch (e) {} if (!drillTtsOn() && 'speechSynthesis' in window) speechSynthesis.cancel(); drillDraw(); }
+function drillToggleTts() { try { localStorage.setItem('susuru_anki_drill_tts', drillTtsOn() ? 'off' : 'on'); } catch (e) {} if (!drillTtsOn()) { if (typeof ttsStopAll === 'function') ttsStopAll(); else if ('speechSynthesis' in window) speechSynthesis.cancel(); } drillDraw(); }
 function drillQText(c) { return c.it ? c.it.w : c.ck.q; }
 function drillAText(c) {
   if (c.ck) return c.ck.ans;
   const seg = parseStructuredAnswer(c.it.m);
-  return seg ? seg.map(x => x.text).join('。') : c.it.m;
+  return seg ? seg.map(x => x.text).join('\n') : c.it.m; // ★【0.04.01】意味ごとに行を分ける（クイズの意味ごとの問題と同じ声を使い回す）
 }
-function drillSpeakQ() { if (dcur && (dcur.it || dcur.ck) && typeof speakText === 'function') speakText(drillQText(dcur)); }
-function drillSpeakA() { if (dcur && (dcur.it || dcur.ck) && typeof speakText === 'function') speakText(drillAText(dcur)); }
+function drillSpeakQ() { if (dcur && (dcur.it || dcur.ck) && typeof speakText === 'function') speakText(typeof spoilerSafeSpeech === 'function' ? spoilerSafeSpeech(drillQText(dcur)) : drillQText(dcur)); } // ★【0.03.65】アクセント問題はネタバレしないように
+function drillSpeakA() { if (dView !== null && DH[dView]) { if (typeof speakText === 'function') speakText(DH[dView].a); return; } if (dcur && (dcur.it || dcur.ck) && typeof speakText === 'function') speakText(drillAText(dcur)); }
 
 // ---------------- 画面 ----------------
+// ★【0.03.67】残りの問題数：今のグループと、周回しているフォルダー全体（1周目は、まだ始めていないグループの単語・Check! も足す）
+function drillLeftCounts() {
+  const isQ = x => x && (x.t === 'q' || x.t === 'c');
+  const cur = isQ(dcur) && dst.ph !== 9 ? 1 : 0;
+  let group = DQ.filter(isQ).length + cur;
+  let rest = 0, gi = -1;
+  if (DS.r === 1) {
+    const inGroup = DQ.some(x => x.t === 'gend'); // グループの単語の途中（まだ gend の前）なら今のグループは DS.gi
+    gi = inGroup ? DS.gi : DS.gi - 1;
+    // グループの最後に出る、間違えた単語の復習と Check! も今のグループの残りに数える
+    if (inGroup && DG[gi]) group += DG[gi].chk.length + DS.gm.length;
+    for (let k = Math.max(gi + 1, 0); k < DG.length; k++) rest += DG[k].items.length + DG[k].chk.length;
+  }
+  return { group, all: group + rest, gi };
+}
+function drillLeftText() {
+  const n = drillLeftCounts();
+  if (DS.r > 1 || DG.length <= 1) return `${DS.r}周目${DS.final ? '（最終ループ）' : ''} ・ 残り<b>${n.all}</b>問${DS.inLoop ? ' ・ 🔁 復習ループ中' : drillStockOn() ? ` ・ ストック ${(DS.stock || []).length}/${DS.N}` : ''}`;
+  const g = DG[n.gi];
+  return `${DS.r}周目 ・ 📁 ${g ? `${dE(g.name)}（${n.gi + 1}/${DG.length}）` : 'グループ'} 残り<b>${n.group}</b>問 ・ 🔁 全体 残り<b>${n.all}</b>問`;
+}
+// ★【0.03.68】解説の履歴はフォルダーごとにこの端末に保存（一時離脱・再読み込みのあとも戻れる）
+const DRILL_HIST_KEY = 'susuru_anki_drill_hist', DRILL_HIST_MAX = 60;
+function drillHistLoad(cat) { try { const o = JSON.parse(localStorage.getItem(DRILL_HIST_KEY) || '{}') || {}; return Array.isArray(o[cat || '']) ? o[cat || ''] : []; } catch (e) { return []; } }
+function drillHistStore() {
+  if (!DS || DS.cat === undefined) return;
+  try { const o = JSON.parse(localStorage.getItem(DRILL_HIST_KEY) || '{}') || {}; if (DH.length) o[DS.cat || ''] = DH; else delete o[DS.cat || '']; localStorage.setItem(DRILL_HIST_KEY, JSON.stringify(o)); } catch (e) {}
+}
+function drillHistGo(i) { if (i >= 0 && i <= drillHistLimit()) { dView = i; drillDraw(); const a = document.getElementById('drillApp'); if (a) a.scrollIntoView({ block: 'start' }); } }
+// ★【0.03.64】前の問題の解説を見返す。進めるのは、もう解いた問題の解説まで（その先は今の問題に戻る）
+function drillHistLimit() { return DH.length - 1 - (dst.ph === 9 ? 1 : 0); }
+function drillHistBack() {
+  if (dlock) return;
+  const lim = drillHistLimit();
+  if (dView === null) { if (lim < 0) return; const i = document.getElementById('drillInput'); dst.draft = i ? i.value : ''; dView = lim; }
+  else if (dView > 0) dView--;
+  drillDraw();
+}
+function drillHistFwd() { if (dView === null) return; if (dView < drillHistLimit()) dView++; else dView = null; drillDraw(); }
+function drillHistClose() { dView = null; drillDraw(); }
+function drillHistHTML() {
+  const lim = drillHistLimit(), h = DH[dView];
+  return `<div class="drill-hist-badge">📜 前の解説を見ています（${dView + 1} / ${lim + 1}問目）</div>${h.html}${h.cid ? drillQaReadOnlyHTML(h.cid) : ''}
+    <div class="drill-hist-nav"><button class="btn btn-secondary" style="flex:1;" onclick="drillHistBack()" ${dView > 0 ? '' : 'disabled'}>◀ 前の解説</button>
+    ${dView < lim ? '<button class="btn btn-secondary" style="flex:1;" onclick="drillHistFwd()">次の解説 ▶</button>' : ''}
+    <button class="btn btn-primary" style="flex:1;" onclick="drillHistClose()">↩ 今の問題に戻る</button></div>
+    <details class="drill-hist-list"${dst.histOpen ? ' open' : ''} ontoggle="dst.histOpen = this.open"><summary>📋 解いた問題の一覧から選ぶ（${lim + 1}問）</summary>
+      ${DH.slice(0, lim + 1).map((x, i) => ({ x, i })).reverse().map(({ x, i }) => `<button type="button" class="drill-hist-item${i === dView ? ' cur' : ''}" onclick="drillHistGo(${i})"><span class="${x.ok ? 'drill-ok' : 'drill-ng'}">${x.ok ? '〇' : '×'}</span>${x.no ? `<span class="card-no">No.${dE(x.no)}</span>` : ''}<span class="drill-hist-w">${dE(String(x.w || '').slice(0, 60))}</span></button>`).join('')}
+    </details>`;
+}
+// ★【0.03.97】導入の文（うしろの「🗺️ 図（…）」は表にする：1行目が「A→B→C」、続く行が「名前：x → y → z」なら表）
+function drillIntroHTML(text) {
+  const parts = String(text || '').split(/\n(?=🗺️ 図)/);
+  return parts.map((p, i) => {
+    if (i === 0 && !p.startsWith('🗺️ 図')) return dE(p.trim()).replace(/\n/g, '<br>');
+    return `<div class="drill-fig">${figHTML(p)}</div>`;
+  }).join('');
+}
 function drillDraw() {
-  if (DS.hdr) { dst.h = `<div class="card drill-group"><b>📁 ${dE(DS.hdr.name)}</b><div class="hint-small">${DS.hdr.items.length}語${DS.hdr.chk.length ? ` ・ Check! ${DS.hdr.chk.length}問` : ''}</div>${DS.hdr.intro && DS.r === 1 ? `<div class="drill-intro hint-small">📖 ${dE(DS.hdr.intro).replace(/\n/g, '<br>')}</div>` : ''}</div>`; DS.hdr = null; }
+  if (dView !== null && !DH[dView]) dView = null;
+  if (DS.hdr) { dst.h = `<div class="card drill-group"><b>📁 ${dE(DS.hdr.name)}</b><div class="hint-small">${DS.hdr.items.length}語${DS.hdr.chk.length ? ` ・ Check! ${DS.hdr.chk.length}問` : ''}</div>${DS.hdr.intro && DS.r === 1 ? `<div class="drill-intro hint-small">📖 ${drillIntroHTML(DS.hdr.intro)}</div>` : ''}</div>`; DS.hdr = null; }
   const c = dcur; let b = '';
-  const W = it => `<div class="drill-word">${dE(it.w)} <button class="chip" style="vertical-align:middle;" onclick="drillSpeakQ()" title="読み上げる">🔊</button></div>`;
-  if (c.t === 'gread') {
-    const q = dst.giq, intro = `<div class="drill-intro">${dE(c.g.intro).replace(/\n/g, '<br>')}</div>`;
+  const W = it => `${showsCardNo(it.card) ? `<div class="card-no drill-no">No.${dE(cardNoText(it.card.no))}</div>` : ''}<div class="drill-word">${dE(it.w)} <button class="chip" style="vertical-align:middle;" onclick="drillSpeakQ()" title="読み上げる">🔊</button></div>`;
+  if (dView !== null) b = drillHistHTML();
+  else if (c.t === 'gread') {
+    const q = dst.giq, intro = `<div class="drill-intro">${drillIntroHTML(c.g.intro)}</div>`;
     if (dst.ph === 'gq' && !q) b = `<div class="card"><b>📖 ${dE(c.g.name)}：導入の文</b><p class="hint-small">🤖 導入の文から問題を作っています…</p></div>`;
     else if (dst.ph === 'gq') b = `<div class="card"><div class="hint-small">📖 ${dE(c.g.name)}：導入の文から</div><p class="drill-q">${dE(q.q)}</p>${q.options.map((o, i) => `<button class="btn btn-secondary drill-opt" onclick="drillGiPick(${i})">${'①②③④⑤'[i] || ''} ${dE(o)}</button>`).join('')}</div>`;
     else b = `<div class="card">${q && dst.gpick !== undefined ? `<p>【判定】 <b class="${dst.gpick === q.answer ? 'drill-ok' : 'drill-ng'}">${dst.gpick === q.answer ? '〇' : '×'}</b> 正解：${dE(q.options[q.answer])}</p>` : ''}<b>📖 ${dE(c.g.name)}：導入の文を読みましょう</b>${intro}<button class="btn btn-primary" style="margin-top:8px;" onclick="drillPop()">読んだ → 次</button></div>`;
   }
+  else if (c.t === 'askN') { let d = 7; try { const v = parseInt(localStorage.getItem(DRILL_N_KEY), 10); if (v >= 0) d = v; } catch (e) {}
+    b = `<div class="card"><b>🔁 復習ループ</b><p>間違いが何問たまったら復習ループに入りますか？（数字で入力。0 にすると復習ループなし）</p><input id="drillNInput" type="number" min="0" max="99" inputmode="numeric" class="form-control" value="${d}" onkeydown="if(event.key==='Enter'&&!event.isComposing)drillSetN()"><div class="drill-btns"><button class="btn btn-primary" onclick="drillSetN()">決定</button></div></div>`; }
   else if (c.t === 'msg') b = `<div class="card">${dE(c.h)}<br><button class="btn btn-primary" style="margin-top:8px;" onclick="drillPop()">次</button></div>`;
   else if (dst.ph === 9) b = dst.res + drillQaHTML();
   else if (c.t === 'c' && c.ck.choices) b = `<div class="card"><div class="hint-small">Check!${c.retry ? ' ・ 再出題' : ''}</div><p class="drill-q">${dE(c.ck.q)} <button class="chip" onclick="drillSpeakQ()">🔊</button></p>${dst.op.map((o, i) => `<button class="btn btn-secondary drill-opt" onclick="drillPick(${i})">${'①②③④⑤⑥'[i] || ''} ${dE(o)}</button>`).join('')}<button class="btn btn-secondary drill-opt" onclick="drillDk()">わからない</button></div>`;
   else if (c.t === 'c' || dst.ph === 0) {
     const q = c.t === 'c';
     b = `<div class="card">${q ? `<div class="hint-small">Check!${c.retry ? ' ・ 再出題' : ''}</div><p class="drill-q">${dE(c.ck.q)} <button class="chip" onclick="drillSpeakQ()">🔊</button></p>${/^\d/.test(c.ck.ans) ? '<div class="hint-small">番号で答えてください（複数なら「1,2」のように）</div>' : ''}`
-      : `${W(c.it)}<div class="hint-small">${c.retry ? '再出題 ・ ' : ''}<span class="card-stars">${starsText(c.it.card.stars)}</span></div><p>${dst.msg ? dE(dst.msg) : (dst.ans.length ? '他にどのような意味（訳）がありますか？' : '和訳は？')}</p>${dst.cv && dst.cv.length && dst.sn ? `<div class="hint-small">⭕ ${dst.cv.map(i => dE(String(dst.sn[i].t).split('，')[0])).join('、')}　（あと${dst.sn.length - dst.cv.length}つ）</div>` : ''}`}
+      : `${W(c.it)}<div class="hint-small">${c.retry ? '再出題 ・ ' : ''}<span class="card-stars">${starsText(c.it.card.stars)}</span></div><p>${dst.msg ? dE(dst.msg) : drillAskText(c.it, dst.ans.length > 0)}</p>${dst.cv && dst.cv.length && dst.sn ? `<div class="hint-small">⭕ ${dst.cv.map(i => dE(String(dst.sn[i].t).split('，')[0])).join('、')}　（あと${dst.sn.length - dst.cv.length}つ）</div>` : ''}`}
       <input id="drillInput" class="form-control" autocomplete="off" onkeydown="if(event.key==='Enter'&&!event.isComposing)drillSubmit()">
       <div class="drill-btns"><button class="btn btn-primary" onclick="drillSubmit()">回答</button><button class="btn btn-secondary" onclick="drillDk()">わからない</button></div></div>`;
   }
@@ -410,60 +629,79 @@ function drillDraw() {
   else if (dst.ph === 1) b = `<div class="card">${W(c.it)}<p>この動詞は次のどれですか？${dst.extra && dst.extra.length ? '<br><b>単語帳に載っている意味についての質問です。</b>' : ''}</p><button class="btn btn-secondary drill-opt" onclick="drillAt(1)">① 自動詞</button><button class="btn btn-secondary drill-opt" onclick="drillAt(2)">② 他動詞</button><button class="btn btn-secondary drill-opt" onclick="drillAt(3)">③ 自動詞・他動詞の両方</button></div>`;
   else if (dst.ph === 2) b = `<div class="card">${W(c.it)}<p>【${dE(dst.z.k)}】この単語の${dE(dst.z.k)}として正しいものを選んでください。</p>${dst.op.map((o, i) => `<button class="btn btn-secondary drill-opt" onclick="drillCh(${i})">${'①②③④'[i]} ${dE(o)}</button>`).join('')}</div>`;
   const A = document.getElementById('drillApp');
-  A.innerHTML = `<div class="drill-top"><span class="hint-small">${DS.r}周目 ・ 残り${DQ.length}問</span><span style="display:flex; gap:6px;"><button class="chip" onclick="drillToggleTts()" title="読み上げのオン・オフ">${drillTtsOn() ? '🔊' : '🔇'}</button><button class="chip" onclick="drillPause()">⏸ 一時離脱</button><button class="chip" onclick="drillQuit()">🏁 やめる</button></span></div>${dst.h || ''}${b}`;
-  const i = document.getElementById('drillInput') || document.getElementById('drillQaInput'); if (i) i.focus();
+  A.innerHTML = `<div class="drill-top"><span class="hint-small">${drillLeftText()}</span><span style="display:flex; gap:6px;">${dView === null && drillHistLimit() >= 0 ? '<button class="chip" onclick="drillHistBack()" title="前の問題の解説に戻る">◀ 前の解説</button>' : ''}<button class="chip" onclick="drillToggleTts()" title="読み上げのオン・オフ">${drillTtsOn() ? '🔊' : '🔇'}</button><button class="chip" onclick="drillPause()">⏸ 一時離脱</button><button class="chip" onclick="drillQuit()">🏁 やめる</button></span></div>${dst.h || ''}${b}`;
+  const i = document.getElementById('drillInput') || document.getElementById('drillQaInput');
+  if (i && i.id === 'drillInput' && dst.draft) { i.value = dst.draft; dst.draft = ''; }
+  if (i) i.focus();
 }
 function drillQuit() { drillSave(); drillHome(); }
 
+// ★【0.03.70】問いかけの文：英語なら「和訳は？」、かなだけの語（古文単語など）は「意味は？」、文法の項目などは「答えは？」
+function drillAskText(it, more) {
+  const w = String(it.w || '').trim();
+  const kind = /^[\x00-\x7F’]+$/.test(w) ? 'en' : /^[\u3040-\u309f\u30a0-\u30ffー・]+$/.test(w) ? 'word' : 'other';
+  if (!more) return kind === 'en' ? '和訳は？' : kind === 'word' ? '意味は？' : '答えは？';
+  return kind === 'en' ? '他にどのような意味（訳）がありますか？' : kind === 'word' ? '他にどのような意味がありますか？' : '他にも答えることがあります。続けて答えてください。';
+}
 // ---------------- 単語：和訳 ----------------
 function drillSubmit() {
   if (dlock) return;
   const el = document.getElementById('drillInput'); const v = el ? el.value.trim() : ''; if (!v) return;
   if (/^(わから(な|ん)い|分から(な|ん)い|不明|知らない|しらない|パス|pass)$/i.test(v)) return drillDk();
+  (dst.given = dst.given || []).push(v); // ★【0.03.88】自分の答えを結果に出す
   if (dcur.t === 'c') return drillChk(v);
   dst.ans.push(v); return drillJudge(v);
+}
+// ★【0.04.05】意味の答えの採点（暗記テストとクイズの記述で共通）。st = { cv: 答えた意味の番号, at: 言い換えの回数, mn: 自他の言及, extra, alt }
+//  返す値：{ status: 'repeat'（もう答えた意味）| 'wrong'（×。tip が理由）| 'more'（ほかの意味も聞く。msg）| 'done'（全部の意味がそろった）}
+async function drillJudgeCore(it, sn, st, v) {
+  st.cv = st.cv || []; st.at = st.at || {}; st.mn = st.mn || '';
+    const local = drillLocalHits(v, sn);
+    // もう答えた意味だけをくり返したとき（言い換え・語形の違いを含む）は、×にせずに聞き直す
+    if ((local && st.cv.length && local.every(i => st.cv.includes(i))) || (!local && drillIsRepeat(v, sn, st.cv))) {
+      return { status: 'repeat' };
+    }
+    let r;
+    const ph = local ? null : drillPartHits(v, sn); // 一部だけ単語帳の訳と同じとき
+    const known = ph ? ph.hits.filter(i => !st.cv.includes(i)) : [];
+    const ask = ph && ph.unknown.length ? ph.unknown.join('、') : v;
+    if (local) r = { hit: local.map(i => ({ i, exact: true })), extra: [], wrong: false, form: false, mention: 'none' };
+    else if (!drillAiOk()) r = { hit: [], extra: [], wrong: true, form: false, mention: 'none' };
+    else {
+      const en = /^[\x00-\x7F’]+$/.test(it.w);
+      const rem = sn.map((x, i) => st.cv.includes(i) || known.includes(i) ? '' : `${i}: ${x.p} ${x.t}`).filter(Boolean).join('\n');
+      const done = sn.filter((x, i) => st.cv.includes(i) || known.includes(i)).map(x => x.t).join('、') || 'なし';
+      r = await drillAi(`${en ? '英単語' : '語句（古文・漢文などを含む）'}「${it.w}」の${en ? '和訳' : '意味'}テストの採点。\n【未回答の正解の意味（番号: 品詞 訳）】\n${rem || 'なし'}\n【回答済みの意味】${done}\n【生徒の最新の回答】「${ask}」${en ? '' : '\n※英単語ではないので、品詞形の判定はしない（form は常に false）。単語帳の訳と同じ言葉は必ず hit（exact=true）にする。'}\n規則:\n- hit: 未回答リストの意味に当たる語句。{i:番号, exact:真偽}。exact=true は、単語帳の訳と同じ語（送り仮名・括弧・「〜」の違いは可）、またはほぼ同義で日本語のニュアンスが変わらない言い換え。exact=false は、意味は合うが単語帳の訳とニュアンスの違う別の言葉（例：単語帳が「社会の」で生徒が「社交的な」）。\n- 品詞形：名=名詞の形（社会、同情 など）、自/他/動=動詞形（〜する、〜を…する、〜に耐える）、形=「〜な」「〜い」「〜の」「〜的な」、副=「〜に」「〜く」「〜と」。意味が合っていても形がズレていれば form=true（hitに入れない）。\n- extra: 回答のうち、リストにも回答済みにも無いが、その英単語の辞書的に正しい意味（品詞は問わない。例：他動詞の「社会化する」）の語句の配列。\n- 厳しく判定する：hit は、未回答リストのその番号の意味そのものを答えているときだけ。回答済みの意味の言い換え・語形を変えたもの（例：回答済み「意思疎通」に対して「意思疎通すること」「意思を通じ合うこと」）を、未回答の別の意味（例：「通信」）に当てはめてはいけない。そういう回答は hit にも extra にも入れず repeat=true にする。迷ったら hit にしない。\n- repeat: 回答が、回答済みの意味をくり返しただけ（言い換え・語形の違いを含む）か。\n- wrong: 上のどれにも当たらない誤った語句が含まれるか。\n- mention: 生徒が自動詞・他動詞に言及したか（none / ji / ta）。\nJSONのみ：{"hit":[{"i":0,"exact":true}],"extra":[],"repeat":false,"wrong":false,"form":false,"mention":"none"}`);
+    }
+    if (known.length) { r.hit = [...known.map(i => ({ i, exact: true })), ...(Array.isArray(r.hit) ? r.hit : []).filter(h => !known.includes(+h.i))]; r.repeat = false; }
+    if (r.repeat && !(Array.isArray(r.hit) && r.hit.length)) return { status: 'repeat' };
+    if (r.mention === 'ji' || r.mention === 'ta') { const a = drillAttr(it), j = /自動詞/.test(a), t = /他動詞/.test(a), ex = j && t ? 3 : j ? 1 : 2; st.mn = (r.mention === 'ji' ? 1 : 2) === ex ? 'ok' : 'bad'; }
+    const hs = (Array.isArray(r.hit) ? r.hit : []).filter(h => sn[+h.i] && !st.cv.includes(+h.i));
+    hs.forEach(h => { const i = +h.i; if (h.exact) { if (!st.cv.includes(i)) st.cv.push(i); } else { st.at[i] = (st.at[i] || 0) + 1; (st.alt = st.alt || []).push({ i, said: ask }); } });
+    // 「単語帳に載っていない意味」から、実は単語帳の訳と同じ言葉を除く（AI が取り違えることがあるため）
+    if (Array.isArray(r.extra)) r.extra = r.extra.filter(x => String(x || '').trim() && !drillLocalHits(x, sn));
+    if (r.extra && r.extra.length) st.extra = [...new Set((st.extra || []).concat(r.extra))];
+    const ex = !!(st.extra && st.extra.length), many = Object.values(st.at).some(n => n >= 3);
+    const none = !hs.length && !(r.extra && r.extra.length);
+    if (r.form || r.wrong || many || none || (st.mn === 'bad' && !ex)) {
+      return { status: 'wrong', tip: r.form ? '品詞（語尾）の形が合っていません。' : r.wrong ? (drillAiOk() ? '意味が違います。' : '単語帳の訳と違います（AI が使えないため、言い換えは判定できません）。') : none ? '他の意味を答えられませんでした。' : many ? '単語帳の訳を思い出せませんでした。' : '自動詞・他動詞の言及が違います。' };
+    }
+    if (st.cv.length < sn.length) {
+      return { status: 'more', hs, msg: hs.some(h => !h.exact) ? '意味は合っています。単語帳に載っている訳で答えてください。' : ex && !hs.length ? '辞書的には正しい意味ですが、単語帳には載っていません。単語帳に載っている意味を答えてください。' : '' };
+    }
+    return { status: 'done', ex };
 }
 async function drillJudge(v) {
   const it = dcur.it; dst.cv = dst.cv || []; dst.mn = dst.mn || ''; dst.at = dst.at || {}; dst.msg = '';
   drillBusy();
   try {
     dst.sn = dst.sn || await drillGetSn(it);
-    const local = drillLocalHits(v, dst.sn);
-    // もう答えた意味だけをくり返したとき（言い換え・語形の違いを含む）は、×にせずに聞き直す
-    if ((local && dst.cv.length && local.every(i => dst.cv.includes(i))) || (!local && drillIsRepeat(v, dst.sn, dst.cv))) {
-      dlock = false; dst.ans.pop(); dst.msg = 'その意味はもう答えました。他の意味を答えてください。'; dst.ph = 0; drillDraw(); return;
-    }
-    let r;
-    const ph = local ? null : drillPartHits(v, dst.sn); // 一部だけ単語帳の訳と同じとき
-    const known = ph ? ph.hits.filter(i => !dst.cv.includes(i)) : [];
-    const ask = ph && ph.unknown.length ? ph.unknown.join('、') : v;
-    if (local) r = { hit: local.map(i => ({ i, exact: true })), extra: [], wrong: false, form: false, mention: 'none' };
-    else if (!drillAiOk()) r = { hit: [], extra: [], wrong: true, form: false, mention: 'none' };
-    else {
-      const en = /^[\x00-\x7F’]+$/.test(it.w);
-      const rem = dst.sn.map((x, i) => dst.cv.includes(i) || known.includes(i) ? '' : `${i}: ${x.p} ${x.t}`).filter(Boolean).join('\n');
-      const done = dst.sn.filter((x, i) => dst.cv.includes(i) || known.includes(i)).map(x => x.t).join('、') || 'なし';
-      r = await drillAi(`${en ? '英単語' : '語句（古文・漢文などを含む）'}「${it.w}」の${en ? '和訳' : '意味'}テストの採点。\n【未回答の正解の意味（番号: 品詞 訳）】\n${rem || 'なし'}\n【回答済みの意味】${done}\n【生徒の最新の回答】「${ask}」${en ? '' : '\n※英単語ではないので、品詞形の判定はしない（form は常に false）。単語帳の訳と同じ言葉は必ず hit（exact=true）にする。'}\n規則:\n- hit: 未回答リストの意味に当たる語句。{i:番号, exact:真偽}。exact=true は、単語帳の訳と同じ語（送り仮名・括弧・「〜」の違いは可）、またはほぼ同義で日本語のニュアンスが変わらない言い換え。exact=false は、意味は合うが単語帳の訳とニュアンスの違う別の言葉（例：単語帳が「社会の」で生徒が「社交的な」）。\n- 品詞形：名=名詞の形（社会、同情 など）、自/他/動=動詞形（〜する、〜を…する、〜に耐える）、形=「〜な」「〜い」「〜の」「〜的な」、副=「〜に」「〜く」「〜と」。意味が合っていても形がズレていれば form=true（hitに入れない）。\n- extra: 回答のうち、リストにも回答済みにも無いが、その英単語の辞書的に正しい意味（品詞は問わない。例：他動詞の「社会化する」）の語句の配列。\n- 厳しく判定する：hit は、未回答リストのその番号の意味そのものを答えているときだけ。回答済みの意味の言い換え・語形を変えたもの（例：回答済み「意思疎通」に対して「意思疎通すること」「意思を通じ合うこと」）を、未回答の別の意味（例：「通信」）に当てはめてはいけない。そういう回答は hit にも extra にも入れず repeat=true にする。迷ったら hit にしない。\n- repeat: 回答が、回答済みの意味をくり返しただけ（言い換え・語形の違いを含む）か。\n- wrong: 上のどれにも当たらない誤った語句が含まれるか。\n- mention: 生徒が自動詞・他動詞に言及したか（none / ji / ta）。\nJSONのみ：{"hit":[{"i":0,"exact":true}],"extra":[],"repeat":false,"wrong":false,"form":false,"mention":"none"}`);
-    }
+    const res = await drillJudgeCore(it, dst.sn, dst, v);
     dlock = false;
-    if (known.length) { r.hit = [...known.map(i => ({ i, exact: true })), ...(Array.isArray(r.hit) ? r.hit : []).filter(h => !known.includes(+h.i))]; r.repeat = false; }
-    if (r.repeat && !(Array.isArray(r.hit) && r.hit.length)) { dst.ans.pop(); dst.msg = 'その意味はもう答えました。他の意味を答えてください。'; dst.ph = 0; drillDraw(); return; }
-    if (r.mention === 'ji' || r.mention === 'ta') { const a = drillAttr(it), j = /自動詞/.test(a), t = /他動詞/.test(a), ex = j && t ? 3 : j ? 1 : 2; dst.mn = (r.mention === 'ji' ? 1 : 2) === ex ? 'ok' : 'bad'; }
-    const hs = (Array.isArray(r.hit) ? r.hit : []).filter(h => dst.sn[+h.i] && !dst.cv.includes(+h.i));
-    hs.forEach(h => { const i = +h.i; if (h.exact) { if (!dst.cv.includes(i)) dst.cv.push(i); } else { dst.at[i] = (dst.at[i] || 0) + 1; (dst.alt = dst.alt || []).push({ i, said: ask }); } });
-    // 「単語帳に載っていない意味」から、実は単語帳の訳と同じ言葉を除く（AI が取り違えることがあるため）
-    if (Array.isArray(r.extra)) r.extra = r.extra.filter(x => String(x || '').trim() && !drillLocalHits(x, dst.sn));
-    if (r.extra && r.extra.length) dst.extra = [...new Set((dst.extra || []).concat(r.extra))];
-    const ex = !!(dst.extra && dst.extra.length), many = Object.values(dst.at).some(n => n >= 3);
-    const none = !hs.length && !(r.extra && r.extra.length);
-    if (r.form || r.wrong || many || none || (dst.mn === 'bad' && !ex)) {
-      dst.tip = r.form ? '品詞（語尾）の形が合っていません。' : r.wrong ? (drillAiOk() ? '意味が違います。' : '単語帳の訳と違います（AI が使えないため、言い換えは判定できません）。') : none ? '他の意味を答えられませんでした。' : many ? '単語帳の訳を思い出せませんでした。' : '自動詞・他動詞の言及が違います。';
-      return drillFin(false);
-    }
-    if (dst.cv.length < dst.sn.length) {
-      dst.msg = hs.some(h => !h.exact) ? '意味は合っています。単語帳に載っている訳で答えてください。' : ex && !hs.length ? '辞書的には正しい意味ですが、単語帳には載っていません。単語帳に載っている意味を答えてください。' : '';
-      dst.ph = 0; drillDraw(); return;
-    }
+    if (res.status === 'repeat') { dst.ans.pop(); dst.msg = 'その意味はもう答えました。他の意味を答えてください。'; dst.ph = 0; drillDraw(); return; }
+    if (res.status === 'wrong') { dst.tip = res.tip; return drillFin(false); }
+    if (res.status === 'more') { dst.msg = res.msg; dst.ph = 0; drillDraw(); return; }
+    const ex = res.ex;
     // ★【0.03.47】元の試作と同じく、動詞は「自動詞？他動詞？両方？」→（両方なら）意味ごとに自動詞か他動詞か
     if (drillIsVerb(it) && !(dst.mn === 'ok' && !ex)) { dst.ph = 1; drillDraw(); return; }
     drillQuiz();
@@ -481,29 +719,36 @@ async function drillExpl(it) {
 }
 function drillDk() {
   if (dlock) return;
+  (dst.given = dst.given || []).push('（わからない）');
   if (dcur.t === 'c') drillFin(false, dcur.ck.ans, '');
   else { dst.tip = '「わからない」のため×です。'; drillFin(false); }
 }
 
 // ---------------- Check!（Review Test） ----------------
-function drillPick(i) { if (dlock) return; drillFin(isAnswerCorrect(dst.op[i], dcur.ck.ans), dcur.ck.ans, ''); }
-async function drillChk(v) {
-  // ★【0.03.51】空白・「、」「,」「／」などで区切って並べた答えは、順番を問わない（日本語は空白も区切り。英語は語句の中の空白は区切りにしない）
-  const k = dcur.ck, n = x => x.toLowerCase().replace(/[\s.．。、,，\/／・]/g, '');
+function drillPick(i) { if (dlock) return; (dst.given = dst.given || []).push(dst.op[i]); drillFin(isAnswerCorrect(dst.op[i], dcur.ck.ans), dcur.ck.ans, ''); }
+// ★【0.04.05】Check! の答えを AI を使わずに比べる（クイズの記述でも使う）。{ decided: 〇×がもう決まったか, ok }
+//  空白・「、」「,」「／」などで区切って並べた答えは、順番を問わない（日本語は空白も区切り。英語は語句の中の空白は区切りにしない）
+function drillCheckLocal(v, ans) {
+  const n = x => String(x).toLowerCase().replace(/[\s.．。、,，\/／・]/g, '');
   const sp = (x, jp) => String(x).normalize('NFKC').toLowerCase().split(jp ? /[\s、,，\/・]+/ : /\s*[、,，\/]\s*/).map(s => s.replace(/[.．。]+$/, '').trim()).filter(Boolean).sort().join('|');
-  if (/^\d\.?(\s*[\/,、\s]\s*\d\.?)*$/.test(k.ans)) return drillFin((v.match(/\d/g) || []).sort().join('') === (k.ans.match(/\d/g) || []).sort().join(''), k.ans, '');
-  if (/^[A-Za-z0-9.,、\s\/'’-]+$/.test(k.ans)) return drillFin(sp(v) === sp(k.ans) || sp(v, true) === sp(k.ans, true) && !/\s/.test(k.ans.trim()), k.ans, '');
-  if (sp(v, true) === sp(k.ans, true)) return drillFin(true, k.ans, '');
-  if (n(v) === n(k.ans) || sp(v) === sp(k.ans) || isAnswerCorrect(v, k.ans)) return drillFin(true, k.ans, '');
+  if (/^\d\.?(\s*[\/,、\s]\s*\d\.?)*$/.test(ans)) return { decided: true, ok: (String(v).match(/\d/g) || []).sort().join('') === (String(ans).match(/\d/g) || []).sort().join('') };
+  if (/^[A-Za-z0-9.,、\s\/'’-]+$/.test(ans)) return { decided: true, ok: sp(v) === sp(ans) || sp(v, true) === sp(ans, true) && !/\s/.test(String(ans).trim()) };
+  if (sp(v, true) === sp(ans, true) || n(v) === n(ans) || sp(v) === sp(ans) || isAnswerCorrect(v, ans)) return { decided: true, ok: true };
+  return { decided: false, ok: false };
+}
+async function drillChk(v) {
+  const k = dcur.ck, lc = drillCheckLocal(v, k.ans);
+  if (lc.decided) return drillFin(lc.ok, k.ans, '');
   if (!drillAiOk()) return drillFin(false, k.ans, '');
   drillBusy();
-  try { const r = await drillAi(`問題:${k.q}\n正解:${k.ans}\n生徒の答え:${v}\n意味が同じなら ok。順序の違い・表記の軽微な違いは許容。JSONのみ：{"v":"ok|x"}`); dlock = false; drillFin(r.v === 'ok', k.ans, ''); }
+  try { const r = await drillAi(`問題:${k.q}\n正解:${k.ans}\n生徒の答え:${v}\n正解の中の（ ）は、省略してよい語か言い換え（「根本的（劇的）な変化」なら「根本的な変化」「劇的な変化」どちらも ok）。意味が同じなら ok。順序の違い・表記の軽微な違いは許容。JSONのみ：{"v":"ok|x"}`); dlock = false; drillFin(r.v === 'ok', k.ans, ''); }
   catch (e) { drillErr(e); }
 }
 
 // ---------------- 自動詞・他動詞 ----------------
 function drillAt(n) {
   if (dlock) return;
+  (dst.given = dst.given || []).push('自他：' + ['', '自動詞', '他動詞', '自動詞・他動詞の両方'][n]);
   const a = drillAttr(dcur.it), j = /自動詞/.test(a), t = /他動詞/.test(a), ex = j && t ? 3 : j ? 1 : 2;
   if (n !== ex) { dst.tip = '自動詞・他動詞の属性が違います。'; return drillFin(false); }
   const m = new Map();
@@ -514,6 +759,7 @@ function drillAt(n) {
 function drillAt2(n) {
   if (dlock) return;
   const x = dst.vk[dst.vi];
+  (dst.given = dst.given || []).push(`「${x.t.join('，')}」：${n === 1 ? '自動詞' : '他動詞'}`);
   if (n !== (x.p === '自' ? 1 : 2)) { dst.tip = `「${x.t.join('，')}」の意味のときは${x.p}動詞です。`; return drillFin(false); }
   dst.vi++; dst.vi < dst.vk.length ? drillDraw() : drillQuiz();
 }
@@ -554,25 +800,65 @@ function drillSynWords(src, w) {
   }
   return out;
 }
+// メモの文から、問題に使える「特徴」の部分だけを取り出す（参照・導入の印、見出し語を含む文は除く）
+function drillNuanceText(s, w) {
+  let t = String(s || '').trim();
+  t = t.replace(/[（(][^（）()]*(参照|例文|導入|→\s*p\.)[^（）()]*[)）]/g, '');
+  t = t.replace(/[（(]?導入より[)）]?[^。]*。?/g, '');
+  const lw = String(w || '').toLowerCase();
+  t = t.split(/(?<=。)/).filter(x => x.trim() && !(lw && x.toLowerCase().includes(lw))).join('');
+  return t.replace(/^★\s*/, '').replace(/[。\s]+$/, '').trim();
+}
 function drillRelQs(it) {
   const z = [], note = String(it.card.note || ''), src = it.m + '\n' + note;
   const ants = drillArrowWords(src, it.w);
   const ants2 = ants.filter(a => !drillSameWord(a, it.w));
   if (ants2.length) z.push({ k: '対義語', a: ants2[0], all: ants2.join(', ') });
   // ★【0.03.46】元の試作と同じく、補足（メモの1行目）に「比べ・より・に対し・否定的」があればニュアンスの4択
-  const n1 = note.split('\n')[0].trim();
-  if (n1 && n1.length <= 120 && /比べ|より|に対し|否定的|ニュアンス/.test(n1)) z.push({ k: 'ニュアンス・特徴', a: n1 });
+  // ★【0.03.54】「（導入より）…」「（下の例文を参照）」などの書き写しの印は除いてから判断する（「導入より」の「より」で出ていた）
+  const n1 = drillNuanceText(note.split('\n')[0], it.w);
+  if (n1 && n1.length <= 120 && /比べ|より|に対し|否定的|ニュアンス/.test(n1)) z.push({ k: 'ニュアンス・特徴', a: n1, src: n1 });
   const sy = drillSynWords(src, it.w);
   if (sy.length) z.push({ k: '類義語', a: sy[0], all: sy.join(', ') });
   return z;
 }
-function drillQuiz() { dst.z0 = drillAiOk() ? drillRelQs(dcur.it) : []; dst.qi = 0; drillNq(); }
+function drillQuiz() { dst.z0 = drillRelQs(dcur.it); dst.qi = 0; drillNq(); }
+// ★【0.03.97】AI が使えないときの4択：不正解は、この範囲のほかの単語（同じグループを先に）や、ほかの単語のニュアンスの説明から選ぶ
+function drillLocalWrong(z, it) {
+  const nz = x => String(x || '').toLowerCase().replace(/[\s　。、,，.・]/g, '');
+  const ok = new Set([z.a, ...String(z.all || '').split(/[,、]/)].map(nz).filter(Boolean));
+  const lw = String(it.w).toLowerCase(), hide = t => String(t || '').replace(new RegExp(lw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), 'この語').trim();
+  const pool = [];
+  const all = DG.flatMap((g, gi) => g.items.map(x => ({ x, near: gi === it.gi ? 0 : Math.abs(gi - it.gi) })));
+  dShuffle(all).sort((a, b) => a.near - b.near).forEach(({ x }) => {
+    if (x === it) return;
+    if (z.k === 'ニュアンス・特徴') {
+      const t = drillNuanceText(String(x.card.note || '').split('\n')[0], x.w);
+      if (t && t.length <= 120) pool.push(hide(String(t).replace(new RegExp(String(x.w).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), 'この語')));
+    } else if (/^[A-Za-z][A-Za-z \-']*$/.test(x.w) && !drillSameWord(x.w, it.w) && String(x.w).toLowerCase().slice(0, 5) !== lw.slice(0, 5)) pool.push(String(x.w).trim()); // 派生語（conserve と conservation など）は紛らわしいので使わない
+  });
+  const wrong = [];
+  pool.forEach(w => { const n = nz(w); if (n && !ok.has(n) && !wrong.some(y => nz(y) === n) && wrong.length < 3) wrong.push(w); });
+  return wrong;
+}
 async function drillNq() {
   if (dst.qi >= dst.z0.length) return drillFin(true);
   const z = dst.z0[dst.qi], it = dcur.it;
+  if (!drillAiOk()) {
+    if (z.k === 'ニュアンス・特徴') { const lw = String(it.w).toLowerCase(); z.a = String(z.a).replace(new RegExp(lw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), 'この語').trim(); }
+    const wrong = drillLocalWrong(z, it);
+    if (wrong.length < 2) { dst.qi++; return drillNq(); }
+    dst.z = z; dst.op = dShuffle([z.a, ...wrong]); dst.ci = dst.op.indexOf(z.a); dst.ph = 2; return drillDraw();
+  }
   drillBusy();
   try {
-    const r = await drillAi(`英単語「${it.w}」（${it.m}）の「${z.k}」を問う4択問題の不正解選択肢を3つ作れ。正解:「${z.a}」${z.all ? `（${z.all}はいずれも正解なので不正解に含めない）` : ''}。紛らわしいが明確に誤りのもの（類義語と対義語の入れ替え、似た単語の特徴、逆の意味など）で、正解と同じ形式・同程度の長さにする。JSONのみ：{"wrong":["","",""]}`);
+    const nu = z.k === 'ニュアンス・特徴';
+    // ★【0.03.54】ニュアンスの問題は、正解の文も AI が書き直す（単語帳の文をそのまま使うと、長さ・言い回し・単語名で答えが分かってしまうため）
+    const r = await drillAi(nu
+      ? `英単語「${it.w}」（${it.m}）の使い方・ニュアンスを問う4択問題を作れ。単語帳の説明：「${z.src}」\n- right：この説明の要点を、20〜35字の1文で言い直した正解の選択肢。\n- wrong：同じ文体・同じくらいの長さで、紛らわしいが明確に誤りの選択肢を3つ（逆の意味、似た単語の特徴など）。\n- どの選択肢にも、英単語・見出し語・「例文」「導入」「参照」「単語帳」という言葉を書かない。4つの長さをそろえる。\nJSONのみ：{"right":"","wrong":["","",""]}`
+      : `英単語「${it.w}」（${it.m}）の「${z.k}」を問う4択問題の不正解選択肢を3つ作れ。正解:「${z.a}」${z.all ? `（${z.all}はいずれも正解なので不正解に含めない）` : ''}。紛らわしいが明確に誤りのもの（類義語と対義語の入れ替え、似た単語の特徴、逆の意味など）で、正解と同じ形式・同程度の長さにする。JSONのみ：{"wrong":["","",""]}`);
+    const lw = String(it.w).toLowerCase(), hide = s => String(s || '').replace(new RegExp(lw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), 'この語').trim();
+    if (nu) { const rt = hide(r.right); if (rt && rt.length >= 6) z.a = rt; else z.a = hide(z.a); r.wrong = (r.wrong || []).map(hide); }
     // 正解（と、正解として認めるもの）と同じ選択肢・重なった選択肢は除く
     const nz = x => String(x || '').toLowerCase().replace(/[\s　。、,，.・]/g, '');
     const ok = new Set([z.a, ...String(z.all || '').split(/[,、]/)].map(nz).filter(Boolean));
@@ -581,9 +867,14 @@ async function drillNq() {
     dlock = false;
     if (wrong.length < 2) { dst.qi++; return drillNq(); } // 選択肢が作れなかったら、この問題は飛ばす
     dst.z = z; dst.op = dShuffle([z.a, ...wrong.slice(0, 3)]); dst.ci = dst.op.indexOf(z.a); dst.ph = 2; drillDraw();
-  } catch (e) { dlock = false; dst.qi = 99; drillFin(true); }
+  } catch (e) {
+    // AI がだめなら、単語帳の中から選択肢を作る
+    dlock = false; const wrong = drillLocalWrong(z, it);
+    if (wrong.length < 2) { dst.qi++; return drillNq(); }
+    dst.z = z; dst.op = dShuffle([z.a, ...wrong]); dst.ci = dst.op.indexOf(z.a); dst.ph = 2; drillDraw();
+  }
 }
-function drillCh(i) { if (dlock) return; i === dst.ci ? (dst.qi++, drillNq()) : drillFin(false, `${dst.z.k}：${dst.z.a}`); }
+function drillCh(i) { if (dlock) return; (dst.given = dst.given || []).push(`${dst.z.k}：${dst.op[i]}`); i === dst.ci ? (dst.qi++, drillNq()) : drillFin(false, `${dst.z.k}：${dst.z.a}`); }
 
 // ---------------- 結果 ----------------
 // 各周の1回目の答えだけ、いつものレベルに反映する
@@ -608,8 +899,9 @@ async function drillFin(ok, ans, tip) {
   if (dst.fl) return; dst.fl = 1;
   const c = dcur, k = dKey(c);
   drillRecord(c.it ? c.it.card : c.ck.card, ok);
+  if (DS.r === 1 && c.it && Number(c.it.card.no) > (DS.mx || 0)) DS.mx = Number(c.it.card.no); // ★【0.04.08】1周目に、どの番号まで進んだか
   if (!ok) {
-    if (!DS.miss.has(k)) { DS.miss.set(k, c); if (DS.r === 1 && !DS.rv && c.it) DS.gm.push(c.it); }
+    if (!DS.miss.has(k)) { DS.miss.set(k, c); if (DS.r === 1 && !DS.rv && c.it) DS.gm.push(c.it); if (drillStockOn() && !DS.inLoop && c.it) (DS.stock = DS.stock || []).push({ t: 'q', it: c.it }); }
     DQ.unshift(c.it ? { t: 'q', it: c.it, retry: true } : { t: 'c', ck: c.ck, retry: true });
   }
   if (c.it && dst.alt && dst.alt.length && drillAiOk()) { drillBusy(); try { dst.ex = await drillExpl(c.it); } catch (e) { dst.ex = []; } dlock = false; }
@@ -624,11 +916,19 @@ async function drillFin(ok, ans, tip) {
   ((c.it && DS.ct[c.it.id]) || []).forEach(t => ns.push(t));
   dst.ph = 9;
   if (drillTtsOn()) drillSpeakA();
-  dst.res = `<div class="card ${ok ? 'drill-ok-card' : 'drill-ng-card'}">${c.it ? `<div class="drill-word">${dE(c.it.w)}</div>` : `<p class="drill-q">${dE(c.ck.q)}</p>`}
+  const core = `${c.it ? `<div class="drill-word">${dE(c.it.w)}</div>` : `<p class="drill-q">${dE(c.ck.q)}</p>`}
     <p>【判定】 <b class="${ok ? 'drill-ok' : 'drill-ng'}">${ok ? '〇' : '×'}</b>${!ok ? '<span class="hint-small">（あとでもう一度出ます）</span>' : ''}${drillStatsText(c)}</p>
+    ${dst.given && dst.given.length ? `<div class="drill-given">【あなたの答え】 ${dst.given.map(dE).join(' ／ ')}</div>` : ''}
     <div>【公式の答え】 <button class="chip" onclick="drillSpeakA()" title="答えを読み上げる">🔊</button> ${official}</div>
     ${ns.length ? `<p>【解説・注意点】<br>${ns.map(dE).join('<br>')}</p>` : ''}
-    <div class="drill-btns"><button class="btn btn-primary" onclick="drillPop()">次</button>${drillAiOk() ? '<button class="btn btn-secondary" onclick="drillQo()">💬 質問する</button>' : ''}</div></div>`;
+    ${dst.aiModels && dst.aiModels.length ? `<div>${dst.aiModels.map(aiModelTag).join(' ')}</div>` : ''}`;
+  // ★【0.03.64】解説の履歴（「◀ 前の解説」で見返す。最大100問）
+  DH.push({ html: `<div class="card ${ok ? 'drill-ok-card' : 'drill-ng-card'}">${core}</div>`, a: drillAText(c), w: drillQText(c), ok: !!ok, cid: drillQaCardId(c), no: c.it && showsCardNo(c.it.card) ? cardNoText(c.it.card.no) : '' });
+  if (DH.length > DRILL_HIST_MAX) DH.splice(0, DH.length - DRILL_HIST_MAX);
+  drillHistStore();
+  dView = null;
+  dst.res = `<div class="card ${ok ? 'drill-ok-card' : 'drill-ng-card'}">${core}
+    <div class="drill-btns"><button class="btn btn-primary" onclick="drillPop()">次</button>${drillTtsOn() && typeof ttsOpenFixDialog === 'function' ? '<button class="btn btn-secondary" onclick="ttsOpenFixDialog([drillQText(dcur), drillAText(dcur)])">🗣️ 読み方</button>' : ''}${drillAiOk() ? `<button class="btn btn-secondary" onclick="drillQo()">💬 質問する${drillQaList(c).length ? `（前の質問 ${drillQaList(c).length}）` : ''}</button>` : (drillQaList(c).length ? `<button class="btn btn-secondary" onclick="drillQo()">💬 前の質問（${drillQaList(c).length}）</button>` : '')}</div></div>`;
   drillSave(); drillDraw();
 }
 function drillStatsText(c) {
@@ -637,19 +937,97 @@ function drillStatsText(c) {
   return st ? ` <span class="hint-small">（暗記テスト通算 〇${st.c} ×${st.w}）</span>` : '';
 }
 // AI に質問する
-function drillQaHTML() {
-  return (dst.qa || []).map(x => `<div class="card"><div class="hint-small">Q：${dE(x.q)}</div>${dE(x.a).replace(/\n/g, '<br>')}</div>`).join('') +
-    (dst.qo ? `<div class="card"><input id="drillQaInput" class="form-control" placeholder="質問を入力" onkeydown="if(event.key==='Enter'&&!event.isComposing)drillAsk()"><button class="btn btn-primary" style="margin-top:6px;" onclick="drillAsk()">送信</button></div>` : '');
+// ★【0.03.56】質問と答えは単語（カード）ごとにこの端末に保存し、次に同じ単語で質問したときも続きとして聞ける
+const DRILL_QA_KEY = 'susuru_anki_drill_qa';
+// ★【0.03.91】質問は drillQa（storage.js）に入れて端末間で同期する。前の版でこの端末にだけ保存していた質問は、いちど移す
+function drillQaMigrate() {
+  try {
+    const old = JSON.parse(localStorage.getItem(DRILL_QA_KEY) || 'null'); if (!old) return;
+    const add = {}; Object.entries(old).forEach(([id, l]) => { add[id] = (l || []).map((x, i) => Object.assign({}, x, { at: x.at || (1 + i) })); });
+    drillQa = mergeDrillQa(drillQa, add); localStorage.removeItem(DRILL_QA_KEY); saveData();
+  } catch (e) {}
 }
-function drillQo() { dst.qo = !dst.qo; drillDraw(); }
+function drillQaCardId(c) { return c ? (c.it ? c.it.card.id : c.ck ? c.ck.card.id : null) : null; }
+function drillQaListById(id) { drillQaMigrate(); return id ? ((drillQa || {})[id] || []).filter(x => !x.del) : []; }
+function drillQaList(c) { return drillQaListById(drillQaCardId(c)); }
+function drillQaSave(c, item) {
+  const id = drillQaCardId(c); if (!id) return;
+  drillQa = mergeDrillQa(drillQa, { [id]: [Object.assign({}, item, { a: String(item.a || '').slice(0, 1500) })] });
+  try { saveData(); } catch (e) {}
+}
+function drillQaDeleteAt(id, at) {
+  if (!id || !confirm('この質問を消しますか？')) return;
+  drillQa = mergeDrillQa(drillQa, { [id]: [{ at, del: true, dt: Date.now() }] });
+  try { saveData(); } catch (e) {}
+  if (_drillActive && dcur && (dcur.it || dcur.ck)) drillDraw();
+}
+function drillQaDelete(i) { const id = drillQaCardId(dcur), x = drillQaList(dcur)[i]; if (x) drillQaDeleteAt(id, x.at); }
+// 前の解説を見返すときの質問（読むだけ）
+// ================================================================
+// ★【0.04.05】AI への質問を、クイズ（答えのあと）とカード一覧でも見る・続けて聞く（暗記テストと同じ drillQa を使う）
+//  大きくなるので、たたんだ状態で出す（押すと開く）
+// ================================================================
+const _qaOpts = {};
+function qaWrapId(prefix, id) { return 'qaWrap_' + prefix + '_' + String(id).replace(/[^A-Za-z0-9_-]/g, '_'); }
+function qaPanelHTML(id, prefix, open) {
+  const list = drillQaListById(id), ask = drillAiOk();
+  if (!list.length && !ask) return '';
+  const item = x => `<div class="card drill-qa"><div class="hint-small">Q：${dE(x.q)}${x.at > 1e9 ? `　<span style="opacity:.7">${new Date(x.at).toLocaleDateString('ja-JP')}</span>` : ''}<button class="chip" style="float:right; padding:2px 8px;" onclick="event.stopPropagation(); qaDelete(${jsArg(id)}, ${Number(x.at)}, ${jsArg(prefix)})" title="消す">🗑️</button></div>${linkifyHTML(dE(x.a)).replace(/\n/g, '<br>')}${x.model && typeof aiModelTag === 'function' ? `<div>${aiModelTag(x.model)}</div>` : ''}</div>`;
+  return `<details class="qa-panel"${open ? ' open' : ''} onclick="event.stopPropagation()" ontoggle="if(this.open && typeof clearTimeout === 'function' && typeof autoNextTimeout !== 'undefined') clearTimeout(autoNextTimeout)"><summary>💬 AI への質問${list.length ? `（${list.length}件）` : '（まだありません）'}</summary>
+    ${list.map(item).join('')}
+    ${ask ? `<div class="qa-ask"><input id="${qaWrapId(prefix, id)}_in" class="form-control" placeholder="${list.length ? '続けて質問（前の質問の続きとして答えます）' : 'この問題について質問'}" onfocus="if(typeof autoNextTimeout !== 'undefined') clearTimeout(autoNextTimeout)" onkeydown="if(event.key==='Enter'&&!event.isComposing)qaAsk(${jsArg(id)}, ${jsArg(prefix)})">
+      ${list.length ? `<label class="hint-small" style="display:flex; align-items:center; gap:6px; margin-top:6px;"><input type="checkbox" id="${qaWrapId(prefix, id)}_cont" checked>前の質問の続きとして聞く</label>` : ''}
+      <button class="btn btn-primary" style="margin-top:6px;" onclick="qaAsk(${jsArg(id)}, ${jsArg(prefix)})">送信</button></div>` : ''}</details>`;
+}
+// 包んで出す（あとで中身だけ描き直せるように）
+function qaPanelWrapHTML(id, prefix) { const h = qaPanelHTML(id, prefix, false); return h ? `<div id="${qaWrapId(prefix, id)}" class="qa-wrap">${h}</div>` : ''; }
+function qaRedraw(id, prefix) { const el = document.getElementById(qaWrapId(prefix, id)); if (el) el.innerHTML = qaPanelHTML(id, prefix, true); }
+function qaDelete(id, at, prefix) { drillQaDeleteAt(id, at); qaRedraw(id, prefix); }
+async function qaAsk(id, prefix) {
+  const wid = qaWrapId(prefix, id), inp = document.getElementById(wid + '_in'); const q = inp && inp.value.trim(); if (!q) return;
+  const card = db.find(x => x.id === id); if (!card) return;
+  const cont = document.getElementById(wid + '_cont');
+  const hist = cont && !cont.checked ? [] : drillQaListById(id).slice(-6);
+  const histText = hist.length ? `\nこれまでのやりとり（この続きとして答える）:\n${hist.map((x, i) => `Q${i + 1}:${x.q}\nA${i + 1}:${String(x.a).slice(0, 400)}`).join('\n')}\n` : '';
+  const ctx = card.kind === 'test' ? `問題:${card.question}／正解:${card.answer}` : `単語・問題:${card.question}／答え:${card.answer}／補足:${card.note || ''}`;
+  inp.disabled = true; const btn = inp.parentNode.querySelector('.btn'); if (btn) { btn.disabled = true; btn.textContent = '🤖 考えています…'; }
+  try {
+    const t0 = Date.now();
+    const a = await aiRequest('あなたは暗記の家庭教師です。', [{ text: `${ctx}${histText}\n生徒の${hist.length ? '続けての' : ''}質問:${q}\n簡潔に（200字程度）日本語で答える。` }], { maxTokens: 600, timeout: 20000, totalTimeout: 30000 });
+    drillQa = mergeDrillQa(drillQa, { [id]: [{ q, a: cleanAiHintText(String(a).replace(/\*\*|`/g, '')).slice(0, 1500), at: Date.now(), model: typeof aiModelSince === 'function' ? aiModelSince(t0) : '' }] });
+    try { saveData(); } catch (e) {}
+  } catch (e) { alert('⚠️ 質問できませんでした：' + (e.message || '通信失敗')); }
+  qaRedraw(id, prefix);
+}
+function drillQaReadOnlyHTML(id) {
+  const list = drillQaListById(id); if (!list.length) return '';
+  return `<details class="card drill-qa-old" open><summary class="hint-small">💬 この問題でした質問（${list.length}件）</summary>${list.map(x => `<div class="card drill-qa"><div class="hint-small">Q：${dE(x.q)}${x.at > 1e9 ? `　<span style="opacity:.7">${new Date(x.at).toLocaleDateString('ja-JP')}</span>` : ''}</div>${linkifyHTML(dE(x.a)).replace(/\n/g, '<br>')}${x.model ? `<div>${aiModelTag(x.model)}</div>` : ''}</div>`).join('')}</details>`;
+}
+function drillQaHTML() {
+  const list = drillQaList(dcur), n0 = dst.qaStart ?? list.length; // この画面より前の質問はたたむ
+  const one = (x, i) => `<div class="card drill-qa"><div class="hint-small">Q：${dE(x.q)}${x.at > 1e9 ? `　<span style="opacity:.7">${new Date(x.at).toLocaleDateString('ja-JP')}</span>` : ''}<button class="chip" style="float:right; padding:2px 8px;" onclick="drillQaDelete(${i})" title="消す">🗑️</button></div>${linkifyHTML(dE(x.a)).replace(/\n/g, '<br>')}${x.model ? `<div>${aiModelTag(x.model)}</div>` : ''}</div>`;
+  const old = list.slice(0, n0), cur = list.slice(n0);
+  return (old.length ? `<details class="card drill-qa-old"${dst.qo || old.length <= 3 ? ' open' : ''}><summary class="hint-small">💬 この${dcur.it ? '単語' : '問題'}の前の質問（${old.length}件）</summary>${old.map((x, i) => one(x, i)).join('')}</details>` : '') +
+    cur.map((x, i) => one(x, n0 + i)).join('') +
+    (dst.qo && drillAiOk() ? `<div class="card"><input id="drillQaInput" class="form-control" placeholder="${list.length ? '続けて質問（前の質問の続きとして答えます）' : '質問を入力'}" onkeydown="if(event.key==='Enter'&&!event.isComposing)drillAsk()">
+      ${list.length ? `<label class="hint-small" style="display:flex; align-items:center; gap:6px; margin-top:6px;"><input type="checkbox" id="drillQaCont" ${dst.qaNew ? '' : 'checked'} onchange="dst.qaNew = !this.checked">前の質問の続きとして聞く</label>` : ''}
+      <button class="btn btn-primary" style="margin-top:6px;" onclick="drillAsk()">送信</button></div>` : '');
+}
+function drillQo() { if (dst.qaStart === undefined) dst.qaStart = drillQaList(dcur).length; dst.qo = !dst.qo; drillDraw(); }
 async function drillAsk() {
   if (dlock) return;
   const q = (document.getElementById('drillQaInput') || {}).value; if (!q || !q.trim()) return;
   drillBusy();
   const c = dcur;
   const ctx = c.it ? `単語:${c.it.w}／意味:${c.it.m}／属性:${drillAttr(c.it)}／補足:${c.it.card.note || ''}` : `Check問題:${c.ck.q}／正解:${c.ck.ans}`;
+  // 続きとして聞く：この語のこれまでの質問と答え（最近の6件）を一緒に送る
+  const hist = dst.qaNew ? [] : drillQaList(c).slice(-6);
+  const histText = hist.length ? `\nこれまでのやりとり（この続きとして答える）:\n${hist.map((x, i) => `Q${i + 1}:${x.q}\nA${i + 1}:${String(x.a).slice(0, 400)}`).join('\n')}\n` : '';
   try {
-    const a = await aiRequest('あなたは英単語の家庭教師です。', [{ text: `${ctx}\n生徒の質問:${q.trim()}\n簡潔に（200字程度）日本語で答える。` }], { maxTokens: 600, timeout: 20000, totalTimeout: 30000 });
-    (dst.qa = dst.qa || []).push({ q: q.trim(), a: cleanAiHintText(String(a).replace(/\*\*|`/g, '')) }); dst.qo = false; dlock = false; drillDraw();
+    const t0 = Date.now();
+    const a = await aiRequest('あなたは英単語の家庭教師です。', [{ text: `${ctx}${histText}\n生徒の${hist.length ? '続けての' : ''}質問:${q.trim()}\n簡潔に（200字程度）日本語で答える。` }], { maxTokens: 600, timeout: 20000, totalTimeout: 30000 });
+    if (dst.qaStart === undefined) dst.qaStart = drillQaList(c).length;
+    drillQaSave(c, { q: q.trim(), a: cleanAiHintText(String(a).replace(/\*\*|`/g, '')), at: Date.now(), model: aiModelSince(t0) });
+    dst.qo = true; dlock = false; drillDraw(); // 続けて質問できるように入力欄は開いたまま
   } catch (e) { drillErr(e); }
 }

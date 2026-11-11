@@ -310,17 +310,20 @@ function openChat(friendUid, friendName) {
   msgBox.innerHTML = '履歴を取得中...';
   
   if (currentChatUnsubscribe) currentChatUnsubscribe();
+  // ★【0.04.11】読めないときは理由を出す（前は「履歴を取得中...」のまま何も出なかった）。10秒たっても届かなければ知らせる
+  const slow = setTimeout(() => { if (msgBox.innerHTML === '履歴を取得中...') msgBox.innerHTML = '<div class="hint-small" style="text-align:center;">⏳ 届くのに時間がかかっています（回線が混んでいるか、Firebase が遅くなっています）。少し待つか、閉じてもう一度開いてください。</div>'; }, 10000);
   currentChatUnsubscribe = firestore.collection('susuru_anki_chats').doc(chatId).collection('messages').orderBy('timestamp', 'asc').onSnapshot(snap => {
+    clearTimeout(slow);
     msgBox.innerHTML = ''; 
     if (snap.empty) { msgBox.innerHTML = '<div style="color:var(--text3); text-align:center; font-size:0.8rem;">まだメッセージがありません。</div>'; }
     snap.forEach(doc => {
       const data = doc.data(); const isMe = data.senderId === currentUser.uid;
       const wrap = document.createElement('div'); wrap.style.cssText = `display:flex; flex-direction:column; max-width:80%; ${isMe ? 'align-self:flex-end;' : 'align-self:flex-start;'}`;
       const bubble = document.createElement('div'); bubble.style.cssText = `padding:10px 14px; border-radius:14px; font-size:0.9rem; word-break:break-all; ${isMe ? 'background:var(--primary); color:#fff; border-bottom-right-radius:2px;' : 'background:var(--bg3); border:1px solid var(--border); color:var(--text); border-bottom-left-radius:2px;'}`;
-      bubble.innerText = data.text; wrap.appendChild(bubble); msgBox.appendChild(wrap);
+      bubble.style.whiteSpace = 'pre-wrap'; bubble.innerHTML = linkifyHTML(escapeHtml(data.text)); wrap.appendChild(bubble); msgBox.appendChild(wrap); // ★【0.04.10】URL は押すと開く
     });
     msgBox.scrollTop = msgBox.scrollHeight;
-  });
+  }, err => { clearTimeout(slow); msgBox.innerHTML = `<div style="color:var(--danger); text-align:center; font-size:0.85rem;">⚠️ メッセージを読めませんでした（${escapeHtml(err.code || err.message || '')}）。閉じてもう一度開いてください。</div>`; });
 }
 
 function closeChat() { 
@@ -335,10 +338,11 @@ async function sendChatMessage() {
   const text = input.value.trim(); 
   if (!text || !currentChatFriendUid) return;
   const chatId = getChatId(currentUser.uid, currentChatFriendUid);
+  // ★【0.04.11】入力欄はすぐ空にする（送信の完了を待っていたので、回線が遅いと「送っても何も起きない」ように見えた）。失敗したら戻す
+  input.value = '';
   try { 
     await firestore.collection('susuru_anki_chats').doc(chatId).collection('messages').add({ text: text, senderId: currentUser.uid, timestamp: firebase.firestore.FieldValue.serverTimestamp() }); 
-    input.value = ''; 
-  } catch (e) { alert("⚠️ エラーが発生しました。"); }
+  } catch (e) { if (!input.value) input.value = text; alert("⚠️ 送信できませんでした（" + (e.code || e.message || '') + "）。もう一度送ってください。"); }
 }
 
 
@@ -390,23 +394,32 @@ async function loadFriendsForComparison() {
       select.appendChild(opt);
     });
     
-    const catSelect = document.getElementById('selCompareCategory');
-    catSelect.innerHTML = '<option value="">🌐 全カテゴリー</option>';
-    categories.forEach(c => {
-      const opt = document.createElement('option');
-      opt.value = c;
-      opt.innerText = c;
-      catSelect.appendChild(opt);
-    });
+    renderCompareCatBtn();
   } catch(e) {}
 }
 
 // ★【0.02.59-g】成績比較: 折れ線グラフ（横軸=日付、縦軸=正答率）
 let compareChartInstance = null;
 
+// ★【0.03.62】カテゴリーはフォルダーを選ぶ画面で
+function renderCompareCatBtn() {
+  const box = document.getElementById('compareCatBtn'); if (!box) return;
+  const cur = document.getElementById('selCompareCategory').value;
+  box.innerHTML = folderPickButtonHTML(cur, '全カテゴリー', 'pickCompareCategory()');
+}
+function pickCompareCategory() {
+  openFolderPicker({ title: '📁 比べるカテゴリー', current: document.getElementById('selCompareCategory').value, allLabel: '🌐 全カテゴリー',
+    hint: '選んだフォルダーの成績だけを比べます', onPick: c => { document.getElementById('selCompareCategory').value = c || ''; renderCompareCatBtn(); renderCompareStats(); } });
+}
+function setCompareMode(m) {
+  document.getElementById('selCompareMode').value = m;
+  document.querySelectorAll('[data-cmpmode]').forEach(b => b.classList.toggle('active', b.dataset.cmpmode === m));
+  renderCompareStats();
+}
 async function renderCompareStats() {
   const friendUid = document.getElementById('selCompareFriend').value;
   const category = document.getElementById('selCompareCategory').value;
+  const catSet = category ? new Set(getAllSubcategories(category)) : null; // 上のフォルダーを選んだら、中のフォルダーの成績も含める
   const cmpMode = (document.getElementById('selCompareMode') || {}).value || 'quiz'; // ★【0.03.39】通常のクイズ／暗記テスト
   const area = document.getElementById('compareStatsArea');
 
@@ -429,8 +442,8 @@ async function renderCompareStats() {
 
     const accumulate = (doc, isMe) => {
       const d = doc.data();
-      if (d.mode === 'race') return;
-      if (category && d.category !== category) return;
+      if (d.mode === 'race' || d.mode === 'drillprog') return;
+      if (catSet && !catSet.has(d.category)) return;
       if ((d.mode === 'drill' ? 'drill' : 'quiz') !== cmpMode) return;
       if (!dateMap[d.date]) dateMap[d.date] = { myScore: 0, myTotal: 0, friendScore: 0, friendTotal: 0, friendName: '?' };
       if (isMe) {
@@ -450,9 +463,27 @@ async function renderCompareStats() {
     const allDates = Object.keys(dateMap).sort();
 
     area.innerHTML = '';
+    // ★【0.04.08】暗記テストの進み具合（何周目・何番まで・残り・合格）を、自分とフレンドで並べる
+    { const progs = [];
+      const inCat = d => !category || d.cat === category || (typeof getAllSubcategories === 'function' && categories.includes(category) && getAllSubcategories(category).includes(d.cat));
+      mySnap.forEach(doc => { const d = doc.data(); if (d.mode === 'drillprog' && inCat(d)) progs.push(Object.assign({ me: true }, d)); });
+      friendSnap.forEach(doc => { const d = doc.data(); if (d.mode === 'drillprog' && inCat(d)) { progs.push(d); friendName = d.name || friendName; } });
+      if (progs.length) {
+        const cats = [...new Set(progs.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).map(d => d.cat))].slice(0, 8);
+        const ago = t => { const m = Math.round((Date.now() - (t || 0)) / 60000); return m < 60 ? `${Math.max(1, m)}分前` : m < 1440 ? `${Math.round(m / 60)}時間前` : `${Math.round(m / 1440)}日前`; };
+        const box = document.createElement('div');
+        box.className = 'card'; box.style.cssText = 'margin-bottom:16px; text-align:left;';
+        box.innerHTML = `<div class="setting-box-title">🧠 暗記テストの進み具合</div>` + cats.map(c => {
+          const mine = progs.find(d => d.me && d.cat === c), fr = progs.find(d => !d.me && d.cat === c);
+          const row = (who, d) => `<div class="cmp-prog-row"><b>${escapeHtml(who)}</b>：${d ? `${escapeHtml(drillProgText(d))} <span class="hint-small">${ago(d.updatedAt)}</span>` : '<span class="hint-small">まだ始めていません</span>'}</div>`;
+          return `<div class="cmp-prog"><div class="hint-small">📁 ${escapeHtml(c)}</div>${row('あなた', mine)}${row(friendName, fr)}</div>`;
+        }).join('');
+        area.appendChild(box);
+      }
+    }
 
     if (allDates.length === 0) {
-      area.innerHTML = '<div style="text-align:center; color:var(--text3); padding:40px;">成績データがありません</div>';
+      area.insertAdjacentHTML('beforeend', '<div style="text-align:center; color:var(--text3); padding:40px;">成績データがありません</div>');
       return;
     }
 

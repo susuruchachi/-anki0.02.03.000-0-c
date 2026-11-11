@@ -60,6 +60,7 @@ function updateHomeSummary() {
   set('homeSumWeak', db.filter(q => !isGrad(q) && ((q.level === 0 && (q.correct + q.incorrect) > 0) || q.level === -1)).length);
   set('homeSumUnseen', db.filter(q => q.correct === 0 && q.incorrect === 0 && q.level >= 0).length);
   set('homeSumGrad', db.filter(isGrad).length);
+  if (typeof renderStreakCard === 'function') renderStreakCard();
 }
 
 async function fetchAndRenderTutorial() {
@@ -82,6 +83,7 @@ async function fetchAndRenderTutorial() {
 }
 
 function executePageTransition(pageId, isBackAction) {
+  if (typeof maybeAutoUpdate === 'function') setTimeout(maybeAutoUpdate, 600); // ★【0.04.10】更新が来ていて、移った先が遊んでいない画面なら読み込み直す
   // ★【0.03.10】対戦中にほかの画面へ移っても対戦は続く（戻ると対戦画面に戻る）。接続切れの扱いは match.js
   stopQuizTimer(); clearTimeout(autoNextTimeout);
   const activeScreen = document.querySelector('.screen.active');
@@ -102,12 +104,13 @@ function executePageTransition(pageId, isBackAction) {
   if (currentId !== pageId) {
     if (currentId === 'pgPublicCategories' && typeof stopPublicCategoriesWatch === 'function') stopPublicCategoriesWatch();
     if (currentId === 'pgShared' && pageId !== 'pgShared' && typeof stopSharedDocWatch === 'function') stopSharedDocWatch();
+    if (currentId === 'pgListen' && typeof listenPause === 'function') listenPause(); // 聞き流しは画面を出たら一時停止
   }
 
   document.querySelectorAll('.screen').forEach(s => { s.classList.remove('active'); s.style.display='none'; });
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   // ★【0.03.00】下部ナビの選択状態と、クイズ中の表示切り替え
-  const navOwner = { pgUpdates: 'pgHome', pgTutorial: 'pgHome', pgPublicCategories: 'pgBox', pgShared: 'pgBox', pgMatchHistory: 'pgOnlineMatch', pgFriends: 'pgBackup', pgCompareStats: 'pgBackup', pgQuizResult: 'pgHome' };
+  const navOwner = { pgUpdates: 'pgHome', pgTutorial: 'pgHome', pgPublicCategories: 'pgBox', pgShared: 'pgBox', pgMatchHistory: 'pgOnlineMatch', pgFriends: 'pgBackup', pgCompareStats: 'pgBackup', pgQuizResult: 'pgHome', pgListen: 'pgHome' };
   const navPage = navOwner[pageId] || pageId;
   document.querySelectorAll('.bnav-item').forEach(b => b.classList.toggle('active', b.dataset.page === navPage));
   const wasInQuiz = document.body.classList.contains('in-quiz');
@@ -123,9 +126,10 @@ function executePageTransition(pageId, isBackAction) {
   if(pageId==='pgBox') { const el = document.getElementById('navBox'); if(el) el.classList.add('active'); renderBox(); }
   if(pageId==='pgStats') { const el = document.getElementById('navStats'); if(el) el.classList.add('active'); renderStatsAndCharts(); }
   if(pageId==='pgOnlineMatch') { const el = document.getElementById('navOnlineMatch'); if(el) el.classList.add('active'); initOnlineMatchPage(); }
+  if(pageId==='pgListen' && typeof renderListenPage === 'function') renderListenPage();
   if(pageId==='pgPublicCategories') { loadPublicCategories(); loadMyPublicCategories(); }
-  if(pageId==='pgCompareStats') { loadFriendsForComparison(); }
-  if(pageId==='pgBackup') { const el = document.getElementById('navBackup'); if(el) el.classList.add('active'); if (typeof renderMySharedDocsSettings === 'function') renderMySharedDocsSettings(); if (typeof renderSnapshotList === 'function') renderSnapshotList(); if (typeof renderNotifySettings === 'function') renderNotifySettings(); if (typeof renderAiSettings === 'function') renderAiSettings(); }
+  if(pageId==='pgCompareStats') { if (typeof renderCompareCatBtn === 'function') renderCompareCatBtn(); loadFriendsForComparison(); }
+  if(pageId==='pgBackup') { const el = document.getElementById('navBackup'); if(el) el.classList.add('active'); if (typeof renderMySharedDocsSettings === 'function') renderMySharedDocsSettings(); if (typeof renderSnapshotList === 'function') renderSnapshotList(); if (typeof renderNotifySettings === 'function') renderNotifySettings(); if (typeof renderAiSettings === 'function') renderAiSettings(); if (typeof renderTtsMixSetting === 'function') renderTtsMixSetting(); }
   if(pageId==='pgTutorial') { fetchAndRenderTutorial(); }
   if(pageId==='pgDrill' && typeof drillOnOpen === 'function') drillOnOpen(); // ★【0.03.27】暗記テストのタブ
   if((pageId==='pgDrill' || pageId==='pgHome') && typeof renderPlanViews === 'function') renderPlanViews(); // ★【0.03.27】週間プラン

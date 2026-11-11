@@ -6,6 +6,48 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
+// ★【0.03.97】単語帳の書き方の印：~~a~~ は取り消し線（その語は使わない。make (~~a~~) progress）、++of++ は下線（大事な語）
+const MARK_STRIKE_RE = /~~([^~\n]+?)~~/g, MARK_UNDER_RE = /\+\+([^+\n]+?)\+\+/g;
+function hasMarks(s) { return /~~[^~\n]+?~~|\+\+[^+\n]+?\+\+/.test(String(s || '')); }
+// エスケープ済みの HTML の中の印をタグにする
+function markHTML(html) { return String(html == null ? '' : html).replace(MARK_STRIKE_RE, '<s class="mk-s">$1</s>').replace(MARK_UNDER_RE, '<u class="mk-u">$1</u>'); }
+// 印だけを外す（文字は残す）
+function markStrip(s) { return String(s == null ? '' : s).replace(MARK_STRIKE_RE, '$1').replace(MARK_UNDER_RE, '$1'); }
+// 読み上げ・答え合わせ用：取り消し線の語は無いものにする（「(~~a~~)」ならかっこごと）
+function markPlain(s) {
+  return String(s == null ? '' : s).replace(/[(（]\s*~~[^~\n]+?~~\s*[)）]/g, ' ').replace(MARK_STRIKE_RE, ' ').replace(MARK_UNDER_RE, '$1').replace(/[ \t]{2,}/g, ' ').replace(/ +([,.?!])/g, '$1').trim();
+}
+// 取り消し線の語を「付けない」とわかる形で（メモ用）：make (~~a~~) progress → make a progress
+function markWrongForm(s) { return String(s == null ? '' : s).replace(/[(（]\s*~~([^~\n]+?)~~\s*[)）]/g, '$1').replace(MARK_STRIKE_RE, '$1').replace(MARK_UNDER_RE, '$1'); }
+
+// ★【0.03.97】単語帳の「図」を表示する：「🗺️ 図（題）」の行と中身の行。表の形（見出し「A→B→C」＋「名前：x → y → z」）なら表にする
+function figHTML(text) {
+  const e = t => markHTML(escapeHtml(t));
+  const lines = String(text || '').split('\n').map(x => x.trim()).filter(Boolean);
+  const title = lines[0] && lines[0].startsWith('🗺️') ? lines.shift() : '';
+  const cells = t => t.split(/\s*(?:→|―|—)\s*/).map(x => x.trim());
+  const rows = lines.map(l => { const m = l.match(/^([^：:]{1,12})[：:]\s*(.+)$/); return m && /→|―/.test(m[2]) ? [m[1], ...cells(m[2])] : null; });
+  const head = lines.length >= 2 && /→/.test(lines[0]) && !/[：:]/.test(lines[0]) ? cells(lines[0]) : null;
+  const body = rows.slice(head ? 1 : 0);
+  let inner;
+  if (body.length && body.every(Boolean) && body.every(r => r.length === body[0].length) && (!head || head.length === body[0].length - 1)) {
+    inner = `<table class="fig-table">${head ? `<tr><th></th>${head.map(h => `<th>${e(h)}</th>`).join('')}</tr>` : ''}${body.map(r => `<tr><th>${e(r[0])}</th>${r.slice(1).map(c => `<td>${e(c)}</td>`).join('')}</tr>`).join('')}</table>`;
+  } else inner = lines.map(l => `<div>${e(l).replace(/\s+／\s+/g, '<br>')}</div>`).join('');
+  return `${title ? `<div class="fig-title">${e(title)}</div>` : ''}${inner}`;
+}
+
+// ★【0.04.10】エスケープ済みの文の中の URL を、押すと開けるリンクにする（メッセージ・お知らせ・要望・AI の答え）
+// 「google.com」「www.example.co.jp/path」のように https:// が無いものもリンクにする（よく使う末尾だけ。v0.04.11・file.csv などはリンクにしない）
+const LINK_TLDS = 'com|net|org|jp|io|dev|app|me|info|biz|edu|gov|tv|ai|ly|gg|co|us|uk|so|to|xyz|site|online|page|cloud|tech|blog|news|shop|games?';
+const LINK_RE = new RegExp(String.raw`(^|[^A-Za-z0-9@./:_-])((?:https?:\/\/[^\s<>"'（）「」、。]+)|(?:(?:www\.)?(?:[A-Za-z0-9-]*[A-Za-z][A-Za-z0-9-]*\.)+(?:${LINK_TLDS})(?![A-Za-z0-9-])(?:[\/?#][^\s<>"'（）「」、。]*)?))`, 'gi');
+function linkifyHTML(html) {
+  return String(html == null ? '' : html).replace(LINK_RE, (m, pre, url) => {
+    const tail = (url.match(/[).,!?;:]+$/) || [''])[0], u = tail ? url.slice(0, -tail.length) : url;
+    const href = /^https?:\/\//i.test(u) ? u : 'https://' + u;
+    return `${pre}<a href="${href}" target="_blank" rel="noopener noreferrer" class="msg-link" onclick="event.stopPropagation()">${u}</a>${tail}`;
+  });
+}
+
 // ★【0.03.02】onclick="fn(...)" の引数に文字列を安全に埋め込む（名前に ' や \ が入っていてもスクリプトとして実行されない）
 function jsArg(v) {
   return JSON.stringify(String(v == null ? '' : v)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '&#39;');
@@ -117,8 +159,8 @@ function hideNoteTranslations(note, answerIsLatin) {
 // 一覧表示用：隠す部分をタップで表示できるHTMLにする
 function noteToSpoilerHTML(note, answerIsLatin) {
   return splitNoteForHiding(note, answerIsLatin).map(p => p.hide
-    ? `<span class="note-spoiler" onclick="event.stopPropagation(); this.classList.toggle('shown')">${escapeHtml(p.t)}</span>`
-    : escapeHtml(p.t)).join('');
+    ? `<span class="note-spoiler" onclick="event.stopPropagation(); this.classList.toggle('shown')">${markHTML(escapeHtml(p.t))}</span>`
+    : markHTML(escapeHtml(p.t))).join('');
 }
 
 function toggleLightMode(forceOn = false) {
@@ -167,14 +209,25 @@ const KNOWN_POS_TAGS = ['名詞', '動詞', '他動詞', '自動詞', '形容詞
 function isKnownPosTag(label) {
   return KNOWN_POS_TAGS.includes(String(label || '').replace(/[①-⑳0-9０-９]/g, '').trim());
 }
-// ★【0.03.45】問題番号の表示（派生語の 1000.01 は「1000-1」、熟語の 1000.0001 は「1000」）
+// ★【0.03.45】問題番号の表示：派生語 1000.01 →「1000-1」。★【0.03.55】表現（熟語・例文）1000.0001 →「1000-0-1」、1000.0101 →「1000-1-1」
 function cardNoText(no) {
   const n = Number(no); if (!Number.isFinite(n)) return '';
-  const i = Math.floor(n), k = Math.round((n - i) * 100);
-  return k > 0 ? `${i}-${k}` : String(i);
+  const i = Math.floor(n), x = Math.round((n - i) * 10000), k = Math.floor(x / 100), j = x % 100;
+  return j > 0 ? `${i}-${k}-${j}` : k > 0 ? `${i}-${k}` : String(i);
+}
+// 番号を表に出すカードか（導入の文・Check! は出さない）
+function showsCardNo(q) { return !!(q && q.no) && q.kind !== 'intro' && q.kind !== 'test'; }
+// ★【0.03.99】「名　進歩　自　進歩する　前進する」「①名 進歩 ②自 進歩する」のように、品詞を1文字（名・他・自・形・副…）で
+// 書いた答えは、「(名詞)進歩/(自動詞)進歩する　前進する」の形として読む（前は「名」「自」も答えの1つとして採点していた）
+const POS_ABBR_ANS_RE = /^\s*(?:[①②③④⑤⑥⑦⑧⑨]\s*)?(名|他|自|形|副|前|接|動|代|助|句)[\s　]+\S/;
+function posAbbrevAnswer(text) {
+  const t = String(text || '');
+  if (!POS_ABBR_ANS_RE.test(t) || /^\s*\(/.test(t) || /[\/／]/.test(t) || typeof vtMeaning !== 'function') return null;
+  try { const r = vtMeaning(t.replace(/[ \t]+/g, '　'), ''); return /^\(/.test(r) ? r : null; } catch (e) { return null; }
 }
 function parseStructuredAnswer(answerText) {
   if (!answerText) return null;
+  { const conv = posAbbrevAnswer(answerText); if (conv) answerText = conv; }
   const rawSegments = splitAnswerAlternatives(answerText, '/');
   if (rawSegments.length < 2) {
     const single = String(rawSegments[0] || '').match(/^\s*\(([^()]*)\)/);

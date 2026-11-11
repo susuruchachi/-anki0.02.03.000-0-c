@@ -1,7 +1,7 @@
 // ----------------- JSON / CSV 管理 -----------------
 function exportJSON() {
   const blob = new Blob([JSON.stringify({ app: 'susuru_anki', version: typeof APP_VERSION !== 'undefined' ? APP_VERSION : '', exportedAt: Date.now(), db, categories, categoryTree, catSubjects }, null, 2)], { type: 'application/json' });
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `susuru_anki_${Date.now()}.json`; a.click();
+  saveBlobFile(blob, `susuru_anki_${Date.now()}.json`);
 }
 // ★【0.03.12】JSONの取り込みは「今のデータに追加（統合）」か「置き換え」を選ぶ（以前は確認なしで全部置き換えていた）
 function importJSON(e) {
@@ -116,7 +116,7 @@ function exportCSV() {
   sortCardsByNumber([...db]).forEach(q => lines.push([q.question, q.answer, getCategoryPathString(q.category), q.no ? cardNoText(q.no) : '', q.note || '', Array.isArray(q.choices) ? q.choices.join(' / ') : '', q.kind === 'test' ? 'テスト' : q.kind === 'cloze' ? '例文' : q.kind === 'self' ? '自己申告' : q.kind === 'intro' ? '導入' : '', starsText(q.stars), q.level, q.correct, q.incorrect]));
   const csv = lines.map(l => l.map(t => `"${String(t === undefined || t === null ? '' : t).replace(/"/g, '""')}"`).join(",")).join("\n");
   const b = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csv], { type: 'text/csv;charset=utf-8;' });
-  const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = `susuru_anki_${Date.now()}.csv`; a.click();
+  saveBlobFile(b, `susuru_anki_${Date.now()}.csv`);
 }
 // 「親>子>孫」形式のフォルダーパス（CSVで書き出して、そのまま取り込み直せるように）
 function getCategoryPathString(cat) {
@@ -231,8 +231,8 @@ function planCSVImport(rows) {
     const kindRaw = iK !== -1 ? String(c[iK] || '').trim() : '';
     const kind = /テスト|test/i.test(kindRaw) ? 'test' : /例文|cloze/i.test(kindRaw) ? 'cloze' : /自己申告|self/i.test(kindRaw) ? 'self' : /導入|intro/i.test(kindRaw) ? 'intro' : '';
     // ★【0.03.45】派生語の「1000-1」も読む（1000.01 として持つ）
-    const noM = iNo !== -1 ? String(c[iNo] || '').replace(/[０-９]/g, d => String.fromCharCode(d.charCodeAt(0) - 0xFEE0)).match(/(\d+)(?:\s*[-.]\s*(\d+))?/) : null;
-    const noNum = noM ? Number(noM[1]) + (noM[2] ? Number(noM[2]) / 100 : 0) : NaN;
+    const noM = iNo !== -1 ? String(c[iNo] || '').replace(/[０-９]/g, d => String.fromCharCode(d.charCodeAt(0) - 0xFEE0)).match(/(\d+)(?:\s*-\s*(\d+))?(?:\s*-\s*(\d+))?/) : null;
+    const noNum = noM ? Number(noM[1]) + (noM[2] ? Number(noM[2]) / 100 : 0) + (noM[3] ? Number(noM[3]) / 10000 : 0) : NaN; // 1000-1-1 まで
     const no = Number.isFinite(noNum) && noNum > 0 ? noNum : null;
     // 同じフォルダーに同じ問題があれば、重複させずに更新する（同じ問題・同じ答え → 同じ問題が1枚だけ → 「（2つ）」などの数だけ違う）
     let ex = db.find(d => d.category === cat && String(d.question).trim() === q && String(d.answer).trim() === a && !usedIds.has(d.id));

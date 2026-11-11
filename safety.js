@@ -82,7 +82,7 @@ async function downloadSnapshot(id) {
   if (!s) return alert('復元ポイントが見つかりません。');
   const p = JSON.parse(s.json);
   const blob = new Blob([JSON.stringify({ app: 'susuru_anki', version: typeof APP_VERSION !== 'undefined' ? APP_VERSION : '', exportedAt: s.at, db: p.db, categories: p.categories, categoryTree: p.categoryTree, catSubjects: p.catSubjects || {} }, null, 2)], { type: 'application/json' });
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `susuru_anki_restore_${s.at}.json`; a.click();
+  saveBlobFile(blob, `susuru_anki_restore_${s.at}.json`);
 }
 
 // その時点の状態に戻す：その時点にあったカード・フォルダー・購読を戻し、カードの内容と成績もその時点のものにする。

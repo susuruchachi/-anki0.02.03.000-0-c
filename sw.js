@@ -11,10 +11,10 @@ const CORE_CACHE = 'susuru-core-v1';
 const RUNTIME_CACHE = 'susuru-runtime-v1';
 const CORE_FILES = [
   './', './index.html', './manifest.webmanifest', './RULES.md', './notify-kv.js',
-  './version-info.js', './release-notes.js', './config.js', './utils.js', './storage.js', './tree.js', './pages.js', './box.js',
+  './version-info.js', './release-notes.js', './config.js', './utils.js', './app-bridge.js', './storage.js', './tree.js', './pages.js', './box.js',
   './quiz.js', './context-menu.js', './import-export.js', './batch-add.js', './scan-import.js', './shared.js', './stats.js',
   './social.js', './match.js', './safety.js', './updates.js', './auth.js', './main.js', './rich-content.js', './rich-editors.js',
-  './chem-search.js', './notify.js', './ai.js', './picker.js', './drill.js', './plan.js', './race.js', './text-import.js',
+  './chem-search.js', './notify.js', './ai.js', './picker.js', './drill.js', './plan.js', './race.js', './text-import.js', './listen.js', './streak.js', './tts.js',
   './icons/icon-192.png', './icons/icon-512.png', './icons/badge-96.png', './icons/apple-touch-icon.png', './icons/favicon-48.png'
 ];
 const CDN_HOSTS = ['cdn.jsdelivr.net', 'cdnjs.cloudflare.com', 'unpkg.com', 'www.gstatic.com', 'fonts.googleapis.com', 'fonts.gstatic.com'];
@@ -37,7 +37,10 @@ function networkFirst(req) {
     const fromCache = () => caches.match(req, { ignoreSearch: req.mode === 'navigate' }).then(r => r || (req.mode === 'navigate' ? caches.match('./index.html') : null));
     // 電波が弱いときは 6 秒で保存しておいたものに切り替える
     const timer = setTimeout(() => { fromCache().then(r => { if (r && !done) { done = true; resolve(r); } }); }, 6000);
-    fetch(req).then(res => {
+    // ★【0.04.07】ブラウザの HTTP キャッシュ（GitHub Pages は10分ほど持たせる）を使わず、必ずサーバーに新しいかを確かめる。
+    //  Android（Chrome・アプリ）では、ここで古いファイルが返ってきて「再読み込み」しても新しいバージョンにならなかった（iPad は毎回確かめていた）
+    const fresh = req.mode === 'navigate' ? fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' }) : fetch(req, { cache: 'no-cache' });
+    fresh.then(res => {
       if (res && res.ok) { const copy = res.clone(); caches.open(CORE_CACHE).then(c => c.put(req, copy)).catch(() => {}); }
       if (!done) { done = true; clearTimeout(timer); resolve(res); }
     }).catch(() => {
@@ -65,11 +68,18 @@ self.addEventListener('fetch', event => {
 });
 
 // ---------------- 通知 ----------------
+function versionNotNewer(a, b) { const pa = String(a).split('.').map(Number), pb = String(b).split('.').map(Number); for (let i = 0; i < Math.max(pa.length, pb.length); i++) { const x = pa[i] || 0, y = pb[i] || 0; if (x !== y) return x < y; } return true; }
 function show(title, body, opts = {}) {
   return self.registration.showNotification(title || 'すするanki', Object.assign({
     body: body || '', icon: 'icons/icon-192.png', badge: 'icons/badge-96.png', lang: 'ja',
-    tag: opts.tag || 'susuru', renotify: !!opts.renotify, data: { url: opts.url || './' }
+    tag: opts.tag || 'susuru', renotify: !!opts.renotify, data: { url: opts.url || './', kind: opts.kind || '', version: opts.version || '', at: Date.now() }
   }, opts.extra || {}));
+}
+// ★【0.04.10】同じ種類の前の通知は消す（催促・課題・煽り・アップデートが溜まらないように）。フレンド申請・要望の通知は消さない
+const REPLACE_KINDS = ['reminder', 'plan', 'taunt', 'update'];
+async function closeOldNotifications(kind, keepTag) {
+  if (!REPLACE_KINDS.includes(kind)) return;
+  try { (await self.registration.getNotifications()).forEach(n => { const d = n.data || {}; if ((d.kind === kind || (!d.kind && n.tag === kind)) && n.tag !== keepTag) n.close(); }); } catch (e) {}
 }
 
 // プッシュ通知（サーバーから。Firebase Cloud Messaging のデータメッセージ）
@@ -82,7 +92,8 @@ self.addEventListener('push', event => {
   event.waitUntil((async () => {
     if (d.kind === 'update' && d.version) await notifyKvSet('notifiedVersion', d.version);
     if (d.kind === 'reminder') await notifyKvSet('lastRemindDate', localDateStr());
-    await show(title, body, { tag: d.tag || d.kind || 'susuru', url: d.url || './', renotify: true });
+    await closeOldNotifications(d.kind, d.tag);
+    await show(title, body, { tag: d.tag || d.kind || 'susuru', url: d.url || './', renotify: true, kind: d.kind, version: d.version });
   })());
 });
 
@@ -99,7 +110,12 @@ self.addEventListener('notificationclick', event => {
 // 画面からの依頼で通知を出す（テスト通知・アプリを開いている間の催促）
 self.addEventListener('message', event => {
   const m = event.data || {};
-  if (m.type === 'notify') event.waitUntil(show(m.title, m.body, { tag: m.tag, url: m.url, renotify: true }));
+  if (m.type === 'notify') event.waitUntil(show(m.title, m.body, { tag: m.tag, url: m.url, renotify: true, kind: m.kind }));
+  // ★【0.04.10】アプリを開いたとき：もう古い通知（今の版までのアップデート・催促・課題・煽り）を消す
+  if (m.type === 'clearOld') event.waitUntil(self.registration.getNotifications().then(list => list.forEach(n => {
+    const d = n.data || {}, kind = d.kind || (REPLACE_KINDS.includes(n.tag) ? n.tag : '');
+    if (kind === 'update' ? !d.version || !m.version || versionNotNewer(d.version, m.version) : ['reminder', 'plan', 'taunt'].includes(kind) || /^plan-/.test(n.tag)) n.close();
+  })).catch(() => {}));
   if (m.type === 'check') event.waitUntil(backgroundCheck()); // 動作確認用
 });
 

@@ -15,8 +15,16 @@ const AI_FAMILY_COL = 'susuru_anki_ai_family';
 
 let _aiFamilyKeys = [];   // [{ owner, ownerName, keys: { gemini: [], openrouter: [] } }]
 let _aiFamilyDoc = null;  // 自分が家族に共有している設定 { members: [], share: bool }
-const _aiCooldown = {};   // { key: 再開できる時刻 }（上限に達したキーをしばらく休ませる）
-let _aiLastModel = '';
+// { key: 再開できる時刻 }（上限に達したキーをしばらく休ませる）。★【0.03.90】再読み込みしても覚えておく（読み込み直すたびに上限のモデルに頼み直して、Too Many Requests が増えていた）
+const AI_COOL_KEY = 'susuru_anki_ai_cool';
+const _aiCooldown = (() => { try { const o = JSON.parse(localStorage.getItem(AI_COOL_KEY) || '{}') || {}; Object.keys(o).forEach(k => { if (!(o[k] > Date.now())) delete o[k]; }); return o; } catch (e) { return {}; } })();
+function aiSaveCooldown() { try { Object.keys(_aiCooldown).forEach(k => { if (!(_aiCooldown[k] > Date.now())) delete _aiCooldown[k]; }); localStorage.setItem(AI_COOL_KEY, JSON.stringify(_aiCooldown)); } catch (e) {} }
+// Gemini の1日の無料回数は、太平洋時間の0時（日本時間の16〜17時）に戻る
+function aiNextGeminiReset() { const d = new Date(); d.setUTCHours(8, 5, 0, 0); if (d.getTime() <= Date.now()) d.setUTCDate(d.getUTCDate() + 1); return d.getTime(); }
+let _aiLastModel = '', _aiLastAt = 0;
+// ★【0.03.79】答えたモデルの表示：t0 より後に AI が答えていれば（保存していたものを使ったときは出さない）、そのモデル名
+function aiModelSince(t0) { return _aiLastAt >= (t0 || 0) && _aiLastModel ? _aiLastModel : ''; }
+function aiModelTag(model) { return model ? `<span class="ai-model">🤖 ${escapeHtml(String(model).replace(/^Gemini /, 'Gemini：').replace(/^OpenRouter /, 'OpenRouter：'))}</span>` : ''; }
 
 function cleanAiKey(k) { return String(k || '').replace(/[\s　 ﻿]/g, ''); }
 function parseKeyList(v) { return [...new Set((Array.isArray(v) ? v : String(v || '').split(/[\n,]+/)).map(cleanAiKey).filter(k => k.length >= 10))]; }
@@ -78,8 +86,25 @@ async function geminiModels(key) {
   return _geminiModels;
 }
 const OPENROUTER_FALLBACK_MODELS = ['google/gemini-2.0-flash-exp:free', 'meta-llama/llama-3.3-70b-instruct:free', 'deepseek/deepseek-chat-v3-0324:free', 'qwen/qwen-2.5-72b-instruct:free', 'mistralai/mistral-small-3.1-24b-instruct:free'];
+// ★【0.03.78】OpenRouter の無料モデルは、1つのモデルの無料枠（混雑）がすぐ埋まる。そこで：
+//  ・無料モデルの一覧を6時間ごとに取り直す（増えたり無くなったりするため。この端末に保存）
+//  ・使えなかったモデルは、この端末で覚えて休ませる（混雑 10分・無くなった 1日。再読み込みしても覚えている）
+//  ・最近答えてくれたモデルを先に試し、だめなら一覧の中から使えるモデルを順に探す（前は上位4つだけ）
+//  ・キーの「1日の無料回数」の上限（free-models-per-day）は、モデルを替えても増えないので、そのキーは翌日まで休ませる
+const OR_LIST_KEY = 'susuru_anki_or_models', OR_STATE_KEY = 'susuru_anki_or_state';
 let _orModels = null;
+function orState() { try { return JSON.parse(localStorage.getItem(OR_STATE_KEY) || '{}') || {}; } catch (e) { return {}; } }
+function orSaveState(st) { try { localStorage.setItem(OR_STATE_KEY, JSON.stringify(st)); } catch (e) {} }
+function orKeyId(key) { let h = 0; for (const c of String(key)) h = (h * 31 + c.charCodeAt(0)) | 0; return 'k' + (h >>> 0).toString(36); }
+// モデル（またはキー）を休ませる
+function orCool(id, ms) { const st = orState(); st.cool = st.cool || {}; st.cool[id] = Date.now() + ms; Object.keys(st.cool).forEach(k => { if (st.cool[k] < Date.now()) delete st.cool[k]; }); orSaveState(st); }
+function orCooling(id) { const st = orState(); return ((st.cool || {})[id] || 0) > Date.now(); }
+function orMarkGood(model) { const st = orState(); st.good = st.good || {}; st.good[model] = Date.now(); orSaveState(st); }
+function orNextUtcMidnight() { const d = new Date(); d.setUTCHours(24, 0, 30, 0); return d.getTime(); }
 async function openrouterModels(needImage) {
+  if (!_orModels) {
+    try { const c = JSON.parse(localStorage.getItem(OR_LIST_KEY) || 'null'); if (c && Date.now() - c.at < 6 * 3600e3 && Array.isArray(c.list) && c.list.length) _orModels = c.list; } catch (e) {}
+  }
   if (!_orModels) {
     try {
       const res = await fetchWithTimeout('https://openrouter.ai/api/v1/models', {}, 8000);
@@ -99,10 +124,16 @@ async function openrouterModels(needImage) {
         return { id: m.id, s, img };
       }).sort((a, b) => b.s - a.s);
       if (!_orModels.length) throw new Error('no free models');
+      try { localStorage.setItem(OR_LIST_KEY, JSON.stringify({ at: Date.now(), list: _orModels })); } catch (e) {}
     } catch (e) { _orModels = OPENROUTER_FALLBACK_MODELS.map((id, i) => ({ id, s: 10 - i, img: /gemini/.test(id) })); }
   }
-  return _orModels.filter(m => !needImage || m.img).map(m => m.id);
+  // 最近（1日以内）答えてくれたモデルを先に。休ませているモデルは外す
+  const good = orState().good || {}, recent = id => (Date.now() - (good[id] || 0) < 86400e3 ? 1 : 0);
+  return _orModels.filter(m => (!needImage || m.img) && !orCooling('m|' + m.id))
+    .sort((a, b) => (recent(b.id) - recent(a.id)) || (recent(a.id) ? (good[b.id] || 0) - (good[a.id] || 0) : 0) || (b.s - a.s)).map(m => m.id);
 }
+// 一覧を取り直す（使えないモデルが続いたとき）
+function openrouterRefreshList() { _orModels = null; try { localStorage.removeItem(OR_LIST_KEY); } catch (e) {} }
 
 // opts.signal を渡すと、外からも止められる（ほかのモデルが先に答えたとき）
 function fetchWithTimeout(url, opts, ms) {
@@ -145,14 +176,18 @@ async function callOpenRouter(key, model, system, parts, { maxTokens, timeout, s
   }, timeout || 20000);
   if (!res.ok) { const e = new Error('OpenRouter ' + res.status); e.status = res.status; e.detail = await res.text().catch(() => ''); throw e; }
   const data = await res.json();
+  // 200 でも中身がエラーのことがある（上流の混雑など）
+  if (data && data.error) { const e = new Error('OpenRouter ' + (data.error.code || 'error')); e.status = Number(data.error.code) || 429; e.detail = JSON.stringify(data.error); throw e; }
   const text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
-  if (!String(text).trim()) { const e = new Error('OpenRouter empty'); e.status = 0; throw e; }
+  if (!String(text).trim()) { const e = new Error('OpenRouter empty'); e.status = 0; e.empty = true; throw e; }
+  orMarkGood(model);
   return String(text);
 }
 
 // キー・モデルを順番に試す。opts: { json, maxTokens, timeout, needPdf, needImage, totalTimeout }
 // ★【0.03.19】Gemini は、ふだん1秒ほどで返すのに、ときどき数十秒止まることがある。
 //  そこで、少し待っても返ってこなければ次のモデルにも同時に頼み、先に返ってきた方を使う（残りは止める）
+let _orMissing = 0;
 const AI_HEDGE_MS = 3500;       // 文字だけのとき、次のモデルにも頼むまでの時間
 const AI_HEDGE_FILE_MS = 25000; // PDF・写真のとき
 async function aiRequest(system, parts, opts = {}) {
@@ -165,13 +200,23 @@ async function aiRequest(system, parts, opts = {}) {
   const tryOne = async (fn, key, model, label, signal) => {
     try {
       const t = await fn();
-      _aiLastModel = label;
+      _aiLastModel = label; _aiLastAt = Date.now();
       countAiUsage();
       return t;
     } catch (e) {
       if (signal && signal.aborted) return null; // ほかのモデルが先に答えたので止めた
       errors.push(`${label}: ${e.message}`);
       const d = e.detail || '';
+      if (/^OpenRouter/.test(label)) {
+        // ★【0.03.78】OpenRouter：1日の無料回数の上限はキーごと（翌日まで）、それ以外の混雑・無くなったモデルはモデルごとに休ませる
+        if (e.status === 429 && /per-day|PerDay|per day|daily/i.test(d)) { _aiCooldown[key] = orNextUtcMidnight(); orCool(orKeyId(key), orNextUtcMidnight() - Date.now()); }
+        else if (e.status === 401 || e.status === 403) { _aiCooldown[key] = Date.now() + 3600e3; }
+        else if (e.status === 402) { _aiCooldown[key] = Date.now() + 3600e3; orCool(orKeyId(key), 3600e3); }
+        else if (e.status === 404 || e.status === 400) { orCool('m|' + model, 86400e3); _orMissing++; if (_orMissing >= 3) { _orMissing = 0; openrouterRefreshList(); } }
+        else orCool('m|' + model, e.empty ? 30 * 60e3 : 10 * 60e3); // 混雑・空の答え
+        aiSaveCooldown();
+        return null;
+      }
       if (e.status === 401 || e.status === 403 || (e.status === 400 && /API_KEY_INVALID|API key not valid/i.test(d))) _aiCooldown[key] = Date.now() + 3600 * 1000; // キーが使えない
       else if (e.status === 402) _aiCooldown[key] = Date.now() + 3600 * 1000; // そのキーの上限
       else if (e.status === 429) {
@@ -179,10 +224,11 @@ async function aiRequest(system, parts, opts = {}) {
         const perDay = /PerDay|per-day|per day|daily/i.test(d);
         const rd = Number((d.match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/) || [])[1]) || 0;
         if (perDay && /^OpenRouter/.test(label)) _aiCooldown[key] = Date.now() + 3600 * 1000;
-        else _aiCooldown[key + '|' + model] = Date.now() + (perDay ? 3600 * 1000 : Math.min(120, Math.max(5, rd || 60)) * 1000);
+        else _aiCooldown[key + '|' + model] = perDay ? aiNextGeminiReset() : Date.now() + Math.min(300, Math.max(10, rd || 60)) * 1000;
       }
       else if (e.status === 503 || e.status === 500) _aiCooldown[key + '|' + model] = Date.now() + 30 * 1000; // 混んでいる
       else if (e.status === 404 || e.status === 400) _aiCooldown[key + '|' + model] = Date.now() + 3600 * 1000; // そのモデルは使えない
+      aiSaveCooldown();
       return null;
     }
   };
@@ -220,19 +266,25 @@ async function aiRequest(system, parts, opts = {}) {
     const models = (await geminiModels(key)).slice(0, 5);
     models.forEach(m => gem.push({ key, model: m, label: `Gemini ${m}`, run: signal => callGemini(key, m, system, parts, Object.assign({}, opts, { signal })) }));
   }
-  let t = gem.length ? await race(gem, hasFile ? AI_HEDGE_FILE_MS : AI_HEDGE_MS) : null;
+  // ★【0.03.90】裏でする頼みごと（読み仮名・聞き取り）は、ほかのモデルに同時に頼まない（回数を使いすぎないように）
+  const hedge = opts.noHedge ? 1e9 : null;
+  let t = gem.length ? await race(gem, hedge || (hasFile ? AI_HEDGE_FILE_MS : AI_HEDGE_MS)) : null;
   if (t) return t;
   if (!opts.needPdf && Date.now() - started < limit) {
     const or = [];
     for (const key of keys.openrouter) {
-      if (cooling(key)) continue;
-      const models = (await openrouterModels(hasFile)).slice(0, 4);
+      if (cooling(key) || orCooling(orKeyId(key))) continue;
+      // ★【0.03.78】上位4つだけでなく、使えるモデルを順に探す（同時には3つまで。だめなら次へ）
+      const models = (await openrouterModels(hasFile)).slice(0, 12);
       models.forEach(m => or.push({ key, model: m, label: `OpenRouter ${m.replace(/:free$/, '')}`, run: signal => callOpenRouter(key, m, system, parts, Object.assign({}, opts, { signal })) }));
     }
-    t = or.length ? await race(or, hasFile ? AI_HEDGE_FILE_MS : AI_HEDGE_MS * 2) : null;
+    t = or.length ? await race(or, hedge || (hasFile ? AI_HEDGE_FILE_MS : AI_HEDGE_MS * 2)) : null;
     if (t) return t;
   }
-  const err = new Error(keys.gemini.length + keys.openrouter.length ? 'AIに接続できませんでした（回数の上限・通信を確認してください）' : 'APIキーが設定されていません');
+  const orDayOut = keys.openrouter.length && keys.openrouter.every(k => orCooling(orKeyId(k)));
+  const err = new Error(!(keys.gemini.length + keys.openrouter.length) ? 'APIキーが設定されていません'
+    : orDayOut && !keys.gemini.length ? 'OpenRouter の今日の無料回数（キーごと）を使い切りました。朝9時（日本時間）に戻ります。Gemini のキーも入れておくと続けて使えます'
+    : 'AIに接続できませんでした（回数の上限・通信を確認してください）');
   err.details = errors;
   console.warn('AI request failed:', errors);
   throw err;

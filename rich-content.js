@@ -340,7 +340,7 @@ function renderRichText(text, opts = {}) {
   }
   out += conv(src.slice(last));
   RICH_BLOCK_RE.lastIndex = 0;
-  return out;
+  return typeof markHTML === 'function' ? markHTML(out) : out; // ★【0.03.97】~~取り消し線~~・++下線++
 }
 
 const KATEX_DELIMITERS = [{ left: '$$', right: '$$', display: true }, { left: '$', right: '$', display: false }];
@@ -363,6 +363,6 @@ function setRichContent(el, text, opts = {}) {
 
 // 読み上げ用: 漢文は書き下し文で読み、構造式は「構造式」と読む
 function richTextToSpeech(text) {
-  return String(text == null ? '' : text).replace(RICH_BLOCK_RE, (_, kw, body) =>
+  return (typeof markPlain === 'function' ? markPlain(text) : String(text == null ? '' : text)).replace(RICH_BLOCK_RE, (_, kw, body) =>
     richBlockType(kw) === 'chem' ? ' 構造式 ' : kanbunToKakikudashi(parseKanbun(body)));
 }
