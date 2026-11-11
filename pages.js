@@ -83,6 +83,7 @@ async function fetchAndRenderTutorial() {
 }
 
 function executePageTransition(pageId, isBackAction) {
+  if (typeof maybeAutoUpdate === 'function') setTimeout(maybeAutoUpdate, 600); // ★【0.04.10】更新が来ていて、移った先が遊んでいない画面なら読み込み直す
   // ★【0.03.10】対戦中にほかの画面へ移っても対戦は続く（戻ると対戦画面に戻る）。接続切れの扱いは match.js
   stopQuizTimer(); clearTimeout(autoNextTimeout);
   const activeScreen = document.querySelector('.screen.active');

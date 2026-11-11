@@ -317,7 +317,7 @@ function openChat(friendUid, friendName) {
       const data = doc.data(); const isMe = data.senderId === currentUser.uid;
       const wrap = document.createElement('div'); wrap.style.cssText = `display:flex; flex-direction:column; max-width:80%; ${isMe ? 'align-self:flex-end;' : 'align-self:flex-start;'}`;
       const bubble = document.createElement('div'); bubble.style.cssText = `padding:10px 14px; border-radius:14px; font-size:0.9rem; word-break:break-all; ${isMe ? 'background:var(--primary); color:#fff; border-bottom-right-radius:2px;' : 'background:var(--bg3); border:1px solid var(--border); color:var(--text); border-bottom-left-radius:2px;'}`;
-      bubble.innerText = data.text; wrap.appendChild(bubble); msgBox.appendChild(wrap);
+      bubble.style.whiteSpace = 'pre-wrap'; bubble.innerHTML = linkifyHTML(escapeHtml(data.text)); // ★【0.04.10】URL は押すと開く wrap.appendChild(bubble); msgBox.appendChild(wrap);
     });
     msgBox.scrollTop = msgBox.scrollHeight;
   });

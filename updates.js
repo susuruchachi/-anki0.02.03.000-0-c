@@ -10,9 +10,28 @@ function updateAdminUIVisibility() {
   if (currentUser && currentUser.uid === ADMIN_UID) {
     postArea.style.display = 'block';
     loadUserReports(); // 管理者なら要望一覧も自動で読み込む
+    startAdminReportWatch();
   } else {
     postArea.style.display = 'none';
   }
+}
+
+// ★【0.04.10】管理者：アプリを開いている間に要望・報告が届いたら知らせる（閉じているときはプッシュ通知で）
+let _adminReportUnsub = null;
+function startAdminReportWatch() {
+  if (_adminReportUnsub || !currentUser || currentUser.uid !== ADMIN_UID) return;
+  const t0 = Date.now(); let first = true;
+  try {
+    _adminReportUnsub = firestore.collection('susuru_anki_reports').orderBy('date', 'desc').limit(5).onSnapshot(snap => {
+      if (first) { first = false; return; }
+      snap.docChanges().forEach(ch => {
+        const d = ch.doc.data(), at = d.date && d.date.toMillis ? d.date.toMillis() : Date.now();
+        if (ch.type !== 'added' || at < t0) return;
+        if (typeof showAppToast === 'function') showAppToast(`📮 要望・報告：${d.name || '名無し'}「${String(d.content || '').slice(0, 40)}」`, () => { openPage('pgBackup'); loadUserReports(); });
+        loadUserReports();
+      });
+    }, () => {});
+  } catch (e) {}
 }
 
 // ★【0.03.00】Firestore のお知らせと、アプリ同梱のお知らせ（release-notes.js）をまとめて新しい順に表示する
@@ -55,7 +74,7 @@ async function loadUpdates() {
       <div class="update-banner-title" style="margin-bottom:8px;">🎉 ${escapeHtml(it.title)} (v${escapeHtml(it.version)}) 
         <span style="font-size:0.7rem; color:var(--text3); margin-left:auto;">${dateStr}</span>
       </div>
-      <div style="font-size:0.85rem; line-height:1.5; color:var(--text); white-space:pre-wrap;">${escapeHtml(it.content)}</div>
+      <div style="font-size:0.85rem; line-height:1.5; color:var(--text); white-space:pre-wrap;">${linkifyHTML(escapeHtml(it.content))}</div>
       ${delBtn}
     </div>`);
   });
@@ -197,7 +216,7 @@ async function loadUserReports() {
           <span>👤 ${escapeHtml(d.name)} (v${escapeHtml(d.version)})</span>
           <span>${dateStr}</span>
         </div>
-        <div style="font-size:0.85rem; color:var(--text); margin-top:5px; white-space:pre-wrap;">${escapeHtml(d.content)}</div>
+        <div style="font-size:0.85rem; color:var(--text); margin-top:5px; white-space:pre-wrap;">${linkifyHTML(escapeHtml(d.content))}</div>
         <div style="display:flex; gap:8px; margin-top:10px;">
           <button class="btn btn-secondary" style="padding:4px 10px; font-size:0.75rem; width:auto;" onclick="copyUserReport(${idx})">📋 コピー</button>
           <button class="btn btn-danger" style="padding:4px 10px; font-size:0.75rem; width:auto;" onclick="deleteUserReport(${jsArg(doc.id)})">✅ 対応完了 (削除)</button>

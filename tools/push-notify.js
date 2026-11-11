@@ -56,19 +56,27 @@ async function sendToUser(docRef, data, payload) {
   return res.successCount;
 }
 
+// ★【0.04.10】催促・週間プラン・煽りの通知の間隔（時間。設定の「通知の間隔」、はじめは1時間）。
+//  通知の時刻から、その間隔ごとに1回まで（その日の 23:59 まで）。24 なら1日1回
+function nudgeSlot(d, now) {
+  const [h, m] = String(d.time || '20:00').split(':').map(Number), start = h * 60 + m;
+  if (now.minutes < start) return null;
+  const every = [1, 2, 3, 4, 6, 12, 24].includes(Number(d.every)) ? Number(d.every) : 1;
+  return `${now.date}#${every}h#${Math.floor((now.minutes - start) / (every * 60))}`;
+}
 async function sendReminders() {
   const snap = await db.collection(PUSH_COL).where('reminder', '==', true).get();
   let sent = 0;
   for (const doc of snap.docs) {
     const d = doc.data();
     const now = localNow(d.tzOffset);
-    const [h, m] = String(d.time || '20:00').split(':').map(Number);
-    if (now.minutes < h * 60 + m) continue;          // まだ時刻になっていない
+    const slot = nudgeSlot(d, now);
+    if (!slot) continue;                              // まだ時刻になっていない
     if (d.lastStudyDate === now.date) continue;       // 今日はもう学習した
-    if (d.lastRemindDate === now.date) continue;      // 今日はもう知らせた
+    if (d.lastRemindSlot === slot) continue;          // この間隔の中ではもう知らせた
     const body = d.weakCount > 0 ? `苦手なカードが ${d.weakCount} 枚あります。1問だけでも解いてみませんか？` : '1問だけでも解いてみませんか？';
     const n = await sendToUser(doc.ref, d, { kind: 'reminder', tag: 'reminder', title: '📚 今日の学習がまだです', body, url: APP_URL });
-    await doc.ref.update({ lastRemindDate: now.date });
+    await doc.ref.update({ lastRemindDate: now.date, lastRemindSlot: slot });
     sent += n;
   }
   console.log(`催促: ${sent} 件送信（対象 ${snap.size} 人）`);
@@ -102,19 +110,19 @@ async function sendPlanReminders() {
     const plans = Array.isArray(d.plans) ? d.plans : (d.plan ? [d.plan] : []); // ★【0.03.33】複数のプラン
     if (!plans.length) continue;
     const now = localNow(d.tzOffset);
-    const [h, m] = String(d.time || '20:00').split(':').map(Number);
-    if (now.minutes < h * 60 + m) continue;
+    const slot = nudgeSlot(d, now);
+    if (!slot) continue;
     const dow = new Date(Date.now() - (Number.isFinite(d.tzOffset) ? d.tzOffset : -540) * 60000).getUTCDay();
     const done = Object.assign({}, d.planReminded || {});
-    Object.keys(done).forEach(k => { if (done[k] !== now.date) delete done[k]; }); // 前の日の記録は消す
+    Object.keys(done).forEach(k => { if (!String(done[k]).startsWith(now.date)) delete done[k]; }); // 前の日の記録は消す
     let changed = false;
     for (const pl of plans) {
       for (const msg of planTaskMessages(pl, Date.now(), dow)) {
         const k = `${pl.planId || 'p'}:${msg.key}`;
-        if (done[k] === now.date) continue; // 今日はもう知らせた
+        if (done[k] === slot) continue; // この間隔の中ではもう知らせた
         const url = pl.planId ? `${APP_URL}?plantask=${encodeURIComponent(pl.planId + ':' + msg.key)}` : APP_URL;
         sent += await sendToUser(doc.ref, d, { kind: 'plan', tag: 'plan-' + k, title: msg.title, body: msg.body, url });
-        done[k] = now.date; changed = true;
+        done[k] = slot; changed = true;
       }
     }
     if (changed) await doc.ref.update({ planReminded: done, lastPlanRemindDate: now.date });
@@ -227,11 +235,9 @@ async function sendTaunts() {
     const d = doc.data();
     if (d.taunt === false || !Object.keys(d.tokens || {}).length) continue;
     const now = localNow(d.tzOffset);
-    const [h, m] = String(d.time || '20:00').split(':').map(Number);
-    // ★【0.03.53】通知の時刻から4時間ごと（その日の 23:59 まで）。例：8:00 なら 8時・12時・16時・20時、20:00 なら 20時だけ
-    const start = h * 60 + m;
-    if (now.minutes < start) continue;
-    const slot = `${now.date}#${Math.floor((now.minutes - start) / 240)}`;
+    // ★【0.04.10】通知の時刻から、設定の間隔ごと（はじめは1時間ごと。その日の 23:59 まで）
+    const slot = nudgeSlot(d, now);
+    if (!slot) continue;
     if (d.lastTauntSlot === slot) continue;
     const prof = await db.collection('susuru_anki_profiles').doc(doc.id).get();
     const fl = prof.exists ? (prof.data().friends || []) : [];
@@ -268,6 +274,27 @@ async function rebuildPublicIndex() {
   console.log(`公開カテゴリーの目次: ${snap.size} 件中 ${wrote} 件を書き直し、${removed} 件を削除`);
 }
 
+// ★【0.04.10】要望・報告が届いたら、管理者だけに知らせる（管理者の UID は updates.js の ADMIN_UID）
+async function sendReportNotices() {
+  const adminUid = (fs.readFileSync(path.join(ROOT, 'updates.js'), 'utf8').match(/ADMIN_UID\s*=\s*["']([^"']+)["']/) || [])[1];
+  if (!adminUid) return console.log('管理者の UID が分かりません');
+  const metaRef = db.doc(META_DOC);
+  const meta = (await metaRef.get()).data() || {};
+  const since = Number(meta.lastReportAt) || 0;
+  if (!since) { await metaRef.set({ lastReportAt: Date.now() }, { merge: true }); return console.log('要望・報告：今から届いたものを知らせます'); }
+  const snap = await db.collection('susuru_anki_reports').where('date', '>', admin.firestore.Timestamp.fromMillis(since)).orderBy('date', 'asc').limit(20).get();
+  if (snap.empty) return;
+  const pref = await db.collection(PUSH_COL).doc(adminUid).get();
+  let sent = 0, last = since;
+  for (const doc of snap.docs) {
+    const d = doc.data(), at = d.date && d.date.toMillis ? d.date.toMillis() : Date.now();
+    last = Math.max(last, at);
+    if (pref.exists) sent += await sendToUser(pref.ref, pref.data(), { kind: 'report', tag: 'report-' + doc.id, title: `📮 要望・報告：${d.name || '名無し'}（v${d.version || '?'}）`, body: String(d.content || '').slice(0, 120), url: APP_URL + '?page=pgBackup' });
+  }
+  await metaRef.set({ lastReportAt: last }, { merge: true });
+  console.log(`要望・報告のお知らせ（管理者）: ${sent} 件送信`);
+}
+
 async function sendFriendNotices() {
   const col = db.collection('susuru_anki_friend_requests');
   let sent = 0;
@@ -298,6 +325,7 @@ async function sendFriendNotices() {
 }
 
 (async () => {
+  if (MODE === 'all' || MODE === 'friends' || MODE === 'reports') await sendReportNotices().catch(e => console.log('要望・報告のお知らせに失敗:', e.message));
   if (MODE === 'all' || MODE === 'friends') await sendFriendNotices().catch(e => console.log('フレンド申請のお知らせに失敗:', e.message));
   if (MODE === 'all' || MODE === 'reminders') await sendReminders();
   if (MODE === 'all' || MODE === 'plan') await sendPlanReminders().catch(e => console.log('週間プランの通知に失敗:', e.message));

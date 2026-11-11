@@ -68,11 +68,18 @@ self.addEventListener('fetch', event => {
 });
 
 // ---------------- 通知 ----------------
+function versionNotNewer(a, b) { const pa = String(a).split('.').map(Number), pb = String(b).split('.').map(Number); for (let i = 0; i < Math.max(pa.length, pb.length); i++) { const x = pa[i] || 0, y = pb[i] || 0; if (x !== y) return x < y; } return true; }
 function show(title, body, opts = {}) {
   return self.registration.showNotification(title || 'すするanki', Object.assign({
     body: body || '', icon: 'icons/icon-192.png', badge: 'icons/badge-96.png', lang: 'ja',
-    tag: opts.tag || 'susuru', renotify: !!opts.renotify, data: { url: opts.url || './' }
+    tag: opts.tag || 'susuru', renotify: !!opts.renotify, data: { url: opts.url || './', kind: opts.kind || '', version: opts.version || '', at: Date.now() }
   }, opts.extra || {}));
+}
+// ★【0.04.10】同じ種類の前の通知は消す（催促・課題・煽り・アップデートが溜まらないように）。フレンド申請・要望の通知は消さない
+const REPLACE_KINDS = ['reminder', 'plan', 'taunt', 'update'];
+async function closeOldNotifications(kind, keepTag) {
+  if (!REPLACE_KINDS.includes(kind)) return;
+  try { (await self.registration.getNotifications()).forEach(n => { const d = n.data || {}; if ((d.kind === kind || (!d.kind && n.tag === kind)) && n.tag !== keepTag) n.close(); }); } catch (e) {}
 }
 
 // プッシュ通知（サーバーから。Firebase Cloud Messaging のデータメッセージ）
@@ -85,7 +92,8 @@ self.addEventListener('push', event => {
   event.waitUntil((async () => {
     if (d.kind === 'update' && d.version) await notifyKvSet('notifiedVersion', d.version);
     if (d.kind === 'reminder') await notifyKvSet('lastRemindDate', localDateStr());
-    await show(title, body, { tag: d.tag || d.kind || 'susuru', url: d.url || './', renotify: true });
+    await closeOldNotifications(d.kind, d.tag);
+    await show(title, body, { tag: d.tag || d.kind || 'susuru', url: d.url || './', renotify: true, kind: d.kind, version: d.version });
   })());
 });
 
@@ -102,7 +110,12 @@ self.addEventListener('notificationclick', event => {
 // 画面からの依頼で通知を出す（テスト通知・アプリを開いている間の催促）
 self.addEventListener('message', event => {
   const m = event.data || {};
-  if (m.type === 'notify') event.waitUntil(show(m.title, m.body, { tag: m.tag, url: m.url, renotify: true }));
+  if (m.type === 'notify') event.waitUntil(show(m.title, m.body, { tag: m.tag, url: m.url, renotify: true, kind: m.kind }));
+  // ★【0.04.10】アプリを開いたとき：もう古い通知（今の版までのアップデート・催促・課題・煽り）を消す
+  if (m.type === 'clearOld') event.waitUntil(self.registration.getNotifications().then(list => list.forEach(n => {
+    const d = n.data || {}, kind = d.kind || (REPLACE_KINDS.includes(n.tag) ? n.tag : '');
+    if (kind === 'update' ? !d.version || !m.version || versionNotNewer(d.version, m.version) : ['reminder', 'plan', 'taunt'].includes(kind) || /^plan-/.test(n.tag)) n.close();
+  })).catch(() => {}));
   if (m.type === 'check') event.waitUntil(backgroundCheck()); // 動作確認用
 });
 

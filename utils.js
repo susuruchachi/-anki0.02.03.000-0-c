@@ -36,6 +36,14 @@ function figHTML(text) {
   return `${title ? `<div class="fig-title">${e(title)}</div>` : ''}${inner}`;
 }
 
+// ★【0.04.10】エスケープ済みの文の中の URL を、押すと開けるリンクにする（メッセージ・お知らせ・要望・AI の答え）
+function linkifyHTML(html) {
+  return String(html == null ? '' : html).replace(/(^|[^"'=>])(https?:\/\/[^\s<>"'（）「」、。]+)/g, (m, pre, url) => {
+    const tail = (url.match(/[).,!?;:]+$/) || [''])[0], u = tail ? url.slice(0, -tail.length) : url;
+    return `${pre}<a href="${u}" target="_blank" rel="noopener noreferrer" class="msg-link" onclick="event.stopPropagation()">${u}</a>${tail}`;
+  });
+}
+
 // ★【0.03.02】onclick="fn(...)" の引数に文字列を安全に埋め込む（名前に ' や \ が入っていてもスクリプトとして実行されない）
 function jsArg(v) {
   return JSON.stringify(String(v == null ? '' : v)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '&#39;');

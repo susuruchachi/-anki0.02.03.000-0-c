@@ -972,7 +972,7 @@ function qaWrapId(prefix, id) { return 'qaWrap_' + prefix + '_' + String(id).rep
 function qaPanelHTML(id, prefix, open) {
   const list = drillQaListById(id), ask = drillAiOk();
   if (!list.length && !ask) return '';
-  const item = x => `<div class="card drill-qa"><div class="hint-small">Q：${dE(x.q)}${x.at > 1e9 ? `　<span style="opacity:.7">${new Date(x.at).toLocaleDateString('ja-JP')}</span>` : ''}<button class="chip" style="float:right; padding:2px 8px;" onclick="event.stopPropagation(); qaDelete(${jsArg(id)}, ${Number(x.at)}, ${jsArg(prefix)})" title="消す">🗑️</button></div>${dE(x.a).replace(/\n/g, '<br>')}${x.model && typeof aiModelTag === 'function' ? `<div>${aiModelTag(x.model)}</div>` : ''}</div>`;
+  const item = x => `<div class="card drill-qa"><div class="hint-small">Q：${dE(x.q)}${x.at > 1e9 ? `　<span style="opacity:.7">${new Date(x.at).toLocaleDateString('ja-JP')}</span>` : ''}<button class="chip" style="float:right; padding:2px 8px;" onclick="event.stopPropagation(); qaDelete(${jsArg(id)}, ${Number(x.at)}, ${jsArg(prefix)})" title="消す">🗑️</button></div>${linkifyHTML(dE(x.a)).replace(/\n/g, '<br>')}${x.model && typeof aiModelTag === 'function' ? `<div>${aiModelTag(x.model)}</div>` : ''}</div>`;
   return `<details class="qa-panel"${open ? ' open' : ''} onclick="event.stopPropagation()" ontoggle="if(this.open && typeof clearTimeout === 'function' && typeof autoNextTimeout !== 'undefined') clearTimeout(autoNextTimeout)"><summary>💬 AI への質問${list.length ? `（${list.length}件）` : '（まだありません）'}</summary>
     ${list.map(item).join('')}
     ${ask ? `<div class="qa-ask"><input id="${qaWrapId(prefix, id)}_in" class="form-control" placeholder="${list.length ? '続けて質問（前の質問の続きとして答えます）' : 'この問題について質問'}" onfocus="if(typeof autoNextTimeout !== 'undefined') clearTimeout(autoNextTimeout)" onkeydown="if(event.key==='Enter'&&!event.isComposing)qaAsk(${jsArg(id)}, ${jsArg(prefix)})">
@@ -1001,11 +1001,11 @@ async function qaAsk(id, prefix) {
 }
 function drillQaReadOnlyHTML(id) {
   const list = drillQaListById(id); if (!list.length) return '';
-  return `<details class="card drill-qa-old" open><summary class="hint-small">💬 この問題でした質問（${list.length}件）</summary>${list.map(x => `<div class="card drill-qa"><div class="hint-small">Q：${dE(x.q)}${x.at > 1e9 ? `　<span style="opacity:.7">${new Date(x.at).toLocaleDateString('ja-JP')}</span>` : ''}</div>${dE(x.a).replace(/\n/g, '<br>')}${x.model ? `<div>${aiModelTag(x.model)}</div>` : ''}</div>`).join('')}</details>`;
+  return `<details class="card drill-qa-old" open><summary class="hint-small">💬 この問題でした質問（${list.length}件）</summary>${list.map(x => `<div class="card drill-qa"><div class="hint-small">Q：${dE(x.q)}${x.at > 1e9 ? `　<span style="opacity:.7">${new Date(x.at).toLocaleDateString('ja-JP')}</span>` : ''}</div>${linkifyHTML(dE(x.a)).replace(/\n/g, '<br>')}${x.model ? `<div>${aiModelTag(x.model)}</div>` : ''}</div>`).join('')}</details>`;
 }
 function drillQaHTML() {
   const list = drillQaList(dcur), n0 = dst.qaStart ?? list.length; // この画面より前の質問はたたむ
-  const one = (x, i) => `<div class="card drill-qa"><div class="hint-small">Q：${dE(x.q)}${x.at > 1e9 ? `　<span style="opacity:.7">${new Date(x.at).toLocaleDateString('ja-JP')}</span>` : ''}<button class="chip" style="float:right; padding:2px 8px;" onclick="drillQaDelete(${i})" title="消す">🗑️</button></div>${dE(x.a).replace(/\n/g, '<br>')}${x.model ? `<div>${aiModelTag(x.model)}</div>` : ''}</div>`;
+  const one = (x, i) => `<div class="card drill-qa"><div class="hint-small">Q：${dE(x.q)}${x.at > 1e9 ? `　<span style="opacity:.7">${new Date(x.at).toLocaleDateString('ja-JP')}</span>` : ''}<button class="chip" style="float:right; padding:2px 8px;" onclick="drillQaDelete(${i})" title="消す">🗑️</button></div>${linkifyHTML(dE(x.a)).replace(/\n/g, '<br>')}${x.model ? `<div>${aiModelTag(x.model)}</div>` : ''}</div>`;
   const old = list.slice(0, n0), cur = list.slice(n0);
   return (old.length ? `<details class="card drill-qa-old"${dst.qo || old.length <= 3 ? ' open' : ''}><summary class="hint-small">💬 この${dcur.it ? '単語' : '問題'}の前の質問（${old.length}件）</summary>${old.map((x, i) => one(x, i)).join('')}</details>` : '') +
     cur.map((x, i) => one(x, n0 + i)).join('') +
