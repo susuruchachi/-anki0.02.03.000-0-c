@@ -9,6 +9,9 @@ const firebaseConfig = {
 };
 if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth(); const firestore = firebase.firestore();
+// ★【0.04.11】回線・端末（Android アプリなど）によって、Firestore のリアルタイムの接続が詰まり、チャットや一覧が出てこないことがあった。
+//  詰まる環境では自動で別の接続方式（ロングポーリング）に切り替える
+try { firestore.settings({ experimentalAutoDetectLongPolling: true, merge: true }); } catch (e) {}
 
 const STORAGE_KEY = 'susuru_anki_022g';
 let currentUser = null, db = [], categories = ["未分類"], categoryTree = {};

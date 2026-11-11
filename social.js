@@ -310,17 +310,20 @@ function openChat(friendUid, friendName) {
   msgBox.innerHTML = '履歴を取得中...';
   
   if (currentChatUnsubscribe) currentChatUnsubscribe();
+  // ★【0.04.11】読めないときは理由を出す（前は「履歴を取得中...」のまま何も出なかった）。10秒たっても届かなければ知らせる
+  const slow = setTimeout(() => { if (msgBox.innerHTML === '履歴を取得中...') msgBox.innerHTML = '<div class="hint-small" style="text-align:center;">⏳ 届くのに時間がかかっています（回線が混んでいるか、Firebase が遅くなっています）。少し待つか、閉じてもう一度開いてください。</div>'; }, 10000);
   currentChatUnsubscribe = firestore.collection('susuru_anki_chats').doc(chatId).collection('messages').orderBy('timestamp', 'asc').onSnapshot(snap => {
+    clearTimeout(slow);
     msgBox.innerHTML = ''; 
     if (snap.empty) { msgBox.innerHTML = '<div style="color:var(--text3); text-align:center; font-size:0.8rem;">まだメッセージがありません。</div>'; }
     snap.forEach(doc => {
       const data = doc.data(); const isMe = data.senderId === currentUser.uid;
       const wrap = document.createElement('div'); wrap.style.cssText = `display:flex; flex-direction:column; max-width:80%; ${isMe ? 'align-self:flex-end;' : 'align-self:flex-start;'}`;
       const bubble = document.createElement('div'); bubble.style.cssText = `padding:10px 14px; border-radius:14px; font-size:0.9rem; word-break:break-all; ${isMe ? 'background:var(--primary); color:#fff; border-bottom-right-radius:2px;' : 'background:var(--bg3); border:1px solid var(--border); color:var(--text); border-bottom-left-radius:2px;'}`;
-      bubble.style.whiteSpace = 'pre-wrap'; bubble.innerHTML = linkifyHTML(escapeHtml(data.text)); // ★【0.04.10】URL は押すと開く wrap.appendChild(bubble); msgBox.appendChild(wrap);
+      bubble.style.whiteSpace = 'pre-wrap'; bubble.innerHTML = linkifyHTML(escapeHtml(data.text)); wrap.appendChild(bubble); msgBox.appendChild(wrap); // ★【0.04.10】URL は押すと開く
     });
     msgBox.scrollTop = msgBox.scrollHeight;
-  });
+  }, err => { clearTimeout(slow); msgBox.innerHTML = `<div style="color:var(--danger); text-align:center; font-size:0.85rem;">⚠️ メッセージを読めませんでした（${escapeHtml(err.code || err.message || '')}）。閉じてもう一度開いてください。</div>`; });
 }
 
 function closeChat() { 
@@ -335,10 +338,11 @@ async function sendChatMessage() {
   const text = input.value.trim(); 
   if (!text || !currentChatFriendUid) return;
   const chatId = getChatId(currentUser.uid, currentChatFriendUid);
+  // ★【0.04.11】入力欄はすぐ空にする（送信の完了を待っていたので、回線が遅いと「送っても何も起きない」ように見えた）。失敗したら戻す
+  input.value = '';
   try { 
     await firestore.collection('susuru_anki_chats').doc(chatId).collection('messages').add({ text: text, senderId: currentUser.uid, timestamp: firebase.firestore.FieldValue.serverTimestamp() }); 
-    input.value = ''; 
-  } catch (e) { alert("⚠️ エラーが発生しました。"); }
+  } catch (e) { if (!input.value) input.value = text; alert("⚠️ 送信できませんでした（" + (e.code || e.message || '') + "）。もう一度送ってください。"); }
 }
 
 

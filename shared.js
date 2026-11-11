@@ -623,10 +623,14 @@ async function loadPublicCategories() {
   const listDiv = document.getElementById('publicCategoriesList');
   if (!listDiv) return;
   stopPublicCategoriesWatch();
-  listDiv.innerHTML = '<div style="text-align:center; color:var(--text2);">読み込み中...</div>';
+  // ★【0.04.11】前に読んだ一覧をすぐ出しておき、新しい一覧が届いたら差し替える
+  let cached = null; try { cached = JSON.parse(localStorage.getItem(PUB_LIST_KEY) || 'null'); } catch (e) {}
+  if (cached && Array.isArray(cached.list) && cached.list.length) { publicCategoriesCache = cached.list; _publicFull = true; renderPublicCategories(); listDiv.insertAdjacentHTML('afterbegin', '<div class="hint-small pub-refreshing" style="text-align:center;">🔄 最新の一覧を読み込み中…</div>'); }
+  else listDiv.innerHTML = '<div style="text-align:center; color:var(--text2);">読み込み中...</div>';
   try {
     const snap = await firestore.collection(PUB_INDEX_COL).where('isPublic', '==', true).get();
     publicCategoriesCache = snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
+    savePublicListCache();
     _publicFull = false;
     if (!publicCategoriesCache.length) return loadPublicCategoriesFull(); // 目次がまだ無いとき（はじめて）
     renderPublicCategories();
@@ -637,14 +641,16 @@ async function loadPublicCategories() {
 }
 // 目次に無いものも探す（全部の公開カテゴリーを中身ごと読む。時間がかかる）。読んだものは目次に書いておく
 let _publicFull = false;
+const PUB_LIST_KEY = 'susuru_anki_public_list';
+function savePublicListCache() { try { localStorage.setItem(PUB_LIST_KEY, JSON.stringify({ at: Date.now(), list: publicCategoriesCache.map(c => ({ id: c.id, catName: c.catName, ownerId: c.ownerId, ownerName: c.ownerName, cardCount: c.cardCount, subscriberCount: c.subscriberCount, shareCode: c.shareCode })) })); } catch (e) {} }
 async function loadPublicCategoriesFull() {
   const listDiv = document.getElementById('publicCategoriesList');
   if (!listDiv) return;
-  listDiv.innerHTML = '<div style="text-align:center; color:var(--text2);">⏳ すべての公開カテゴリーを読み込み中…（はじめは時間がかかります。次からは速くなります）</div>';
+  if (!listDiv.querySelector('.pub-refreshing')) listDiv.innerHTML = '<div style="text-align:center; color:var(--text2);">⏳ すべての公開カテゴリーを読み込み中…（はじめは時間がかかります。次からは速くなります）</div>';
   try {
     const snap = await firestore.collection('susuru_anki_shared').where('isPublic', '==', true).get();
     publicCategoriesCache = snap.docs.map(d => { const x = d.data(); syncPublicIndex(d.id, x); return Object.assign({ id: d.id }, publicIndexEntry(x)); });
-    _publicFull = true;
+    _publicFull = true; savePublicListCache();
     renderPublicCategories();
   } catch (err) {
     console.error("公開カテゴリー読み込みエラー:", err);
