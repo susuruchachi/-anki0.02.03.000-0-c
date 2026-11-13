@@ -17,6 +17,9 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.CancellationSignal;
+import android.speech.tts.TextToSpeech;
+import android.speech.tts.UtteranceProgressListener;
+import android.media.AudioAttributes;
 import android.os.Environment;
 import android.provider.MediaStore;
 import android.util.Base64;
@@ -63,6 +66,9 @@ public class MainActivity extends Activity {
     private WebView web;
     private ValueCallback<Uri[]> fileCallback;
     private final Executor bg = Executors.newSingleThreadExecutor();
+    // ★【0.04.13】読み上げ：Android の WebView はブラウザの読み上げ（Web Speech）が使えないので、Android の読み上げ（TextToSpeech）を使う
+    private TextToSpeech tts;
+    private volatile boolean ttsOk = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -114,6 +120,18 @@ public class MainActivity extends Activity {
             }
         });
 
+        tts = new TextToSpeech(this, status -> {
+            ttsOk = status == TextToSpeech.SUCCESS;
+            if (!ttsOk) return;
+            // 音楽を止めないように、読み上げは「話し声」として流す
+            tts.setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build());
+            tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                @Override public void onStart(String id) {}
+                @Override public void onDone(String id) { ttsDone(id); }
+                @Override public void onError(String id) { ttsDone(id); }
+                @Override public void onStop(String id, boolean interrupted) { ttsDone(id); }
+            });
+        });
         if (savedInstanceState != null) web.restoreState(savedInstanceState);
         else web.loadUrl(startUrl(getIntent()));
     }
@@ -165,6 +183,14 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onPause() { super.onPause(); CookieManager.getInstance().flush(); }
+
+    @Override
+    protected void onDestroy() { if (tts != null) { tts.stop(); tts.shutdown(); } super.onDestroy(); }
+
+    private void ttsDone(String id) {
+        String js = "window.__susuruTtsDone&&window.__susuruTtsDone(" + JSONObject.quote(id == null ? "" : id) + ")";
+        runOnUiThread(() -> web.evaluateJavascript(js, null));
+    }
 
     private void openInApp(Uri u) {
         String sc = u.getScheme();
@@ -281,6 +307,21 @@ public class MainActivity extends Activity {
         }
 
         // 外のページを、ほかのアプリ（ブラウザなど）で開く
+        // 読み上げ（1つずつ。終わったら window.__susuruTtsDone(id)）。使えなければ false
+        @JavascriptInterface public boolean ttsReady() { return ttsOk; }
+        @JavascriptInterface public boolean ttsSpeak(String id, String text, String lang, float rate) {
+            if (!ttsOk || tts == null) return false;
+            try {
+                java.util.Locale loc = java.util.Locale.forLanguageTag(lang == null || lang.isEmpty() ? "ja-JP" : lang);
+                if (tts.isLanguageAvailable(loc) >= TextToSpeech.LANG_AVAILABLE) tts.setLanguage(loc);
+                tts.setSpeechRate(rate > 0 ? rate : 1f);
+                return tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, id) == TextToSpeech.SUCCESS;
+            } catch (Exception e) { return false; }
+        }
+        @JavascriptInterface public void ttsStop() { if (tts != null) tts.stop(); }
+        @JavascriptInterface public boolean ttsHasLang(String lang) {
+            try { return tts != null && ttsOk && tts.isLanguageAvailable(java.util.Locale.forLanguageTag(lang)) >= TextToSpeech.LANG_AVAILABLE; } catch (Exception e) { return false; }
+        }
         @JavascriptInterface public void openInApp(String url) { runOnUiThread(() -> MainActivity.this.openInApp(Uri.parse(url))); }
         @JavascriptInterface public void openExternal(String url) {
             try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url))); } catch (Exception e) { toast("開けるアプリがありません"); }

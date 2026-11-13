@@ -113,7 +113,7 @@ function renderTtsMixSetting() {
   const sel = document.getElementById('selTtsMix'); if (!sel) return;
   sel.value = ttsMixPref();
   const note = document.getElementById('lblTtsMixNote');
-  if (note) note.textContent = navigator.audioSession ? '' : '⚠️ このブラウザはこの設定に対応していません（iPhone・iPad の iOS 17 以降の Safari・ホーム画面アプリで使えます。Android は設定しなくても音楽と一緒に流れることが多いです）';
+  if (note) note.textContent = navigator.audioSession || (typeof isAndroidApp === 'function' && isAndroidApp()) ? '' : '⚠️ このブラウザはこの設定に対応していません（iPhone・iPad の iOS 17 以降の Safari・ホーム画面アプリで使えます。Android は設定しなくても音楽と一緒に流れることが多いです）';
 }
 applyTtsAudioSession();
 function speakText(text, options = {}) {

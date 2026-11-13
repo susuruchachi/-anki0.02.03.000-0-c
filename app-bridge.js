@@ -72,3 +72,41 @@ function appCheckApkUpdate(force) {
   if (confirm(`📲 新しい Android アプリ（${ANDROID_APK_VERSION}）があります。\n今のアプリに上書きで入れます（学習データはそのまま）。更新しますか？`)) appInstallApk();
 }
 window.addEventListener('load', () => setTimeout(() => appCheckApkUpdate(false), 4000));
+
+// ================================================================
+// ★【0.04.13】読み上げ：Android アプリ（WebView）はブラウザの読み上げ（speechSynthesis）が動かないので、
+//  アプリ側の Android の読み上げ（TextToSpeech）につなぐ。speechSynthesis・SpeechSynthesisUtterance と同じ形で使えるようにするので、
+//  クイズ・暗記テスト・聞き流し・AI の声が使えないときのいつもの読み上げは、そのまま動く
+// ================================================================
+(function () {
+  if (!isAndroidApp() || !window.SusuruApp.ttsSpeak) return;
+  const voices = [
+    { name: 'Android 日本語', lang: 'ja-JP', localService: true, default: true, voiceURI: 'android-ja' },
+    { name: 'Android English', lang: 'en-US', localService: true, default: false, voiceURI: 'android-en' }
+  ];
+  function Utterance(text) { this.text = String(text == null ? '' : text); this.lang = ''; this.rate = 1; this.pitch = 1; this.volume = 1; this.voice = null; this.onend = null; this.onerror = null; this.onstart = null; }
+  Utterance.prototype.addEventListener = function (t, f) { this['on' + t] = f; };
+  let queue = [], cur = null, seq = 0;
+  const fire = (u, t) => { try { if (u && typeof u['on' + t] === 'function') u['on' + t]({ type: t, utterance: u }); } catch (e) {} };
+  function next() {
+    if (cur || !queue.length) return;
+    cur = queue.shift(); cur._id = 'u' + (++seq);
+    const lang = cur.lang || (cur.voice && cur.voice.lang) || 'ja-JP';
+    let ok = false; try { ok = window.SusuruApp.ttsSpeak(cur._id, cur.text, lang, Number(cur.rate) || 1); } catch (e) {}
+    if (!ok) { const u = cur; cur = null; fire(u, 'error'); next(); return; }
+    fire(cur, 'start');
+  }
+  window.__susuruTtsDone = function (id) {
+    if (!cur || cur._id !== id) return; // 止めたもの・前のものは無視
+    const u = cur; cur = null; fire(u, 'end'); next();
+  };
+  const synth = {
+    get speaking() { return !!cur; }, get pending() { return queue.length > 0; }, paused: false, onvoiceschanged: null,
+    speak(u) { if (!u || !u.text) { fire(u, 'end'); return; } queue.push(u); next(); },
+    cancel() { const q = queue; queue = []; const u = cur; cur = null; try { window.SusuruApp.ttsStop(); } catch (e) {} if (u) fire(u, 'end'); q.forEach(x => fire(x, 'end')); },
+    pause() {}, resume() {}, getVoices() { return voices.slice(); },
+    addEventListener(t, f) { if (t === 'voiceschanged') this.onvoiceschanged = f; }, removeEventListener() {}
+  };
+  try { Object.defineProperty(window, 'speechSynthesis', { value: synth, configurable: true, writable: true }); } catch (e) { window.speechSynthesis = synth; }
+  window.SpeechSynthesisUtterance = Utterance;
+})();

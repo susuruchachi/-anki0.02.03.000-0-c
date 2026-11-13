@@ -25,7 +25,9 @@ function ttsAnyModelReady() { try { const keys = allAiKeys().gemini; return TTS_
 
 // 使うか：iPhone・iPad（audioSession がある Safari）で、「音楽を止める」以外を選んでいて、Gemini のキーがあるとき
 function ttsUseAi() {
-  if (!navigator.audioSession || typeof ttsMixPref !== 'function' || ttsMixPref() === 'stop') return false;
+  // ★【0.04.13】Android アプリでも AI の声を使う（アプリの中で鳴らすので、音楽と一緒に流せる）
+  const app = typeof isAndroidApp === 'function' && isAndroidApp();
+  if ((!navigator.audioSession && !app) || typeof ttsMixPref !== 'function' || ttsMixPref() === 'stop') return false;
   if (navigator.onLine === false) return false;
   try { return typeof allAiKeys === 'function' && allAiKeys().gemini.length > 0; } catch (e) { return false; }
 }
