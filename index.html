@@ -1115,6 +1115,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
     <div class="card" style="margin-bottom: 15px;">
       <div style="font-size:0.85rem; color:var(--text2); margin-bottom: 10px;">作成者: <span id="sharedOwnerName" style="color:var(--text); font-weight:bold;">--</span></div>
       <div id="sharedCodeRow" style="font-size:0.85rem; color:var(--text2); margin-bottom:10px; display:none;">🔑 共有コード: <span id="sharedCodeText" style="font-family:'JetBrains Mono',monospace; font-weight:700; color:var(--text); letter-spacing:0.1em;"></span> <button class="chip" onclick="copySharedCode()">📋 コピー</button></div>
+      <button id="sharedPubLinkBtn" class="btn btn-secondary" style="display:none; margin-bottom:10px;" onclick="currentSharedData && sharePublicLink(currentSharedDocId, currentSharedData.catName)">🔗 共有用リンク（開いた人は購読します）</button>
       <button class="btn btn-success" onclick="importCurrentShared()">📥 購読してインポート</button>
       <button class="btn btn-secondary" style="margin-top:10px;" onclick="exitSharedMode()">🏠 閉じてホームに戻る</button>
     </div>

@@ -357,6 +357,7 @@ function renderSharedPage() {
     const owner = currentUser && currentUser.uid === data.ownerId;
     if (data.shareCode) { codeRow.style.display = 'block'; document.getElementById('sharedCodeText').innerText = data.shareCode; }
     else codeRow.style.display = 'none';
+    const pl = document.getElementById('sharedPubLinkBtn'); if (pl) pl.style.display = data.isPublic ? '' : 'none'; // ★【0.04.12】公開カテゴリーの共有用リンク
     // 作成者なら、コードが無ければ発行し、あれば「コードで探せる」ように登録しておく（発行すると onSnapshot で再描画される）
     if (owner) ensureShareCode(currentSharedDocId).catch(() => {});
   }
@@ -678,6 +679,7 @@ function renderPublicCategories() {
       <div style="font-size:0.85rem; color:var(--text2); margin-top:4px;">作成者: <span style="color:var(--text);">${escapeHtml(cat.ownerName || 'Unknown')}</span></div>
       <div style="font-size:0.8rem; color:var(--text3); margin-top:6px;">カード数: <span style="color:var(--primary); font-weight:bold;">${cat.cardCount ?? (cat.cards || []).length}問</span> 👥 利用者: <span style="color:var(--accent); font-weight:bold;">${cat.subscriberCount ?? (cat.subscriberUids || []).length}人</span></div>
       <button class="btn btn-secondary" style="margin-top:10px; width:100%;" onclick="openPage('pgShared'); listenToSharedDoc(${jsArg(cat.id)})">🌐 詳細・共同編集者の管理</button>
+      <button class="btn btn-secondary" style="margin-top:8px; width:100%;" onclick="sharePublicLink(${jsArg(cat.id)}, ${jsArg(cat.catName)})">🔗 共有用リンク（開いた人は購読します）</button>
       ${subscribeBtn}
       ${isOwner ? `<button class="btn btn-danger" style="margin-top:8px; width:100%;" onclick="deletePublicCategory(${jsArg(cat.id)}, ${jsArg(cat.catName)})">🗑️ 削除</button>` : ''}`;
     listDiv.appendChild(card);
@@ -756,20 +758,51 @@ async function importPublicCategory(docId, catName) {
     const count = subscribeToSharedData(docId, cat);
     autoMerge(); alert(`✅ 購読完了！\n新規追加: ${count}件`); openPage('pgBox');
     syncSubscriptions();
-    // 利用者数を記録（自分のUIDをsubscriberUidsに追記）
-    if (currentUser) {
-      try {
-        await firestore.collection('susuru_anki_shared').doc(docId).update({
-          subscriberUids: firebase.firestore.FieldValue.arrayUnion(currentUser.uid)
-        });
-        // ローカルキャッシュも即時更新
-        const subs = new Set(cat.subscriberUids || []); subs.add(currentUser.uid);
-        syncPublicIndex(docId, Object.assign({}, cat, { subscriberUids: [...subs] }));
-        const cached = publicCategoriesCache.find(c => c.id === docId);
-        if (cached) cached.subscriberCount = subs.size;
-      } catch(e2) { /* 失敗しても購読自体は成功しているので無視 */ }
-    }
+    recordPublicSubscriber(docId, cat);
   } catch(e) { alert('⚠️ 購読に失敗しました'); }
+}
+// 利用者数を記録（自分のUIDをsubscriberUidsに追記）。失敗しても購読自体は成功しているので無視
+async function recordPublicSubscriber(docId, cat) {
+  if (!currentUser) return;
+  try {
+    await firestore.collection('susuru_anki_shared').doc(docId).update({ subscriberUids: firebase.firestore.FieldValue.arrayUnion(currentUser.uid) });
+    const subs = new Set(cat.subscriberUids || []); subs.add(currentUser.uid);
+    syncPublicIndex(docId, Object.assign({}, cat, { subscriberUids: [...subs] }));
+    const cached = publicCategoriesCache.find(c => c.id === docId);
+    if (cached) cached.subscriberCount = subs.size;
+  } catch (e) {}
+}
+
+// ================================================================
+// ★【0.04.12】公開カテゴリーの共有用リンク（?sub=カテゴリーのID）。開いた人は、そのカテゴリーを購読する
+// ================================================================
+function publicSubscribeUrl(docId) { return location.origin + location.pathname + '?sub=' + encodeURIComponent(docId); }
+async function sharePublicLink(docId, catName) {
+  const url = publicSubscribeUrl(docId);
+  if (navigator.share && /Android|iPhone|iPad|Macintosh/.test(navigator.userAgent) && 'ontouchend' in document) {
+    try { await navigator.share({ title: `すするanki「${catName}」`, text: `すするanki の公開カテゴリー「${catName}」です。開くと購読できます。`, url }); return; }
+    catch (e) { if (e && e.name === 'AbortError') return; }
+  }
+  const ok = await copyTextToClipboard(url);
+  if (ok === true) alert(`✅ 共有用リンクをコピーしました\n${url}\n\n開いた人は、このカテゴリーを購読します。`);
+}
+function waitAuthReady(ms) { return new Promise(r => { const t0 = Date.now(); const tick = () => { if (window._authReady || Date.now() - t0 > ms) r(); else setTimeout(tick, 100); }; tick(); }); }
+async function handleSubscribeLink(docId) {
+  try { const u = new URL(location.href); u.searchParams.delete('sub'); history.replaceState(history.state, '', u.pathname + u.search + u.hash); } catch (e) {} // 読み込み直しで二重にしない
+  await waitAuthReady(5000);
+  let s;
+  try { s = await firestore.collection('susuru_anki_shared').doc(docId).get(); }
+  catch (e) { return alert('⚠️ カテゴリーを読めませんでした（通信を確かめて、もう一度リンクを開いてください）'); }
+  if (!s.exists) return alert('⚠️ このカテゴリーは見つかりません（削除されたかもしれません）');
+  const d = s.data();
+  // 作った人・公開していないカテゴリーは、いつもの詳細の画面
+  if ((currentUser && d.ownerId === currentUser.uid) || !d.isPublic) { openPage('pgShared'); listenToSharedDoc(docId); return; }
+  if (subscribedDocs.includes(docId)) { openPage('pgBox'); return alert(`📚 「${d.catName}」はもう購読しています`); }
+  const cat = Object.assign({ id: docId }, d);
+  const count = subscribeToSharedData(docId, cat);
+  autoMerge(); syncSubscriptions(); recordPublicSubscriber(docId, cat);
+  openPage('pgBox');
+  alert(`✅ 公開カテゴリー「${d.catName}」を購読しました（${count}問）\n作成者が問題を直したり足したりすると、自動で届きます。`);
 }
 
 // ★【0.02.59-g】構造エクスプローラーからのカテゴリー追加・削除をsharedDocに同期

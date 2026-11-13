@@ -28,6 +28,7 @@ async function firebaseLogout() {
 
 auth.onAuthStateChanged(user => {
   currentUser = user;
+  window._authReady = true; // ★【0.04.12】ログインの確認が済んだ（共有用リンクの購読で待つ）
   const ls = document.getElementById('fbLoginState');
   if(!ls) return;
   
