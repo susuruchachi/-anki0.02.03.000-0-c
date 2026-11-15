@@ -706,7 +706,8 @@ function loadQuizQuestion() {
 
   if (typeof ttsSetShareCard === 'function') ttsSetShareCard(cur); // ★【0.03.86】共有・公開カテゴリーの声は分け合う
   if(document.getElementById('chkTTS').checked) {
-    speakText(spoilerSafeSpeech(qSpeech));
+    window._quizQSpeech = spoilerSafeSpeech(qSpeech); // ★【0.04.16】「読み方を直す」で、実際に読んだ問題文を作り直せるように
+    speakText(window._quizQSpeech);
     // ★【0.03.75】AI の声のときは、答えと次の問題の声を先に作っておく
     if (typeof ttsPrefetch === 'function') { const nx = quizPool[quizIndex + 1]; ttsPrefetch([getPrimaryAnswer(cur.answer), nx ? spoilerSafeSpeech(nx.kind && /\n/.test(nx.question) ? nx.question.split('\n')[0] : nx.question) : '']); }
   }
@@ -1643,7 +1644,7 @@ function renderAiFeedbackBox(cur, isCorrect, opts) {
   if (!isCorrect && opts.typed && !opts.focusLate && String(opts.given || '').trim()) btns.push(`<button type="button" class="chip" onclick="regradeLastAnswer(true)">🙆 合っているので正解にする</button>`);
   const canExplain = !isCorrect && !opts.pass && typeof aiAvailable === 'function' && aiAvailable() && getAiPrefs().hint && !window.currentOnlineMatch && !(ai && ai.tip);
   if (canExplain) btns.push(`<button type="button" class="chip" id="btnAiExplain" onclick="showAiExplanation()">🤖 AIの解説</button>`);
-  if (document.getElementById('chkTTS') && document.getElementById('chkTTS').checked && typeof ttsOpenFixDialog === 'function') btns.push(`<button type="button" class="chip" onclick="ttsOpenFixDialog([quizPool[quizIndex].question, getPrimaryAnswer(quizPool[quizIndex].answer)])">🗣️ 読み方を直す</button>`);
+  if (document.getElementById('chkTTS') && document.getElementById('chkTTS').checked && typeof ttsOpenFixDialog === 'function') btns.push(`<button type="button" class="chip" onclick="ttsOpenFixDialog([window._quizQSpeech || quizPool[quizIndex].question, getPrimaryAnswer(quizPool[quizIndex].answer)])">🗣️ 読み方を直す</button>`);
   box.innerHTML = parts.join('') + (btns.length ? `<div class="ai-btns">${btns.join('')}</div>` : '') + '<div id="aiExplainArea"></div>';
   box.style.display = (parts.length || btns.length) ? 'block' : 'none';
   if (canExplain && getAiPrefs().explainAuto) showAiExplanation();
