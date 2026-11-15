@@ -442,7 +442,7 @@ async function renderCompareStats() {
 
     const accumulate = (doc, isMe) => {
       const d = doc.data();
-      if (d.mode === 'race' || d.mode === 'drillprog') return;
+      if (d.mode === 'race' || d.mode === 'drillprog' || d.mode === 'summary') return;
       if (catSet && !catSet.has(d.category)) return;
       if ((d.mode === 'drill' ? 'drill' : 'quiz') !== cmpMode) return;
       if (!dateMap[d.date]) dateMap[d.date] = { myScore: 0, myTotal: 0, friendScore: 0, friendTotal: 0, friendName: '?' };

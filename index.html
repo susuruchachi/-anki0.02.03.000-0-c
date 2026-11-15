@@ -181,6 +181,12 @@ h2 { font-size: 1.4rem; font-weight: 700; margin-bottom: 20px; display: flex; al
 .cmp-prog-row { font-size: .9rem; margin-top: 2px; }
 .race-prog { font-size: .8rem; color: var(--text2); margin-top: 2px; width: 100%; }
 .msg-link { color: var(--accent, #4f8cff); text-decoration: underline; word-break: break-all; }
+.stats-cmp-wrap { overflow-x: auto; }
+.stats-cmp { border-collapse: collapse; width: 100%; font-size: .85rem; }
+.stats-cmp th, .stats-cmp td { padding: 5px 6px; border-bottom: 1px solid var(--border); text-align: right; white-space: nowrap; }
+.stats-cmp th:first-child { text-align: left; font-weight: normal; color: var(--text2); }
+.stats-cmp tr:first-child th { font-weight: 700; color: var(--text); text-align: right; }
+.stats-cmp td.top { color: var(--success, #22c77a); font-weight: 700; }
 .qa-panel { margin: 6px 0; border: 1px solid var(--border); border-radius: 10px; padding: 6px 8px; background: var(--bg3); text-align: left; }
 .qa-panel > summary { cursor: pointer; font-size: .85rem; font-weight: 700; color: var(--text2); }
 .qa-panel .drill-qa { margin: 6px 0; font-size: .9rem; }
@@ -891,6 +897,11 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
     <div class="card">
       <div class="setting-box-title">🔥 連続記録と学習ヒートマップ（過去15週）</div>
       <div id="heatmapContainer" class="heatmap-grid"></div>
+    </div>
+
+    <div class="card">
+      <div class="setting-box-title">👥 フレンドと比べる</div>
+      <div id="statsFriendBox" class="hint-small">読み込み中...</div>
     </div>
 
     <div class="card">

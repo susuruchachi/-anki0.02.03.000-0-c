@@ -230,7 +230,7 @@ function srsStatusOf(t) {
   if (t.level === -1) return 'shikkari';
   if (t.level >= 3) return 'master';
   if (t.level >= 1) return 'normal';
-  return (t.correct || 0) + (t.incorrect || 0) > 0 ? 'weak' : 'unseen';
+  return (typeof cardAnswered === 'function' ? cardAnswered(t) : (t.correct || 0) + (t.incorrect || 0) > 0) ? 'weak' : 'unseen';
 }
 function recordQuizSessionResult(cur, isCorrect, isPass, regrade, m, senseKey, before) {
   if (window.currentOnlineMatch || !cur) return;
