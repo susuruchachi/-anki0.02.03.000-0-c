@@ -70,20 +70,25 @@ function statsSummary() {
   return { streak: s.cur, best: s.best, today: s.todayCount, week, month, daysTotal: s.total,
     grad: c('grad'), master: c('master'), normal: c('normal'), weak: c('weak') + c('shikkari'), unseen: c('unseen'), cards: db.length, date: today };
 }
-let _sumSent = '', _sumAt = 0;
+// ★【0.04.17】解いたら数秒後に送る（前は2分に1回までだったので、フレンドの画面になかなか出なかった）
+let _sumSent = '', _sumTimer = null;
 function publishStatsSummary(force) {
   if (typeof currentUser === 'undefined' || !currentUser || typeof raceShareOn !== 'function' || !raceShareOn()) return;
-  const sum = statsSummary(), key = JSON.stringify(sum);
-  if (key === _sumSent || (!force && Date.now() - _sumAt < 120000)) return;
-  _sumSent = key; _sumAt = Date.now();
-  firestore.collection('susuru_anki_category_scores').doc('summary_' + currentUser.uid)
-    .set(Object.assign({ mode: 'summary', uid: currentUser.uid, name: currentUser.displayName || 'Anonymous', updatedAt: Date.now() }, sum))
-    .catch(() => { _sumSent = ''; });
+  clearTimeout(_sumTimer);
+  _sumTimer = setTimeout(() => {
+    const sum = statsSummary(), key = JSON.stringify(sum);
+    if (key === _sumSent) return;
+    _sumSent = key;
+    firestore.collection('susuru_anki_category_scores').doc('summary_' + currentUser.uid)
+      .set(Object.assign({ mode: 'summary', uid: currentUser.uid, name: currentUser.displayName || 'Anonymous', updatedAt: Date.now() }, sum))
+      .catch(() => { _sumSent = ''; });
+  }, force ? 0 : 4000);
 }
 async function renderStatsFriends() {
   const box = document.getElementById('statsFriendBox'); if (!box) return;
   if (typeof currentUser === 'undefined' || !currentUser) { box.innerHTML = 'ログインすると、フレンドと成績を比べられます。'; return; }
   publishStatsSummary(true);
+  if (typeof startFriendLiveWatch === 'function') startFriendLiveWatch();
   let friends = [], docs = [];
   try {
     friends = await myFriendList();
@@ -94,15 +99,18 @@ async function renderStatsFriends() {
   // 前の日の記録の「今日」は0、別の週・月なら今週・今月も0にして比べる
   const fix = d => { const x = Object.assign({}, d); if (x.date !== today) { x.today = 0; const mon = streakShift(today, -((new Date(today + 'T12:00:00').getDay() + 6) % 7)); if (!(x.date >= mon)) x.week = 0; if (String(x.date).slice(0, 7) !== today.slice(0, 7)) x.month = 0; if (x.date < streakShift(today, -1)) x.streak = 0; } return x; };
   const me = Object.assign({ name: 'あなた', me: true }, statsSummary());
-  const cols = [me, ...docs.map(fix).sort((a, b) => (b.week || 0) - (a.week || 0))];
+  // ★【0.04.17】まだまとめが無いフレンドも列に出す（「—」。前は出なかったので、比べられないように見えた）
+  const have = new Set(docs.map(d => d.uid)), noSum = friends.filter(u => !have.has(u)).slice(0, 10);
+  const noNames = await Promise.all(noSum.map(u => (typeof friendNameOf === 'function' ? friendNameOf(u) : Promise.resolve('フレンド')).catch(() => 'フレンド')));
+  const cols = [me, ...docs.map(fix).sort((a, b) => (b.week || 0) - (a.week || 0)), ...noSum.map((u, i) => ({ name: noNames[i], none: true }))];
   const rows = [['🔥 連続記録（日）', 'streak'], ['🏆 最長（日）', 'best'], ['📝 今日の問題数', 'today'], ['📅 今週の問題数', 'week'], ['🗓️ 今月の問題数', 'month'], ['📆 学習した日（合計）', 'daysTotal'],
     ['🎓 卒業', 'grad'], ['⚡ 得意', 'master'], ['⚠️ 苦手・しっかり', 'weak', true], ['🃏 カードの数', 'cards']];
-  const best = (k, low) => { const v = cols.map(c => Number(c[k]) || 0); return low ? null : Math.max(...v); };
+  const best = (k, low) => { const v = cols.filter(c => !c.none).map(c => Number(c[k]) || 0); return low ? null : Math.max(...v); };
   const missing = friends.length - docs.length;
   box.innerHTML = `<div class="stats-cmp-wrap"><table class="stats-cmp"><tr><th></th>${cols.map(c => `<th>${escapeHtml(c.name)}</th>`).join('')}</tr>
-    ${rows.map(([l, k, low]) => { const b = best(k, low); return `<tr><th>${l}</th>${cols.map(c => { const v = Number(c[k]) || 0; return `<td class="${!low && b > 0 && v === b ? 'top' : ''}">${v}</td>`; }).join('')}</tr>`; }).join('')}
-    <tr><th>🕒 記録</th>${cols.map(c => `<td class="hint-small">${c.me ? '今' : escapeHtml(String(c.date || '').slice(5).replace('-', '/'))}</td>`).join('')}</tr></table></div>
-    ${missing > 0 ? `<div class="hint-small" style="margin-top:6px;">ほかに ${missing}人のフレンドがいます（成績共有がオフか、まだこの版で開いていないため、まだ出ません）。</div>` : ''}
+    ${rows.map(([l, k, low]) => { const b = best(k, low); return `<tr><th>${l}</th>${cols.map(c => { if (c.none) return '<td class="hint-small">—</td>'; const v = Number(c[k]) || 0; return `<td class="${!low && b > 0 && v === b ? 'top' : ''}">${v}</td>`; }).join('')}</tr>`; }).join('')}
+    <tr><th>🕒 記録</th>${cols.map(c => `<td class="hint-small">${c.me ? '今' : c.none ? 'まだ無し' : escapeHtml(String(c.date || '').slice(5).replace('-', '/'))}</td>`).join('')}</tr></table></div>
+    ${missing > 0 ? `<div class="hint-small" style="margin-top:6px;">「—」のフレンドは、成績共有がオフか、まだ新しい版のアプリで問題を解いていないため、成績がまだ届いていません。</div>` : ''}
     ${typeof raceShareOn === 'function' && !raceShareOn() ? '<div class="hint-small" style="margin-top:6px;">⚠️ あなたの成績共有がオフなので、フレンドからはあなたの成績が見えません（設定の「👥 フレンド・ランキング」でオンにできます）。</div>' : ''}
     <button class="btn btn-secondary" style="margin-top:8px;" onclick="openPage('pgCompareStats')">📈 正答率の推移・暗記テストの進み具合を詳しく比べる</button>`;
 }

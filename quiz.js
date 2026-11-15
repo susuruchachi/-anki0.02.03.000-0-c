@@ -1943,6 +1943,9 @@ async function recordDailyLogAdjust(delta) {
 async function recordDailyLog(isCorrect, opts = {}) {
   if (typeof notifyMarkStudied === 'function') notifyMarkStudied(); // ★【0.03.14】今日は学習済み（催促しない）
   if (typeof markStudyDay === 'function') markStudyDay(); // ★【0.03.62】連続記録
+  // ★【0.04.17】1問ごとに、プランバトルの記録・成績のまとめもフレンドに届ける（数秒まとめて）
+  if (typeof raceSync === 'function') raceSync();
+  if (typeof publishStatsSummary === 'function') publishStatsSummary(false);
   if(!currentUser) return;
   const d = getTodayStr(); 
   const inc = firebase.firestore.FieldValue.increment;

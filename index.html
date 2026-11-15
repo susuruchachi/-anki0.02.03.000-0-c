@@ -389,9 +389,9 @@ body.light-mode .setting-box { background: rgba(240,242,245,0.4); }
 .hm-stats b { display: block; font-family: 'JetBrains Mono', monospace; font-size: 1.05rem; color: var(--text); }
 .hm-stats span { font-size: 0.62rem; color: var(--text2); }
 .hm-grid { display: grid; gap: 3px; align-items: center; }
-.hm-month { font-size: 0.6rem; color: var(--text2); white-space: nowrap; overflow: visible; height: 12px; }
-.hm-wd { font-size: 0.6rem; color: var(--text2); text-align: left; }
-.hm-cell { aspect-ratio: 1; width: 100%; border-radius: 4px; background: var(--bg4); border: none; padding: 0; cursor: pointer; }
+.hm-month { font-size: 0.6rem; color: var(--text2); white-space: nowrap; overflow: visible; height: 12px; width: 0; }
+.hm-wd { font-size: 0.55rem; color: var(--text2); text-align: left; line-height: 11px; }
+.hm-cell { aspect-ratio: 1; width: 100%; border-radius: 2px; background: var(--bg4); border: none; padding: 0; cursor: pointer; }
 .hm-cell.hm-future { background: transparent; cursor: default; }
 .hm-cell.hm-today { outline: 2px solid #f59e0b; outline-offset: 1px; }
 .hm-cell.hm-sel { outline: 2px solid var(--primary); outline-offset: 1px; }
@@ -895,7 +895,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
     <h2>📊 習熟実績と学習状況</h2>
     
     <div class="card">
-      <div class="setting-box-title">🔥 連続記録と学習ヒートマップ（過去15週）</div>
+      <div class="setting-box-title">🔥 連続記録と学習ヒートマップ</div>
       <div id="heatmapContainer" class="heatmap-grid"></div>
     </div>
 
