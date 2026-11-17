@@ -458,6 +458,7 @@ function renderPlanViews() {
   planSyncNotice();
   if (typeof raceSync === 'function') raceSync();
   if (typeof updateAppBadge === 'function') updateAppBadge();
+  if (typeof appWidgetSync === 'function') appWidgetSync(); // ★【0.04.18】ウィジェットの「次の課題」
 }
 
 // ---------------- 通知 ----------------

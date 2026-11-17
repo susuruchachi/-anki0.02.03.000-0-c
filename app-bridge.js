@@ -110,3 +110,33 @@ window.addEventListener('load', () => setTimeout(() => appCheckApkUpdate(false),
   try { Object.defineProperty(window, 'speechSynthesis', { value: synth, configurable: true, writable: true }); } catch (e) { window.speechSynthesis = synth; }
   window.SpeechSynthesisUtterance = Utterance;
 })();
+
+// ================================================================
+// ★【0.04.18】Android のホーム画面のウィジェットに、連続記録・今日の数・週間プランの次の課題を渡す
+//  （アプリを開いたとき・1問解いたとき・プランが変わったとき。日付が変わったときの表示はウィジェット側で計算する）
+// ================================================================
+let _widgetTimer = null;
+function appWidgetSync(now) {
+  if (!isAndroidApp() || !window.SusuruApp.setWidgetData) return;
+  clearTimeout(_widgetTimer);
+  _widgetTimer = setTimeout(() => {
+    try {
+      const s = typeof getStreakInfo === 'function' ? getStreakInfo() : { cur: 0, best: 0, todayCount: 0 };
+      const days = Object.keys(studyDays || {}).filter(k => studyDayCount(studyDays[k]) > 0).sort();
+      const data = { streak: s.cur, best: s.best, today: s.todayCount, todayDate: getTodayStr(), last: days.length ? days[days.length - 1] : '', at: Date.now() };
+      if (typeof planList === 'function' && planList().length) {
+        const t = typeof planUrgentTask === 'function' ? planUrgentTask() : null;
+        if (t) {
+          const name = t.title.split('：').slice(1).join('：') || t.title;
+          const text = t.key === 'words' ? (t.overdue ? `⏰ ${name}：単語の期限を過ぎています` : `🧠 ${name}：今週の単語`) : t.key === 'chants' ? `🎵 ${name}：チャンツ` : t.key === 'examples' ? `📖 ${name}：例文` : `🔁 ${name}：先週の復習`;
+          data.plan = { text, deadline: t.deadline && !t.overdue ? +t.deadline : 0, url: t.planId ? `${location.origin}${location.pathname}?plantask=${encodeURIComponent(t.planId + ':' + t.key)}` : '' };
+        } else data.plan = {};
+        const n = typeof planTodayRemaining === 'function' ? planTodayRemaining() : 0;
+        if (n > 1) data.foot = `すするanki ・ 残りの課題 ${n}つ`;
+      }
+      window.SusuruApp.setWidgetData(JSON.stringify(data));
+    } catch (e) {}
+  }, now ? 0 : 1500);
+}
+window.addEventListener('load', () => setTimeout(() => appWidgetSync(true), 3000));
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') appWidgetSync(true); });

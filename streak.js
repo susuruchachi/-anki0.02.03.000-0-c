@@ -19,6 +19,7 @@ function markStudyDay() {
   if (first && _streakSaveDay !== t) { _streakSaveDay = t; try { saveData(); } catch (e) {} }
   else { try { if (!_localWriteTimer) _localWriteTimer = setTimeout(writeLocal, 400); } catch (e) {} }
   if (first) { renderStreakCard(); if (typeof updateAppBadge === 'function') updateAppBadge(); }
+  if (typeof appWidgetSync === 'function') appWidgetSync(); // ★【0.04.18】ホーム画面のウィジェット
   if (typeof publishStatsSummary === 'function') publishStatsSummary(false); // ★【0.04.14】フレンドに見せる成績のまとめ（2分に1回まで）
 }
 
