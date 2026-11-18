@@ -409,7 +409,14 @@ async function applyAppUpdate() {
   let reloaded = false;
   // アップデートで読み込み直したときは、週間プランの課題を自動で開かない（いた画面に戻る）
   try { localStorage.setItem('susuru_anki_plan_autoopen', String(Date.now())); } catch (e) {}
-  const go = () => { if (reloaded) return; reloaded = true; if (document.body) document.body.classList.remove('in-quiz'); location.reload(); };
+  // ★【0.04.28】URL に ?upd=新しいバージョン を付けて開き直す（サービスワーカーが、GitHub の配信に残っている古いファイルを避けて取りに行く）
+  const target = _updateFound && _updateFound.version;
+  const go = () => {
+    if (reloaded) return; reloaded = true; if (document.body) document.body.classList.remove('in-quiz');
+    if (!target) return location.reload();
+    try { const n = Number(sessionStorage.getItem('susuru_upd_try') || 0); sessionStorage.setItem('susuru_upd_try', String(n + 1)); } catch (e) {}
+    const u = new URL(location.href); u.searchParams.set('upd', target); location.replace(u.href);
+  };
   try {
     if (navigator.serviceWorker) navigator.serviceWorker.addEventListener('controllerchange', go, { once: true });
     if (_swReg) {
@@ -420,6 +427,19 @@ async function applyAppUpdate() {
   } catch (e) {}
   setTimeout(go, 300);
 }
+// ★【0.04.28】開き直したあと：URL の ?upd を消す。まだ古いままなら、少し待ってもう一度（3回まで）
+(function afterUpdateReload() {
+  let want = ''; try { want = new URL(location.href).searchParams.get('upd') || ''; } catch (e) {}
+  if (!want) { try { sessionStorage.removeItem('susuru_upd_try'); } catch (e) {} return; }
+  window.addEventListener('load', () => {
+    const u = new URL(location.href); u.searchParams.delete('upd'); history.replaceState(history.state, '', u.pathname + u.search + u.hash);
+    let n = 0; try { n = Number(sessionStorage.getItem('susuru_upd_try') || 0); } catch (e) {}
+    if (typeof APP_VERSION !== 'undefined' && versionNewer(want, APP_VERSION) && n < 3) {
+      if (typeof showAppToast === 'function') showAppToast(`🔄 新しいバージョン v${want} がまだ届いていません。少し待って、もう一度読み込みます…`);
+      setTimeout(() => { if (appIdleForUpdate()) { try { sessionStorage.setItem('susuru_upd_try', String(n + 1)); } catch (e) {} const v = new URL(location.href); v.searchParams.set('upd', want); location.replace(v.href); } }, 20000);
+    } else { try { sessionStorage.removeItem('susuru_upd_try'); } catch (e) {} }
+  });
+})();
 function startUpdateWatch() {
   clearInterval(_updateTimer);
   _updateTimer = setInterval(checkForAppUpdate, UPDATE_CHECK_MS);

@@ -160,9 +160,19 @@ async function mainVersion() {
   try { const r = await fetch(`https://raw.githubusercontent.com/${repo}/main/version-info.js?t=${Date.now()}`); if (r.ok) return ((await r.text()).match(/APP_VERSION\s*=\s*["']([^"']+)["']/) || [])[1] || null; } catch (e) {}
   return null;
 }
+// ★【0.04.28】サイトにそのバージョンが出るまで待つ（GitHub Pages の公開は push から1分ほどかかる。出る前に知らせると、再読み込みしても新しくならない）
+async function waitSiteVersion(v, maxMs) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < maxMs) {
+    try { const r = await fetch(APP_URL + 'version-info.js?t=' + Date.now(), { cache: 'no-store' }); if (r.ok && ((await r.text()).match(/APP_VERSION\s*=\s*["']([^"']+)["']/) || [])[1] === v) return true; } catch (e) {}
+    await new Promise(r => setTimeout(r, 15000));
+  }
+  return false;
+}
 async function sendUpdate() {
   const { version, title } = await readVersionInfo();
   if (!version) return console.log('バージョンを読めませんでした');
+  if (process.env.GITHUB_EVENT_NAME === 'push' && !(await waitSiteVersion(version, 6 * 60000))) return console.log(`v${version} がまだサイトに出ていないので、今は知らせません（次の定期実行で知らせます）`);
   const metaRef = db.doc(META_DOC);
   const meta = (await metaRef.get()).data() || {};
   const mv = await mainVersion();

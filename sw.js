@@ -31,7 +31,15 @@ self.addEventListener('activate', event => {
   )).then(() => self.clients.claim()));
 });
 
-function networkFirst(req) {
+// ★【0.04.28】「再読み込み」で新しいバージョンにするとき、ページの URL に ?upd=バージョン が付く。
+//  そのときは、ファイルの URL にも同じ印を付けて取りに行く（GitHub の配信の途中に残っている古いファイル（10分ほど）を避ける）
+function bustOf(event, url) {
+  const own = url.searchParams.get('upd');
+  if (own || event.request.mode === 'navigate') return Promise.resolve(own || '');
+  if (!event.clientId) return Promise.resolve('');
+  return self.clients.get(event.clientId).then(c => { try { return c ? (new URL(c.url).searchParams.get('upd') || '') : ''; } catch (e) { return ''; } }).catch(() => '');
+}
+function networkFirst(req, bust) {
   return new Promise(resolve => {
     let done = false;
     const fromCache = () => caches.match(req, { ignoreSearch: req.mode === 'navigate' }).then(r => r || (req.mode === 'navigate' ? caches.match('./index.html') : null));
@@ -39,9 +47,11 @@ function networkFirst(req) {
     const timer = setTimeout(() => { fromCache().then(r => { if (r && !done) { done = true; resolve(r); } }); }, 6000);
     // ★【0.04.07】ブラウザの HTTP キャッシュ（GitHub Pages は10分ほど持たせる）を使わず、必ずサーバーに新しいかを確かめる。
     //  Android（Chrome・アプリ）では、ここで古いファイルが返ってきて「再読み込み」しても新しいバージョンにならなかった（iPad は毎回確かめていた）
-    const fresh = req.mode === 'navigate' ? fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' }) : fetch(req, { cache: 'no-cache' });
+    let u = req.url;
+    if (bust && !/[?&]upd=/.test(u)) u += (u.includes('?') ? '&' : '?') + 'upd=' + encodeURIComponent(bust);
+    const fresh = req.mode === 'navigate' || bust ? fetch(u, { cache: 'no-cache', credentials: 'same-origin' }) : fetch(req, { cache: 'no-cache' });
     fresh.then(res => {
-      if (res && res.ok) { const copy = res.clone(); caches.open(CORE_CACHE).then(c => c.put(req, copy)).catch(() => {}); }
+      if (res && res.ok) { const copy = res.clone(); const key = (() => { const k = new URL(req.url); k.searchParams.delete('upd'); return k.href; })(); caches.open(CORE_CACHE).then(c => c.put(key, copy)).catch(() => {}); }
       if (!done) { done = true; clearTimeout(timer); resolve(res); }
     }).catch(() => {
       fromCache().then(r => { if (!done) { done = true; clearTimeout(timer); resolve(r || new Response('オフラインです', { status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' } })); } });
@@ -61,7 +71,7 @@ self.addEventListener('fetch', event => {
   const url = new URL(req.url);
   if (url.origin === self.location.origin) {
     if (url.pathname.endsWith('/sw.js')) return;
-    event.respondWith(networkFirst(req));
+    event.respondWith(bustOf(event, url).then(v => networkFirst(req, v)));
   } else if (CDN_HOSTS.includes(url.hostname)) {
     event.respondWith(staleWhileRevalidate(req));
   }
