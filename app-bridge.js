@@ -134,9 +134,51 @@ function appWidgetSync(now) {
         const n = typeof planTodayRemaining === 'function' ? planTodayRemaining() : 0;
         if (n > 1) data.foot = `すするanki ・ 残りの課題 ${n}つ`;
       }
+      data.board = widgetBoardMine();
+      if (_widgetFriends) data.board.rank = widgetRank(_widgetFriends.list), data.board.rankAt = _widgetFriends.at;
       window.SusuruApp.setWidgetData(JSON.stringify(data));
+      // フレンドの成績は10分に1回だけ読み直す（読み終わったら、もう一度ウィジェットに送る）
+      if (!_widgetFriendsBusy && typeof currentUser !== 'undefined' && currentUser && (!_widgetFriends || Date.now() - _widgetFriends.at > 600000)) {
+        _widgetFriendsBusy = true;
+        widgetLoadFriends().then(list => { _widgetFriends = { list, at: Date.now() }; appWidgetSync(true); }).catch(() => {}).finally(() => { _widgetFriendsBusy = false; });
+      }
     } catch (e) {}
   }, now ? 0 : 1500);
+}
+// ★【0.04.19】大きいウィジェット：フレンドとの今週のランキング・自分の進み具合
+let _widgetFriends = null, _widgetFriendsBusy = false;
+async function widgetLoadFriends() {
+  const friends = typeof myFriendList === 'function' ? await myFriendList() : [];
+  if (!friends.length) return [];
+  const docs = (await firestore.collection('susuru_anki_category_scores').where('mode', '==', 'summary').get()).docs.map(d => d.data());
+  return docs.filter(d => friends.includes(d.uid)).map(d => ({ name: d.name || 'フレンド', week: d.week || 0, today: d.today || 0, streak: d.streak || 0, date: d.date || '' }));
+}
+function widgetRank(list) {
+  const today = getTodayStr(), mon = streakShift(today, -((new Date(today + 'T12:00:00').getDay() + 6) % 7));
+  // 前の日・前の週のまとめは、今日・今週を0にして比べる（成績の画面と同じ）
+  const rows = (list || []).map(d => ({ n: d.name, w: d.date >= mon ? d.week : 0, t: d.date === today ? d.today : 0, s: d.date >= streakShift(today, -1) ? d.streak : 0 }));
+  const me = typeof statsSummary === 'function' ? statsSummary() : { week: 0, today: 0, streak: 0 };
+  rows.push({ n: 'あなた', w: me.week, t: me.today, s: me.streak, me: true });
+  rows.sort((a, b) => b.w - a.w || b.t - a.t || (b.me ? 1 : 0) - (a.me ? 1 : 0));
+  rows.forEach((r, i) => { r.r = i + 1; });
+  const mine = rows.find(r => r.me), top = rows.slice(0, 5);
+  if (!top.includes(mine)) top[4] = mine;
+  return top;
+}
+function widgetBoardMine() {
+  const b = {};
+  try { const m = typeof statsSummary === 'function' ? statsSummary() : null; if (m) b.week = m.week; } catch (e) {}
+  try {
+    if (typeof planTasks === 'function' && typeof planList === 'function' && planList().length) {
+      const icon = { words: '🧠単語', chants: '🎵チャンツ', examples: '📖例文' };
+      b.tasks = planTasks().filter(t => !t.optional).map(t => ({ t: icon[t.key] || '🔁先週', done: !!t.done, wait: !!(t.upcoming || t.locked), p: Math.round((t.progress || 0) * 100) }));
+    }
+  } catch (e) {}
+  try {
+    const d = JSON.parse(localStorage.getItem('susuru_widget_drill') || 'null');
+    if (d && typeof drillProgText === 'function') b.drill = `📝 ${d.cat}：${drillProgText(d)}`;
+  } catch (e) {}
+  return b;
 }
 window.addEventListener('load', () => setTimeout(() => appWidgetSync(true), 3000));
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') appWidgetSync(true); });

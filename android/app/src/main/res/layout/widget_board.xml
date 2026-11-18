@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ★【0.04.19】大きいウィジェット：フレンドとの今週のランキング・自分の進み具合 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/b_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="12dp"
+    android:background="@drawable/widget_bg">
+
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:gravity="center_vertical">
+        <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+            android:text="🏆 今週のランキング" android:textSize="14sp" android:textStyle="bold" android:textColor="#FFD166" />
+        <TextView android:id="@+id/b_rank_at" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="" android:textSize="10sp" android:textColor="#5E6B82" />
+    </LinearLayout>
+
+    <TextView android:id="@+id/b_rank" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="4dp" android:text="アプリを開くと、ランキングが届きます" android:textSize="13sp"
+        android:textColor="#E8EDF5" android:lineSpacingExtra="2dp" android:maxLines="6" android:ellipsize="end" />
+
+    <View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginTop="8dp"
+        android:layout_marginBottom="6dp" android:background="#33FFFFFF" />
+
+    <TextView android:id="@+id/b_status" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:text="今日1問解いて記録をはじめよう" android:textSize="14sp" android:textStyle="bold"
+        android:textColor="#FFFFFF" android:maxLines="2" android:ellipsize="end" />
+    <TextView android:id="@+id/b_week" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="2dp" android:text="" android:textSize="12sp" android:textColor="#C9D1E0" android:maxLines="1" android:ellipsize="end" />
+    <TextView android:id="@+id/b_tasks" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="4dp" android:text="" android:textSize="12sp" android:textColor="#E8EDF5" android:maxLines="2" android:ellipsize="end" />
+    <TextView android:id="@+id/b_plan" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="2dp" android:text="" android:textSize="11sp" android:textColor="#9AA6BC" android:maxLines="1" android:ellipsize="end" />
+    <TextView android:id="@+id/b_drill" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="2dp" android:text="" android:textSize="12sp" android:textColor="#9AD1FF" android:maxLines="2" android:ellipsize="end" />
+</LinearLayout>

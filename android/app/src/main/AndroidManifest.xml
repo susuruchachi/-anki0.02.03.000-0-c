@@ -42,6 +42,13 @@
             </intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_streak_info" />
         </receiver>
+        <!-- ★【0.04.19】大きいウィジェット（フレンドとのランキング・自分の進み具合） -->
+        <receiver android:name=".BoardWidget" android:exported="false" android:label="@string/boardName">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_board_info" />
+        </receiver>
 
         <!-- ★【0.04.12】アプリの中のブラウザ（チャットなどのリンクを開く） -->
         <activity

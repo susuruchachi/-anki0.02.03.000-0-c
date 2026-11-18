@@ -325,7 +325,7 @@ public class MainActivity extends Activity {
         // ★【0.04.18】ホーム画面のウィジェットに出す内容（連続記録・今日の数・週間プランの次の課題）を受け取って描き直す
         @JavascriptInterface public void setWidgetData(String json) {
             getSharedPreferences(StreakWidget.PREFS, MODE_PRIVATE).edit().putString("data", json == null ? "{}" : json).apply();
-            StreakWidget.updateAll(MainActivity.this);
+            StreakWidget.refreshAll(MainActivity.this);
         }
         @JavascriptInterface public void openInApp(String url) { runOnUiThread(() -> MainActivity.this.openInApp(Uri.parse(url))); }
         @JavascriptInterface public void openExternal(String url) {
