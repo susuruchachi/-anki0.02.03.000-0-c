@@ -131,7 +131,7 @@ function renderBox() {
     if (currentViewContext === 'normal') filtered = db.filter(q => !(isGraduated(q)) && q.level >= 1 && q.level <= 2);
     if (currentViewContext === 'weak') filtered = db.filter(q => !(isGraduated(q)) && q.level === 0 && (q.correct+q.incorrect)>0);
     if (currentViewContext === 'shikkari') filtered = db.filter(q => !(isGraduated(q)) && q.level === -1);
-    if (currentViewContext === 'unseen') filtered = db.filter(q => q.correct === 0 && q.incorrect === 0 && q.level >= 0);
+    if (currentViewContext === 'unseen') filtered = db.filter(STATUS_TESTS.unseen);
   }
 
   const sb = document.getElementById('txtSearchBox');

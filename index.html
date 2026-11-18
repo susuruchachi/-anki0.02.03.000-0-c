@@ -181,6 +181,12 @@ h2 { font-size: 1.4rem; font-weight: 700; margin-bottom: 20px; display: flex; al
 .cmp-prog-row { font-size: .9rem; margin-top: 2px; }
 .race-prog { font-size: .8rem; color: var(--text2); margin-top: 2px; width: 100%; }
 .msg-link { color: var(--accent, #4f8cff); text-decoration: underline; word-break: break-all; }
+.stats-cmp-wrap { overflow-x: auto; }
+.stats-cmp { border-collapse: collapse; width: 100%; font-size: .85rem; }
+.stats-cmp th, .stats-cmp td { padding: 5px 6px; border-bottom: 1px solid var(--border); text-align: right; white-space: nowrap; }
+.stats-cmp th:first-child { text-align: left; font-weight: normal; color: var(--text2); }
+.stats-cmp tr:first-child th { font-weight: 700; color: var(--text); text-align: right; }
+.stats-cmp td.top { color: var(--success, #22c77a); font-weight: 700; }
 .qa-panel { margin: 6px 0; border: 1px solid var(--border); border-radius: 10px; padding: 6px 8px; background: var(--bg3); text-align: left; }
 .qa-panel > summary { cursor: pointer; font-size: .85rem; font-weight: 700; color: var(--text2); }
 .qa-panel .drill-qa { margin: 6px 0; font-size: .9rem; }
@@ -383,9 +389,9 @@ body.light-mode .setting-box { background: rgba(240,242,245,0.4); }
 .hm-stats b { display: block; font-family: 'JetBrains Mono', monospace; font-size: 1.05rem; color: var(--text); }
 .hm-stats span { font-size: 0.62rem; color: var(--text2); }
 .hm-grid { display: grid; gap: 3px; align-items: center; }
-.hm-month { font-size: 0.6rem; color: var(--text2); white-space: nowrap; overflow: visible; height: 12px; }
-.hm-wd { font-size: 0.6rem; color: var(--text2); text-align: left; }
-.hm-cell { aspect-ratio: 1; width: 100%; border-radius: 4px; background: var(--bg4); border: none; padding: 0; cursor: pointer; }
+.hm-month { font-size: 0.6rem; color: var(--text2); white-space: nowrap; overflow: visible; height: 12px; width: 0; }
+.hm-wd { font-size: 0.55rem; color: var(--text2); text-align: left; line-height: 11px; }
+.hm-cell { aspect-ratio: 1; width: 100%; border-radius: 2px; background: var(--bg4); border: none; padding: 0; cursor: pointer; }
 .hm-cell.hm-future { background: transparent; cursor: default; }
 .hm-cell.hm-today { outline: 2px solid #f59e0b; outline-offset: 1px; }
 .hm-cell.hm-sel { outline: 2px solid var(--primary); outline-offset: 1px; }
@@ -514,6 +520,41 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 .card-preview-row > b { color: var(--text3); font-size: 0.75rem; min-width: 1.5em; padding-top: 3px; }
 .card-preview-row > div { flex: 1; overflow-x: auto; }
 
+/* ★【0.04.20】📅 カレンダー・👪 グループ */
+.cal-head { display: flex; align-items: center; gap: 8px; margin: 4px 0 8px; }
+.cal-head b { flex: 1; text-align: center; font-size: 1.05rem; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; margin-bottom: 10px; }
+.cal-wd { text-align: center; font-size: 0.7rem; color: var(--text3); padding: 2px 0; }
+.cal-wd.sun, .cal-cell.sun .cal-dn { color: #ff6b6b; } .cal-wd.sat, .cal-cell.sat .cal-dn { color: #5aa0ff; }
+.cal-cell { min-height: 62px; background: var(--bg2); border: 1px solid var(--border); border-radius: 6px; padding: 2px; overflow: hidden; cursor: pointer; position: relative; box-shadow: inset 0 3px 0 var(--band, transparent); }
+.cal-cell.other { opacity: 0.45; }
+.cal-cell.today .cal-dn { background: var(--primary); color: #fff !important; border-radius: 10px; display: inline-block; min-width: 18px; text-align: center; }
+.cal-cell.sel { outline: 2px solid var(--primary); outline-offset: -1px; }
+.cal-dn { font-size: 0.72rem; font-weight: 700; line-height: 1.3; padding: 0 2px; }
+.cal-ev { font-size: 0.58rem; line-height: 1.25; margin-top: 1px; padding: 0 2px; border-radius: 3px; background: color-mix(in srgb, var(--c) 28%, transparent); border-left: 2px solid var(--c); white-space: nowrap; overflow: hidden; text-overflow: clip; color: var(--text); }
+.cal-more { font-size: 0.55rem; color: var(--text3); padding-left: 2px; }
+.cal-day { margin-bottom: 10px; }
+.cal-item { display: flex; align-items: center; gap: 8px; padding: 8px; margin-top: 6px; background: var(--bg3); border-radius: 8px; border-left: 4px solid var(--primary); cursor: pointer; }
+.cal-note { white-space: pre-wrap; margin-top: 2px; }
+.cal-up { display: flex; align-items: center; gap: 6px; padding: 5px 0; font-size: 0.85rem; border-bottom: 1px solid var(--border); cursor: pointer; }
+.cal-up:last-child { border-bottom: none; }
+.cal-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.cal-up-d { color: var(--text2); font-size: 0.78rem; flex-shrink: 0; min-width: 62px; }
+.cal-up-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-left { font-size: 0.78rem; color: var(--text2); flex-shrink: 0; }
+.cal-left.soon { color: #ff5d6c; }
+.cal-home { background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 8px 12px; margin-bottom: 10px; cursor: pointer; }
+.cal-home-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 0.9rem; }
+.cal-home-today { margin: 4px 0 2px; }
+.cal-types { display: flex; flex-wrap: wrap; gap: 6px; }
+.cal-days { display: flex; gap: 4px; flex-wrap: wrap; }
+.cal-daychk { display: flex; align-items: center; gap: 2px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 14px; font-size: 0.85rem; }
+.cal-lbl { font-weight: 500; font-size: 0.8rem; }
+.cal-editor, .group-sheet { max-height: 88vh; overflow-y: auto; }
+.cal-plan-pick { margin-top: 4px; }
+.group-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px; margin-bottom: 6px; background: var(--bg3); border-radius: 8px; cursor: pointer; }
+.group-invite { border: 1px solid var(--warn); cursor: default; }
+.group-mem, .group-cat { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
 </style>
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
@@ -634,7 +675,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 
   <div id="pgHome" class="screen active">
     <!-- ★【0.03.49】ホームを整理：見出しの横にガイド・お知らせ → お知らせバナー → 学習状況 → 今週のプラン（短く）→ クイズ -->
-    <div class="page-head"><h2>🏠 ホーム</h2><div class="page-head-btns"><button class="chip" onclick="openPage('pgTutorial')">📖 ガイド</button><button class="chip" onclick="openPage('pgUpdates'); loadUpdates();">📢 お知らせ</button></div></div>
+    <div class="page-head"><h2>🏠 ホーム</h2><div class="page-head-btns"><button class="chip" onclick="openCalendar()">📅 予定</button><button class="chip" onclick="openPage('pgTutorial')">📖 ガイド</button><button class="chip" onclick="openPage('pgUpdates'); loadUpdates();">📢 お知らせ</button></div></div>
 
     <!-- ★【0.03.00】新しいお知らせのバナー（未読のときだけ表示） -->
     <div id="releaseBanner" class="release-banner" style="display:none;" onclick="openReleaseNotesFromBanner()">
@@ -649,6 +690,8 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
     <!-- ★【0.03.00】学習状況のひと目サマリー（タップでカード箱を絞り込み） -->
     <!-- ★【0.03.62】🔥 連続記録 -->
     <div id="streakCard" class="streak-card" onclick="openPage('pgStats')"></div>
+    <!-- ★【0.04.20】📅 これからのテスト・期限・今日の授業 -->
+    <div id="homeCalCard" class="cal-home" onclick="openCalendar()"></div>
 
     <div class="home-summary">
       <div class="home-summary-item" onclick="showAllCards(); openPage('pgBox');"><div class="home-summary-num" id="homeSumTotal">0</div><div class="home-summary-label">📝 カード</div></div>
@@ -875,6 +918,12 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
     </div>
   </div>
 
+  <!-- ★【0.04.20】📅 カレンダー -->
+  <div id="pgCalendar" class="screen">
+    <div class="page-head"><h2>📅 カレンダー</h2><div class="page-head-btns"><button class="chip" onclick="calNewEvent()">＋</button><button class="chip" onclick="calMenu()">🔗 連携</button><button class="chip" onclick="openPage('pgHome')">戻る</button></div></div>
+    <div id="calApp"></div>
+  </div>
+
   <div id="pgListen" class="screen">
     <div class="page-head"><h2>🎧 聞き流し</h2><div class="page-head-btns"><button class="chip" onclick="openPage('pgHome')">戻る</button></div></div>
     <div id="listenApp"></div>
@@ -889,8 +938,13 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
     <h2>📊 習熟実績と学習状況</h2>
     
     <div class="card">
-      <div class="setting-box-title">🔥 連続記録と学習ヒートマップ（過去15週）</div>
+      <div class="setting-box-title">🔥 連続記録と学習ヒートマップ</div>
       <div id="heatmapContainer" class="heatmap-grid"></div>
+    </div>
+
+    <div class="card">
+      <div class="setting-box-title">👥 フレンドと比べる</div>
+      <div id="statsFriendBox" class="hint-small">読み込み中...</div>
     </div>
 
     <div class="card">
@@ -1079,6 +1133,12 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
       </div>
 
       <div class="card" style="margin-bottom:15px;">
+        <div class="setting-box-title">👪 グループ</div>
+        <div class="hint-small" style="margin-bottom:6px;">フレンドを招待してグループを作ると、グループの中だけでカテゴリー（みんなで編集できる）や予定を共有できます。</div>
+        <div id="groupBox"></div>
+      </div>
+
+      <div class="card" style="margin-bottom:15px;">
         <div class="setting-box-title">📨 フレンド申請 <span class="friend-req-badge" style="display:none;"></span></div>
         <div id="friendRequestsBox" class="hint-small">ログインすると表示されます。</div>
       </div>
@@ -1115,6 +1175,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
     <div class="card" style="margin-bottom: 15px;">
       <div style="font-size:0.85rem; color:var(--text2); margin-bottom: 10px;">作成者: <span id="sharedOwnerName" style="color:var(--text); font-weight:bold;">--</span></div>
       <div id="sharedCodeRow" style="font-size:0.85rem; color:var(--text2); margin-bottom:10px; display:none;">🔑 共有コード: <span id="sharedCodeText" style="font-family:'JetBrains Mono',monospace; font-weight:700; color:var(--text); letter-spacing:0.1em;"></span> <button class="chip" onclick="copySharedCode()">📋 コピー</button></div>
+      <button id="sharedPubLinkBtn" class="btn btn-secondary" style="display:none; margin-bottom:10px;" onclick="currentSharedData && sharePublicLink(currentSharedDocId, currentSharedData.catName)">🔗 共有用リンク（開いた人は購読します）</button>
       <button class="btn btn-success" onclick="importCurrentShared()">📥 購読してインポート</button>
       <button class="btn btn-secondary" style="margin-top:10px;" onclick="exitSharedMode()">🏠 閉じてホームに戻る</button>
     </div>
@@ -1594,6 +1655,8 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 <script src="text-import.js"></script>
 <script src="listen.js"></script>
 <script src="shared.js"></script>
+<script src="group.js"></script>
+<script src="calendar.js"></script>
 <script src="main.js"></script>
 
 </body>

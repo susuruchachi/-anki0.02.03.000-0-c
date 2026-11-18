@@ -38,6 +38,7 @@ let studyDays = {}; // ★【0.03.73】値は { 端末ID: その端末で答え�
 // ★【0.03.73】暗記テストの途中経過 { フォルダー: 途中の状態（at: 保存時刻, dev: 端末）| { deleted: true, at } } と、
 // クイズの「番号順（前回の続きから）」の位置 { 出題範囲: { pos, at } } も同期する
 let drillProgress = {};
+let calEvents = {}; // ★【0.04.20】📅 カレンダーの予定（calendar.js）。{ id: 予定 }（消した予定は { deleted: true, at }）
 let quizOrderPos = {};
 // ★【0.03.82】読み上げの読み方の辞書 { 書き方: { r: 読み方, at } | { deleted: true, at } }（端末間で同期）
 let ttsDict = {};
@@ -256,6 +257,7 @@ function loadData() {
       if(p.studyPlan) studyPlan=p.studyPlan;
       if(p.studyDays) studyDays=p.studyDays;
       if(p.drillProgress) drillProgress=p.drillProgress;
+      if(p.calEvents) calEvents=p.calEvents;
       if(p.quizOrderPos) quizOrderPos=p.quizOrderPos;
       if(p.ttsDict) ttsDict=p.ttsDict;
       if(p.drillQa) drillQa=p.drillQa;
@@ -338,7 +340,7 @@ function updateStructStamp() {
 }
 
 function buildSyncPayload() {
-  return { db, categories, categoryTree, subscribedDocs, ownedDocs, deletedCards, deletedCardsAt, deletedCats, catStamps, docStamps, structAt, catSubjects, catSkip, studyPlan, studyDays, drillProgress, quizOrderPos, ttsDict, drillQa };
+  return { db, categories, categoryTree, subscribedDocs, ownedDocs, deletedCards, deletedCardsAt, deletedCats, catStamps, docStamps, structAt, catSubjects, catSkip, studyPlan, studyDays, drillProgress, quizOrderPos, ttsDict, drillQa, calEvents };
 }
 
 let _quotaWarned = false;
@@ -602,6 +604,7 @@ function mergeSyncStates(L, C) {
     quizOrderPos: mergeStampedMap(L.quizOrderPos, C.quizOrderPos, 365),
     ttsDict: mergeStampedMap(L.ttsDict, C.ttsDict, 365),
     drillQa: mergeDrillQa(L.drillQa, C.drillQa),
+    calEvents: mergeStampedMap(L.calEvents, C.calEvents, 120),
     subscribedDocs: subs, ownedDocs: owned
   };
 }
@@ -611,7 +614,7 @@ function mergeIntoLocal(r) {
   const merged = mergeSyncStates(buildSyncPayload(), r);
   db = merged.db; categories = merged.categories; categoryTree = merged.categoryTree;
   deletedCards = merged.deletedCards; deletedCardsAt = merged.deletedCardsAt; deletedCats = merged.deletedCats;
-  catStamps = merged.catStamps; docStamps = merged.docStamps; structAt = merged.structAt; catSubjects = merged.catSubjects || {}; catSkip = merged.catSkip || {}; studyPlan = merged.studyPlan || null; studyDays = merged.studyDays || {}; drillProgress = merged.drillProgress || {}; quizOrderPos = merged.quizOrderPos || {}; ttsDict = merged.ttsDict || {}; drillQa = merged.drillQa || {};
+  catStamps = merged.catStamps; docStamps = merged.docStamps; structAt = merged.structAt; catSubjects = merged.catSubjects || {}; catSkip = merged.catSkip || {}; studyPlan = merged.studyPlan || null; studyDays = merged.studyDays || {}; drillProgress = merged.drillProgress || {}; quizOrderPos = merged.quizOrderPos || {}; ttsDict = merged.ttsDict || {}; drillQa = merged.drillQa || {}; calEvents = merged.calEvents || {};
   subscribedDocs = merged.subscribedDocs; ownedDocs = merged.ownedDocs;
   ensureSystemSanity();
   autoMerge(true);
@@ -641,7 +644,7 @@ function syncFingerprint(p) {
   return stableStringify({
     db: dbSorted, categories: [...(p.categories || [])].sort(), categoryTree: p.categoryTree || {},
     deletedCards: [...(p.deletedCards || [])].sort(), deletedCardsAt: p.deletedCardsAt || {}, deletedCats: [...(p.deletedCats || [])].sort(),
-    catStamps: p.catStamps || {}, docStamps: p.docStamps || {}, structAt: p.structAt || 0, catSubjects: p.catSubjects || {}, catSkip: p.catSkip || {}, studyPlan: p.studyPlan || null, studyDays: p.studyDays || {}, drillProgress: p.drillProgress || {}, quizOrderPos: p.quizOrderPos || {}, ttsDict: p.ttsDict || {}, drillQa: p.drillQa || {},
+    catStamps: p.catStamps || {}, docStamps: p.docStamps || {}, structAt: p.structAt || 0, catSubjects: p.catSubjects || {}, catSkip: p.catSkip || {}, studyPlan: p.studyPlan || null, studyDays: p.studyDays || {}, drillProgress: p.drillProgress || {}, quizOrderPos: p.quizOrderPos || {}, ttsDict: p.ttsDict || {}, drillQa: p.drillQa || {}, calEvents: p.calEvents || {},
     subscribedDocs: [...(p.subscribedDocs || [])].sort(), ownedDocs: [...(p.ownedDocs || [])].sort()
   });
 }
@@ -796,7 +799,7 @@ function resolveAccountSwitch() {
     if (!merge) {
       takeSnapshot('アカウント変更（置き換え）');
       db = []; categories = ['未分類']; categoryTree = {}; subscribedDocs = []; ownedDocs = [];
-      deletedCards = []; deletedCardsAt = {}; deletedCats = []; catStamps = {}; docStamps = {}; structAt = 0; catSubjects = {}; catSkip = {}; studyPlan = null; studyDays = {}; drillProgress = {}; quizOrderPos = {}; ttsDict = {}; drillQa = {};
+      deletedCards = []; deletedCardsAt = {}; deletedCats = []; catStamps = {}; docStamps = {}; structAt = 0; catSubjects = {}; catSkip = {}; studyPlan = null; studyDays = {}; drillProgress = {}; quizOrderPos = {}; ttsDict = {}; drillQa = {}; calEvents = {};
       sharedDocPermissions = {};
       _structHash = structFingerprint(); writeLocal();
     } else {

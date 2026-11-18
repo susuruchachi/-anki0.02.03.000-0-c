@@ -28,6 +28,7 @@ async function firebaseLogout() {
 
 auth.onAuthStateChanged(user => {
   currentUser = user;
+  window._authReady = true; // ★【0.04.12】ログインの確認が済んだ（共有用リンクの購読で待つ）
   const ls = document.getElementById('fbLoginState');
   if(!ls) return;
   
@@ -67,9 +68,13 @@ auth.onAuthStateChanged(user => {
     if (typeof streakBackfill === 'function') setTimeout(streakBackfill, 4000); // ★【0.03.62】連続記録の過去分
     if (typeof loadAiKeysFromCloud === 'function') loadAiKeysFromCloud(); // ★【0.03.15】AI のキー（自分の・家族の）
     if (typeof startFriendRequestWatch === 'function') startFriendRequestWatch(); // ★【0.03.25】フレンド申請
+    if (typeof startGroupWatch === 'function') startGroupWatch(); // ★【0.04.20】グループ
+    if (typeof calStartSubWatch === 'function') calStartSubWatch(); // ★【0.04.22】URL で購読するカレンダー
   } else {
     if (typeof stopCloudListener === 'function') stopCloudListener();
     if (typeof startFriendRequestWatch === 'function') startFriendRequestWatch(); // ログアウトしたら見張りをやめる
+    if (typeof startGroupWatch === 'function') startGroupWatch();
+    if (typeof calStartSubWatch === 'function') calStartSubWatch();
     ls.innerHTML = `<span style="color:var(--warn);">未ログイン</span>`;
     const btnLogin = document.getElementById('btnFbLogin');
     const btnLogout = document.getElementById('btnFbLogout');

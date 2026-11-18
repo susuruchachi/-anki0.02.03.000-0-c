@@ -19,6 +19,8 @@ function markStudyDay() {
   if (first && _streakSaveDay !== t) { _streakSaveDay = t; try { saveData(); } catch (e) {} }
   else { try { if (!_localWriteTimer) _localWriteTimer = setTimeout(writeLocal, 400); } catch (e) {} }
   if (first) { renderStreakCard(); if (typeof updateAppBadge === 'function') updateAppBadge(); }
+  if (typeof appWidgetSync === 'function') appWidgetSync(); // ★【0.04.18】ホーム画面のウィジェット
+  if (typeof publishStatsSummary === 'function') publishStatsSummary(false); // ★【0.04.14】フレンドに見せる成績のまとめ（2分に1回まで）
 }
 
 function getStreakInfo() {
@@ -53,12 +55,14 @@ function renderStreakCard() {
     <div class="streak-week">${dots}</div>`;
 }
 
-// 学習ヒートマップ（実績ページ・過去12週）
+// 学習ヒートマップ（実績ページ・画面の幅に入るだけの週。最大1年）
 // ★【0.03.95】見やすく：横いっぱいの大きさ・曜日と月の見出し・今日の枠・色の見本・押すとその日の数・今週／今月のまとめ
 function renderStudyHeatmap() {
   const hc = document.getElementById('heatmapContainer'); if (!hc) return;
   const today = getTodayStr(), days = {}; Object.entries(studyDays || {}).forEach(([k, v]) => { days[k] = studyDayCount(v); });
-  const weeks = 15;
+  // ★【0.04.17】マスは小さく決まった大きさ（11px）にして、画面の幅に入るだけの週を出す（前は15週を横いっぱいに広げていたので、マスが大きすぎた）
+  const HM_CELL = 11, HM_GAP = 2, avail = (hc.clientWidth || (hc.parentElement && hc.parentElement.clientWidth) || 340) - 22;
+  const weeks = Math.max(8, Math.min(53, Math.floor(avail / (HM_CELL + HM_GAP))));
   // 列＝週（日曜はじまり）、行＝曜日。いちばん右が今週
   const endOffset = 6 - new Date(today + 'T12:00:00').getDay();
   const start = streakShift(today, endOffset - (weeks * 7 - 1));
@@ -89,7 +93,7 @@ function renderStudyHeatmap() {
       <div><b>🔥 ${s.cur}</b><span>日連続</span></div><div><b>${s.best}</b><span>最長（日）</span></div>
       <div><b>${thisWeek}</b><span>今週の問題数</span></div><div><b>${thisMonth}</b><span>今月の問題数</span></div>
     </div>
-    <div class="hm-grid" style="grid-template-columns: 18px repeat(${weeks}, minmax(0, 1fr));">${months}${cells}</div>
+    <div class="hm-grid" style="grid-template-columns: 18px repeat(${weeks}, ${HM_CELL}px); gap: ${HM_GAP}px;">${months}${cells}</div>
     <div class="hm-foot"><span id="hmInfo" class="hint-small">マスを押すと、その日の問題数が出ます</span>
       <span class="hm-legend">少<i data-level="0"></i><i data-level="1"></i><i data-level="2"></i><i data-level="3"></i><i data-level="4"></i>多</span></div>
     <div class="hint-small" style="margin-top:4px;">学習した日 合計 ${s.total}日 ・ 学習した日の平均 ${avg}問（色：1問〜／5問〜／20問〜／50問〜）</div>`;

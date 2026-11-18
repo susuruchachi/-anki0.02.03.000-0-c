@@ -113,7 +113,7 @@ function renderTtsMixSetting() {
   const sel = document.getElementById('selTtsMix'); if (!sel) return;
   sel.value = ttsMixPref();
   const note = document.getElementById('lblTtsMixNote');
-  if (note) note.textContent = navigator.audioSession ? '' : '⚠️ このブラウザはこの設定に対応していません（iPhone・iPad の iOS 17 以降の Safari・ホーム画面アプリで使えます。Android は設定しなくても音楽と一緒に流れることが多いです）';
+  if (note) note.textContent = navigator.audioSession || (typeof isAndroidApp === 'function' && isAndroidApp()) ? '' : '⚠️ このブラウザはこの設定に対応していません（iPhone・iPad の iOS 17 以降の Safari・ホーム画面アプリで使えます。Android は設定しなくても音楽と一緒に流れることが多いです）';
 }
 applyTtsAudioSession();
 function speakText(text, options = {}) {
@@ -230,7 +230,7 @@ function srsStatusOf(t) {
   if (t.level === -1) return 'shikkari';
   if (t.level >= 3) return 'master';
   if (t.level >= 1) return 'normal';
-  return (t.correct || 0) + (t.incorrect || 0) > 0 ? 'weak' : 'unseen';
+  return (typeof cardAnswered === 'function' ? cardAnswered(t) : (t.correct || 0) + (t.incorrect || 0) > 0) ? 'weak' : 'unseen';
 }
 function recordQuizSessionResult(cur, isCorrect, isPass, regrade, m, senseKey, before) {
   if (window.currentOnlineMatch || !cur) return;
@@ -706,7 +706,8 @@ function loadQuizQuestion() {
 
   if (typeof ttsSetShareCard === 'function') ttsSetShareCard(cur); // ★【0.03.86】共有・公開カテゴリーの声は分け合う
   if(document.getElementById('chkTTS').checked) {
-    speakText(spoilerSafeSpeech(qSpeech));
+    window._quizQSpeech = spoilerSafeSpeech(qSpeech); // ★【0.04.16】「読み方を直す」で、実際に読んだ問題文を作り直せるように
+    speakText(window._quizQSpeech);
     // ★【0.03.75】AI の声のときは、答えと次の問題の声を先に作っておく
     if (typeof ttsPrefetch === 'function') { const nx = quizPool[quizIndex + 1]; ttsPrefetch([getPrimaryAnswer(cur.answer), nx ? spoilerSafeSpeech(nx.kind && /\n/.test(nx.question) ? nx.question.split('\n')[0] : nx.question) : '']); }
   }
@@ -1643,7 +1644,7 @@ function renderAiFeedbackBox(cur, isCorrect, opts) {
   if (!isCorrect && opts.typed && !opts.focusLate && String(opts.given || '').trim()) btns.push(`<button type="button" class="chip" onclick="regradeLastAnswer(true)">🙆 合っているので正解にする</button>`);
   const canExplain = !isCorrect && !opts.pass && typeof aiAvailable === 'function' && aiAvailable() && getAiPrefs().hint && !window.currentOnlineMatch && !(ai && ai.tip);
   if (canExplain) btns.push(`<button type="button" class="chip" id="btnAiExplain" onclick="showAiExplanation()">🤖 AIの解説</button>`);
-  if (document.getElementById('chkTTS') && document.getElementById('chkTTS').checked && typeof ttsOpenFixDialog === 'function') btns.push(`<button type="button" class="chip" onclick="ttsOpenFixDialog([quizPool[quizIndex].question, getPrimaryAnswer(quizPool[quizIndex].answer)])">🗣️ 読み方を直す</button>`);
+  if (document.getElementById('chkTTS') && document.getElementById('chkTTS').checked && typeof ttsOpenFixDialog === 'function') btns.push(`<button type="button" class="chip" onclick="ttsOpenFixDialog([window._quizQSpeech || quizPool[quizIndex].question, getPrimaryAnswer(quizPool[quizIndex].answer)])">🗣️ 読み方を直す</button>`);
   box.innerHTML = parts.join('') + (btns.length ? `<div class="ai-btns">${btns.join('')}</div>` : '') + '<div id="aiExplainArea"></div>';
   box.style.display = (parts.length || btns.length) ? 'block' : 'none';
   if (canExplain && getAiPrefs().explainAuto) showAiExplanation();
@@ -1942,6 +1943,9 @@ async function recordDailyLogAdjust(delta) {
 async function recordDailyLog(isCorrect, opts = {}) {
   if (typeof notifyMarkStudied === 'function') notifyMarkStudied(); // ★【0.03.14】今日は学習済み（催促しない）
   if (typeof markStudyDay === 'function') markStudyDay(); // ★【0.03.62】連続記録
+  // ★【0.04.17】1問ごとに、プランバトルの記録・成績のまとめもフレンドに届ける（数秒まとめて）
+  if (typeof raceSync === 'function') raceSync();
+  if (typeof publishStatsSummary === 'function') publishStatsSummary(false);
   if(!currentUser) return;
   const d = getTodayStr(); 
   const inc = firebase.firestore.FieldValue.increment;

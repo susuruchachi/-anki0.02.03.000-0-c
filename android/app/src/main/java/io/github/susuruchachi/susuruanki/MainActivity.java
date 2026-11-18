@@ -17,6 +17,9 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.CancellationSignal;
+import android.speech.tts.TextToSpeech;
+import android.speech.tts.UtteranceProgressListener;
+import android.media.AudioAttributes;
 import android.os.Environment;
 import android.provider.MediaStore;
 import android.util.Base64;
@@ -63,6 +66,9 @@ public class MainActivity extends Activity {
     private WebView web;
     private ValueCallback<Uri[]> fileCallback;
     private final Executor bg = Executors.newSingleThreadExecutor();
+    // ★【0.04.13】読み上げ：Android の WebView はブラウザの読み上げ（Web Speech）が使えないので、Android の読み上げ（TextToSpeech）を使う
+    private TextToSpeech tts;
+    private volatile boolean ttsOk = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -114,6 +120,18 @@ public class MainActivity extends Activity {
             }
         });
 
+        tts = new TextToSpeech(this, status -> {
+            ttsOk = status == TextToSpeech.SUCCESS;
+            if (!ttsOk) return;
+            // 音楽を止めないように、読み上げは「話し声」として流す
+            tts.setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build());
+            tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                @Override public void onStart(String id) {}
+                @Override public void onDone(String id) { ttsDone(id); }
+                @Override public void onError(String id) { ttsDone(id); }
+                @Override public void onStop(String id, boolean interrupted) { ttsDone(id); }
+            });
+        });
         if (savedInstanceState != null) web.restoreState(savedInstanceState);
         else web.loadUrl(startUrl(getIntent()));
     }
@@ -165,6 +183,14 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onPause() { super.onPause(); CookieManager.getInstance().flush(); }
+
+    @Override
+    protected void onDestroy() { if (tts != null) { tts.stop(); tts.shutdown(); } super.onDestroy(); }
+
+    private void ttsDone(String id) {
+        String js = "window.__susuruTtsDone&&window.__susuruTtsDone(" + JSONObject.quote(id == null ? "" : id) + ")";
+        runOnUiThread(() -> web.evaluateJavascript(js, null));
+    }
 
     private void openInApp(Uri u) {
         String sc = u.getScheme();
@@ -281,6 +307,52 @@ public class MainActivity extends Activity {
         }
 
         // 外のページを、ほかのアプリ（ブラウザなど）で開く
+        // 読み上げ（1つずつ。終わったら window.__susuruTtsDone(id)）。使えなければ false
+        @JavascriptInterface public boolean ttsReady() { return ttsOk; }
+        @JavascriptInterface public boolean ttsSpeak(String id, String text, String lang, float rate) {
+            if (!ttsOk || tts == null) return false;
+            try {
+                java.util.Locale loc = java.util.Locale.forLanguageTag(lang == null || lang.isEmpty() ? "ja-JP" : lang);
+                if (tts.isLanguageAvailable(loc) >= TextToSpeech.LANG_AVAILABLE) tts.setLanguage(loc);
+                tts.setSpeechRate(rate > 0 ? rate : 1f);
+                return tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, id) == TextToSpeech.SUCCESS;
+            } catch (Exception e) { return false; }
+        }
+        @JavascriptInterface public void ttsStop() { if (tts != null) tts.stop(); }
+        @JavascriptInterface public boolean ttsHasLang(String lang) {
+            try { return tts != null && ttsOk && tts.isLanguageAvailable(java.util.Locale.forLanguageTag(lang)) >= TextToSpeech.LANG_AVAILABLE; } catch (Exception e) { return false; }
+        }
+        // ★【0.04.18】ホーム画面のウィジェットに出す内容（連続記録・今日の数・週間プランの次の課題）を受け取って描き直す
+        @JavascriptInterface public void setWidgetData(String json) {
+            getSharedPreferences(StreakWidget.PREFS, MODE_PRIVATE).edit().putString("data", json == null ? "{}" : json).apply();
+            StreakWidget.refreshAll(MainActivity.this);
+        }
+        // ★【0.04.22】カレンダーの購読（.ics の URL）を読む。ブラウザからは読めない（CORS の）サーバーでも、アプリなら読める
+        //   https だけ・5MB まで。終わったら window.__susuruFetchDone(id, ok, 中身 or エラー)
+        @JavascriptInterface public void fetchText(String id, String url) {
+            bg.execute(() -> {
+                boolean ok = false; String body;
+                try {
+                    URL u = new URL(url);
+                    if (!"https".equals(u.getProtocol())) throw new Exception("https のURLだけ読めます");
+                    HttpURLConnection c = (HttpURLConnection) u.openConnection();
+                    c.setConnectTimeout(15000); c.setReadTimeout(30000); c.setInstanceFollowRedirects(true);
+                    c.setRequestProperty("Accept", "text/calendar, text/plain, */*");
+                    try {
+                        int code = c.getResponseCode();
+                        if (code >= 400) throw new Exception("HTTP " + code);
+                        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+                        try (InputStream in = c.getInputStream()) {
+                            byte[] buf = new byte[65536]; int n;
+                            while ((n = in.read(buf)) > 0) { out.write(buf, 0, n); if (out.size() > 5 * 1024 * 1024) throw new Exception("大きすぎます（5MB まで）"); }
+                        }
+                        body = new String(out.toByteArray(), java.nio.charset.StandardCharsets.UTF_8); ok = true;
+                    } finally { c.disconnect(); }
+                } catch (Exception e) { body = String.valueOf(e.getMessage()); }
+                String js = "window.__susuruFetchDone&&window.__susuruFetchDone(" + JSONObject.quote(id == null ? "" : id) + "," + ok + "," + JSONObject.quote(body) + ")";
+                runOnUiThread(() -> web.evaluateJavascript(js, null));
+            });
+        }
         @JavascriptInterface public void openInApp(String url) { runOnUiThread(() -> MainActivity.this.openInApp(Uri.parse(url))); }
         @JavascriptInterface public void openExternal(String url) {
             try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url))); } catch (Exception e) { toast("開けるアプリがありません"); }

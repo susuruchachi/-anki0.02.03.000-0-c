@@ -24,6 +24,7 @@ window.onload = function() {
 
   const urlParams = new URLSearchParams(window.location.search);
   if (urlParams.get('share_id')) { openPage('pgShared'); listenToSharedDoc(urlParams.get('share_id')); }
+  else if (urlParams.get('sub') && typeof handleSubscribeLink === 'function') handleSubscribeLink(urlParams.get('sub')); // ★【0.04.12】公開カテゴリーの共有用リンク
   else if (/^pg[A-Za-z]+$/.test(urlParams.get('page') || '') && document.getElementById(urlParams.get('page'))) {
     // ★【0.03.14】ホーム画面アイコンのショートカット（クイズ・カード一覧）
     openPage(urlParams.get('page'));
@@ -38,7 +39,7 @@ window.onload = function() {
   // ★【0.03.32】週間プランの課題が残っていれば、そこから始める（共有URL・ショートカットで開いたときは除く）
   // ★【0.03.36】通知から開いたときは、その課題をそのまま始める
   if (urlParams.get('plantask') && typeof planHandleTaskParam === 'function') setTimeout(() => planHandleTaskParam(), 1500);
-  else if (!urlParams.get('share_id') && !urlParams.get('page') && typeof planAutoOpen === 'function') setTimeout(planAutoOpen, 2500);
+  else if (!urlParams.get('share_id') && !urlParams.get('sub') && !urlParams.get('page') && typeof planAutoOpen === 'function') setTimeout(planAutoOpen, 2500);
 
   // 起動時に共有カテゴリーの変更を同期する
   if (typeof syncSubscriptions === 'function') syncSubscriptions();

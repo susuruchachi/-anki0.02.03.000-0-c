@@ -35,6 +35,21 @@
                 <data android:scheme="https" android:host="@string/hostName" android:pathPrefix="@string/pathPrefix" />
             </intent-filter>
         </activity>
+        <!-- ★【0.04.18】ホーム画面のウィジェット（連続記録・週間プランの次の課題） -->
+        <receiver android:name=".StreakWidget" android:exported="false" android:label="@string/widgetName">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_streak_info" />
+        </receiver>
+        <!-- ★【0.04.19】大きいウィジェット（フレンドとのランキング・自分の進み具合） -->
+        <receiver android:name=".BoardWidget" android:exported="false" android:label="@string/boardName">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_board_info" />
+        </receiver>
+
         <!-- ★【0.04.12】アプリの中のブラウザ（チャットなどのリンクを開く） -->
         <activity
             android:name=".BrowserActivity"

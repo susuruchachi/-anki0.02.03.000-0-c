@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ★【0.04.19】21時から、今日まだ解いていないとき -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#5A0F16" />
+    <stroke android:width="3dp" android:color="#FF3B4E" />
+    <corners android:radius="20dp" />
+</shape>

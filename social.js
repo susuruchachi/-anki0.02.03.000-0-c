@@ -163,7 +163,7 @@ function startFriendRequestWatch() {
   if (location.hash === '#friends') { history.replaceState(null, '', location.pathname + location.search); openPage('pgFriends'); loadAppFriends(); }
 }
 function renderFriendRequests() {
-  const n = _friendReqIn.length + _friendIntros.length;
+  const n = _friendReqIn.length + _friendIntros.length + (typeof groupInvites !== 'undefined' ? groupInvites.length : 0); // ★【0.04.20】グループへの招待も数える
   document.querySelectorAll('.friend-req-badge').forEach(b => { b.textContent = n; b.style.display = n ? 'inline-flex' : 'none'; });
   const box = document.getElementById('friendRequestsBox');
   if (!box) return;
@@ -442,7 +442,7 @@ async function renderCompareStats() {
 
     const accumulate = (doc, isMe) => {
       const d = doc.data();
-      if (d.mode === 'race' || d.mode === 'drillprog') return;
+      if (d.mode === 'race' || d.mode === 'drillprog' || d.mode === 'summary') return;
       if (catSet && !catSet.has(d.category)) return;
       if ((d.mode === 'drill' ? 'drill' : 'quiz') !== cmpMode) return;
       if (!dateMap[d.date]) dateMap[d.date] = { myScore: 0, myTotal: 0, friendScore: 0, friendTotal: 0, friendName: '?' };

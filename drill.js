@@ -441,17 +441,22 @@ function drillRateRound(round) {
 let _dpTimer = null, _dpLast = '';
 function drillProgDocId(uid, cat) { return 'drillprog_' + uid + '_' + String(cat || 'all').replace(/[\/\s.#$\[\]]+/g, '_').slice(0, 80); }
 function drillProgSync(passed, restN) {
-  if (typeof currentUser === 'undefined' || !currentUser || typeof raceShareOn !== 'function' || !raceShareOn() || !DS || DS.r === undefined) return;
+  if (!DS || DS.r === undefined) return;
+  const signed = typeof currentUser !== 'undefined' && !!currentUser;
+  if (!(signed && typeof raceShareOn === 'function' && raceShareOn()) && typeof isAndroidApp !== 'function') return;
   const items = DG.flatMap(g => g.items), nos = items.map(x => Number(x.card.no)).filter(n => n > 0);
   const n = typeof drillLeftCounts === 'function' && !passed ? drillLeftCounts() : { all: 0, gi: DS.gi };
   const g = DG[Math.max(0, Math.min(DG.length - 1, n.gi >= 0 ? n.gi : DS.gi))];
   const doc = {
-    mode: 'drillprog', uid: currentUser.uid, name: currentUser.displayName || 'Anonymous', cat: DS.cat || 'すべて',
+    mode: 'drillprog', uid: signed ? currentUser.uid : '', name: signed ? (currentUser.displayName || 'Anonymous') : '', cat: DS.cat || 'すべて',
     r: DS.r, final: !!DS.final, passed: !!passed, rest: passed ? (restN || 0) : 0,
     from: nos.length ? cardNoText(Math.min(...nos)) : '', to: DS.r === 1 ? (DS.mx ? cardNoText(DS.mx) : '') : (nos.length ? cardNoText(Math.max(...nos)) : ''),
     last: nos.length ? cardNoText(Math.max(...nos)) : '', gi: g ? DG.indexOf(g) + 1 : 0, groups: DG.length, group: g ? g.name : '',
     words: items.length, left: n.all || 0, rt: DS.rt || 0, date: getTodayStr(), updatedAt: Date.now()
   };
+  // ★【0.04.19】大きいウィジェットに「暗記テストの進み具合」を出すため、この端末にも残す
+  try { localStorage.setItem('susuru_widget_drill', JSON.stringify(doc)); } catch (e) {}
+  if (!(signed && typeof raceShareOn === 'function' && raceShareOn())) return;
   const key = JSON.stringify(Object.assign({}, doc, { updatedAt: 0 }));
   if (key === _dpLast) return;
   clearTimeout(_dpTimer);
@@ -928,7 +933,7 @@ async function drillFin(ok, ans, tip) {
   drillHistStore();
   dView = null;
   dst.res = `<div class="card ${ok ? 'drill-ok-card' : 'drill-ng-card'}">${core}
-    <div class="drill-btns"><button class="btn btn-primary" onclick="drillPop()">次</button>${drillTtsOn() && typeof ttsOpenFixDialog === 'function' ? '<button class="btn btn-secondary" onclick="ttsOpenFixDialog([drillQText(dcur), drillAText(dcur)])">🗣️ 読み方</button>' : ''}${drillAiOk() ? `<button class="btn btn-secondary" onclick="drillQo()">💬 質問する${drillQaList(c).length ? `（前の質問 ${drillQaList(c).length}）` : ''}</button>` : (drillQaList(c).length ? `<button class="btn btn-secondary" onclick="drillQo()">💬 前の質問（${drillQaList(c).length}）</button>` : '')}</div></div>`;
+    <div class="drill-btns"><button class="btn btn-primary" onclick="drillPop()">次</button>${drillTtsOn() && typeof ttsOpenFixDialog === 'function' ? '<button class="btn btn-secondary" onclick="ttsOpenFixDialog([spoilerSafeSpeech(drillQText(dcur)), drillAText(dcur)])">🗣️ 読み方</button>' : ''}${drillAiOk() ? `<button class="btn btn-secondary" onclick="drillQo()">💬 質問する${drillQaList(c).length ? `（前の質問 ${drillQaList(c).length}）` : ''}</button>` : (drillQaList(c).length ? `<button class="btn btn-secondary" onclick="drillQo()">💬 前の質問（${drillQaList(c).length}）</button>` : '')}</div></div>`;
   drillSave(); drillDraw();
 }
 function drillStatsText(c) {

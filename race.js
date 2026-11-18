@@ -25,6 +25,10 @@ function raceCountDrill(st, ok) {
 // 自分の今週の記録（プランごと）
 function raceMine(p) {
   planUse(p);
+  // ★【0.04.17】チャンツ・例文・先週の復習の「終わった」は、週間プランを表示したときに記録していた（クイズの途中では記録されず、
+  //  画面を戻るまで点数に入らなかった）。ここでも確かめて記録する
+  try { if (typeof planTasks === 'function') planTasks(); } catch (e) {}
+  planUse(p);
   const i = planWeekIndex(), L = planLog(i), wk = raceWeekKey();
   const set = new Set(getAllSubcategories(p.root));
   let dc = 0, dw = 0;
@@ -58,6 +62,25 @@ function raceSync() {
 function raceHc() { try { return JSON.parse(localStorage.getItem(RACE_HC_KEY) || '{}') || {}; } catch (e) { return {}; } }
 function raceSetHc(uid, v) { const h = raceHc(); h[uid] = Number(v) || 0; try { localStorage.setItem(RACE_HC_KEY, JSON.stringify(h)); } catch (e) {} renderRace(); }
 
+// ★【0.04.17】フレンドの記録が変わったら、開いているバトル・「フレンドと比べる」をすぐ描き直す（解き終わるのを待たない）
+let _raceLive = null, _raceLiveTimer = null;
+function startFriendLiveWatch() {
+  if (_raceLive || typeof currentUser === 'undefined' || !currentUser) return;
+  let first = true;
+  try {
+    _raceLive = firestore.collection(RACE_COL).where('mode', 'in', ['race', 'summary', 'drillprog']).onSnapshot(snap => {
+      if (first) { first = false; return; }
+      if (snap.docChanges().every(ch => ch.doc.data().uid === currentUser.uid)) return; // 自分の書き込みだけなら描き直さない
+      clearTimeout(_raceLiveTimer);
+      _raceLiveTimer = setTimeout(() => {
+        if (document.visibilityState !== 'visible') return;
+        if ([...document.querySelectorAll('.race-box')].some(b => b.offsetParent !== null)) renderRace();
+        const st = document.getElementById('pgStats'); if (st && st.classList.contains('active') && typeof renderStatsFriends === 'function') renderStatsFriends();
+      }, 1500);
+    }, () => { _raceLive = null; });
+  } catch (e) { _raceLive = null; }
+}
+
 // ---------------- 煽り ----------------
 const RACE_PICK = a => a[Math.floor(Math.random() * a.length)];
 function raceTaunt(me, rows, progOf) {
@@ -84,6 +107,7 @@ async function renderRace() {
   const plans = typeof planList === 'function' ? planList() : [];
   if (!plans.length) return set('<div class="hint-small">週間プランを登録すると、同じ単語帳のプランをしているフレンドと今週の進み具合で競えます。</div>');
   if (typeof currentUser === 'undefined' || !currentUser) return set('<div class="hint-small">ログインすると、フレンドと競えます。</div>');
+  startFriendLiveWatch();
   let friends = [], docs = [], progs = [];
   try {
     friends = await myFriendList();
