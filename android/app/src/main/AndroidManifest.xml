@@ -6,8 +6,11 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- 新しい APK を、アプリの中から上書きインストールする（初めてのときだけ「この提供元のアプリを許可」を聞かれる） -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- ★【0.04.27】通知（Android 13 から、通知を出すには許可が要る） -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
+        android:name=".SusuruApplication"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -49,6 +52,12 @@
             </intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_calendar_info" />
         </receiver>
+        <!-- ★【0.04.27】プッシュ通知（Firebase Cloud Messaging）を受け取る -->
+        <service android:name=".PushService" android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
         <!-- ★【0.04.24】アプリの自動更新（入れた結果・閉じて1分後に起こす） -->
         <receiver android:name=".InstallResultReceiver" android:exported="false" />
         <!-- ★【0.04.19】大きいウィジェット（フレンドとのランキング・自分の進み具合） -->

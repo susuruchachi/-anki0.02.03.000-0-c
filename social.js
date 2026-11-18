@@ -118,7 +118,7 @@ function friendNoticeSeen(key) {
 }
 function friendNotify(title, body, key) {
   if (friendNoticeSeen(key)) return;
-  if (typeof showLocalNotification === 'function' && typeof Notification !== 'undefined' && Notification.permission === 'granted' && document.visibilityState !== 'visible') showLocalNotification(title, body, 'friend');
+  if (typeof showLocalNotification === 'function' && typeof notifPerm === 'function' && notifPerm() === 'granted' && document.visibilityState !== 'visible') showLocalNotification(title, body, 'friend');
   else showAppToast(`${title}　${body}`, () => { openPage('pgFriends'); loadAppFriends(); });
 }
 function showAppToast(text, onClick) {

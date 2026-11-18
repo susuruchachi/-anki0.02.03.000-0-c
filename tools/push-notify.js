@@ -39,7 +39,9 @@ async function sendToUser(docRef, data, payload) {
   const messages = tokens.map(token => ({
     token,
     data: Object.fromEntries(Object.entries(payload).map(([k, v]) => [k, String(v)])),
-    webpush: { headers: { Urgency: 'high', TTL: String(12 * 3600) } }
+    webpush: { headers: { Urgency: 'high', TTL: String(12 * 3600) } },
+    // ★【0.04.27】Android アプリ（アプリの通知）：省電力中でも遅れにくいように
+    android: { priority: 'high', ttl: 12 * 3600 * 1000 }
   }));
   const res = await messaging.sendEach(messages);
   const dead = [];

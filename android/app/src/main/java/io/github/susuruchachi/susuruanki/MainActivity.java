@@ -63,6 +63,16 @@ import java.util.concurrent.Executors;
 
 public class MainActivity extends Activity {
     private static final int FILE_CHOOSER = 1001;
+    private static final int NOTIF_PERM = 1002;
+    private void notifPermDone() {
+        String st = Notifier.allowed(this) ? "granted" : "denied";
+        web.evaluateJavascript("window.__susuruNotifPerm&&window.__susuruNotifPerm('" + st + "')", null);
+    }
+    @Override
+    public void onRequestPermissionsResult(int req, String[] perms, int[] res) {
+        super.onRequestPermissionsResult(req, perms, res);
+        if (req == NOTIF_PERM) notifPermDone();
+    }
     private WebView web;
     private ValueCallback<Uri[]> fileCallback;
     private final Executor bg = Executors.newSingleThreadExecutor();
@@ -369,6 +379,55 @@ public class MainActivity extends Activity {
                 runOnUiThread(() -> web.evaluateJavascript(js, null));
             });
         }
+        // ★【0.04.27】通知（notify.js から）。WebView にはブラウザの通知（Web プッシュ）が無いので、アプリの通知を使う
+        @JavascriptInterface public boolean pushSupported() { return SusuruApplication.pushConfigured(MainActivity.this); }
+        // 'granted' / 'denied'（一度ことわった・設定でオフ）/ 'default'（まだ聞いていない）
+        @JavascriptInterface public String notifPermission() {
+            if (Notifier.allowed(MainActivity.this)) return "granted";
+            if (Build.VERSION.SDK_INT >= 33 && !getSharedPreferences("susuru_push", MODE_PRIVATE).getBoolean("asked", false)) return "default";
+            return "denied";
+        }
+        // 許可を聞く（終わったら window.__susuruNotifPerm(状態)）。一度ことわったときは、アプリの通知の設定を開く
+        @JavascriptInterface public void requestNotifPermission() {
+            runOnUiThread(() -> {
+                if (Notifier.allowed(MainActivity.this)) { notifPermDone(); return; }
+                boolean asked = getSharedPreferences("susuru_push", MODE_PRIVATE).getBoolean("asked", false);
+                if (Build.VERSION.SDK_INT >= 33 && (!asked || shouldShowRequestPermissionRationale(android.Manifest.permission.POST_NOTIFICATIONS))) {
+                    getSharedPreferences("susuru_push", MODE_PRIVATE).edit().putBoolean("asked", true).apply();
+                    requestPermissions(new String[]{ android.Manifest.permission.POST_NOTIFICATIONS }, NOTIF_PERM);
+                } else { openNotifSettings(); notifPermDone(); }
+            });
+        }
+        @JavascriptInterface public void openNotifSettings() {
+            try {
+                Intent i = new Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, getPackageName());
+                startActivity(i);
+            } catch (Exception e) { toast("通知の設定を開けませんでした"); }
+        }
+        // プッシュ通知の宛先（トークン）。終わったら window.__susuruPushToken(token, エラー)
+        @JavascriptInterface public void pushGetToken() {
+            try {
+                SusuruApplication.initFirebase(getApplicationContext());
+                com.google.firebase.messaging.FirebaseMessaging.getInstance().getToken().addOnCompleteListener(t -> {
+                    String tok = t.isSuccessful() ? t.getResult() : null;
+                    String err = t.isSuccessful() ? "" : String.valueOf(t.getException() != null ? t.getException().getMessage() : "error");
+                    if (tok != null) getSharedPreferences("susuru_push", MODE_PRIVATE).edit().putString("token", tok).apply();
+                    String js = "window.__susuruPushToken&&window.__susuruPushToken(" + JSONObject.quote(tok == null ? "" : tok) + "," + JSONObject.quote(err) + ")";
+                    runOnUiThread(() -> web.evaluateJavascript(js, null));
+                });
+            } catch (Exception e) {
+                String js = "window.__susuruPushToken&&window.__susuruPushToken(''," + JSONObject.quote(String.valueOf(e.getMessage())) + ")";
+                runOnUiThread(() -> web.evaluateJavascript(js, null));
+            }
+        }
+        // ログアウトのとき、この端末への通知を止める
+        @JavascriptInterface public void pushDeleteToken() {
+            try { com.google.firebase.messaging.FirebaseMessaging.getInstance().deleteToken(); } catch (Exception e) {}
+            getSharedPreferences("susuru_push", MODE_PRIVATE).edit().remove("token").apply();
+        }
+        // アプリから出す通知（テスト通知・アプリを開いている間のお知らせ）
+        @JavascriptInterface public void showNotification(String title, String body, String tag, String kind, String url) { Notifier.show(MainActivity.this, title, body, tag, kind, url); }
+
         // ★【0.04.24】アプリの自動更新（app-bridge.js から）
         //  apkPrepare：裏でダウンロード（終わったら window.__susuruApkReady(ok, 確認なしで入れられるか)）
         @JavascriptInterface public void apkPrepare(String url, long code) {

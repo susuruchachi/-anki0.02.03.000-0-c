@@ -49,6 +49,19 @@ if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
   });
 }
 // ★【0.04.10】アプリを開いたら、もう古い通知（今の版までのアップデート・催促・課題・煽り）を消す（溜まらないように）
+// ★【0.04.27】Android アプリ（WebView）にはブラウザの通知が無いので、アプリの通知（Firebase のプッシュ）を使う
+function nativePushApp() { return typeof isAndroidApp === 'function' && isAndroidApp(); }
+function nativePushOk() { try { return nativePushApp() && !!window.SusuruApp.pushSupported && window.SusuruApp.pushSupported(); } catch (e) { return false; } }
+// 通知の許可：'granted' / 'denied' / 'default' / 'unsupported'
+function notifPerm() {
+  if (nativePushApp()) { if (!nativePushOk()) return 'unsupported'; try { return window.SusuruApp.notifPermission(); } catch (e) { return 'default'; } }
+  return typeof Notification !== 'undefined' ? Notification.permission : 'unsupported';
+}
+function nativeAsk(fn, cbName, ms) {
+  return new Promise(res => { const t = setTimeout(() => { window[cbName] = null; res(null); }, ms); window[cbName] = (...a) => { clearTimeout(t); window[cbName] = null; res(a); }; try { fn(); } catch (e) { clearTimeout(t); res(null); } });
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && nativePushApp()) { renderNotifySettings(); if (notifPerm() === 'granted' && currentUser && !_pushState.token) ensurePush(); } });
+
 function clearOldNotifications() {
   try { const sw = navigator.serviceWorker && navigator.serviceWorker.controller; if (sw) sw.postMessage({ type: 'clearOld', version: typeof APP_VERSION !== 'undefined' ? APP_VERSION : '' }); } catch (e) {}
 }
@@ -61,7 +74,7 @@ async function afterServiceWorkerReady() {
   notifyKvSet('prefs', getNotifyPrefs());
   notifyKvSet('weakCount', weakCardCount());
   try { const ls = localStorage.getItem('susuru_anki_last_study'); if (ls) notifyKvSet('lastStudyDate', ls); } catch (e) {}
-  if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+  if (notifPerm() === 'granted') {
     await ensurePeriodicSync();
     if (currentUser) ensurePush();
   }
@@ -85,6 +98,21 @@ async function installApp() {
 
 // ---------------- 通知の許可 ----------------
 async function enableNotifications() {
+  if (nativePushApp()) {
+    if (!nativePushOk()) return alert(window.SusuruApp.pushSupported ? '通知の準備がまだできていません（次のアプリの更新で使えるようになります）。' : 'このアプリは古いので、通知を使えません。設定の「アプリを更新」から、アプリを新しくしてください。');
+    if (notifPerm() !== 'granted') {
+      const r = await nativeAsk(() => window.SusuruApp.requestNotifPermission(), '__susuruNotifPerm', 120000);
+      if (!r || r[0] !== 'granted') { renderNotifySettings(); return alert('通知が許可されていません。開いた「通知」の設定で、すするanki の通知をオンにしてから、もう一度押してください。'); }
+    }
+    let firstTime = false; try { firstTime = !localStorage.getItem(NOTIFY_PREFS_KEY); } catch (e) {}
+    const p = getNotifyPrefs();
+    if (firstTime || (!p.reminder && !p.updates)) { p.reminder = true; p.updates = true; }
+    saveNotifyPrefs(p);
+    await ensurePush();
+    renderNotifySettings();
+    sendTestNotification(true);
+    return;
+  }
   if (typeof Notification === 'undefined' || !('serviceWorker' in navigator)) {
     if (isIOSDevice() && !isStandaloneApp()) return alert('iPhone・iPad で通知を受け取るには、先に Safari の共有ボタン →「ホーム画面に追加」でアプリにして、ホーム画面のアイコンから開いてください（iOS 16.4 以降）。');
     return alert('このブラウザは通知に対応していません。');
@@ -107,6 +135,7 @@ async function enableNotifications() {
 
 async function ensurePeriodicSync() {
   _periodicOk = false;
+  if (nativePushApp()) return false;
   try {
     const reg = await navigator.serviceWorker.ready;
     if (!('periodicSync' in reg)) return false;
@@ -121,6 +150,17 @@ async function ensurePeriodicSync() {
 async function ensurePush() {
   _pushState.error = '';
   try {
+    if (nativePushApp()) {
+      // Android アプリ：アプリが Firebase のプッシュの宛先（トークン）を作る
+      if (!currentUser || notifPerm() !== 'granted') return false;
+      const r = await nativeAsk(() => window.SusuruApp.pushGetToken(), '__susuruPushToken', 30000);
+      if (!r || !r[0]) { _pushState.error = 'プッシュ通知を登録できませんでした（' + ((r && r[1]) || '時間切れ') + '）'; return false; }
+      _pushState.token = r[0];
+      try { localStorage.setItem('susuru_anki_push_token', r[0]); localStorage.setItem('susuru_anki_push_uid', currentUser.uid); } catch (e) {}
+      await syncPushDoc(true);
+      await checkPushServer();
+      return true;
+    }
     if (!currentUser || typeof Notification === 'undefined' || Notification.permission !== 'granted') return false;
     if (!firebase.messaging || !(await firebase.messaging.isSupported())) { _pushState.error = 'この端末・ブラウザはプッシュ通知に対応していません'; return false; }
     const reg = await navigator.serviceWorker.ready;
@@ -163,7 +203,7 @@ function syncPushDoc(immediate) {
     const body = {
       uid: currentUser.uid, reminder: p.reminder, time: p.time, updates: p.updates, friends: p.friends, taunt: p.taunt, every: p.every,
       tzOffset: new Date().getTimezoneOffset(), weakCount: weakCardCount(), updatedAt: Date.now(),
-      tokens: { [token]: { at: Date.now(), ua: (isAndroidDevice() ? 'android' : isIOSDevice() ? 'ios' : 'other') + (isStandaloneApp() ? '-app' : '') } }
+      tokens: { [token]: { at: Date.now(), ua: nativePushApp() ? 'android-native' : (isAndroidDevice() ? 'android' : isIOSDevice() ? 'ios' : 'other') + (isStandaloneApp() ? '-app' : '') } }
     };
     if (lastStudy) body.lastStudyDate = lastStudy;
     try { await firestore.collection(PUSH_COL).doc(currentUser.uid).set(body, { merge: true }); }
@@ -180,13 +220,14 @@ async function removePushTokenBeforeLogout() {
     if (currentUser && token) await firestore.collection(PUSH_COL).doc(currentUser.uid).update(new firebase.firestore.FieldPath('tokens', token), firebase.firestore.FieldValue.delete());
   } catch (e) {}
   try { localStorage.removeItem('susuru_anki_push_token'); } catch (e) {}
+  if (nativePushOk()) { try { window.SusuruApp.pushDeleteToken(); } catch (e) {} }
   _pushState.token = null;
   if (typeof notifyKvSet === 'function') notifyKvSet('pushActive', false);
 }
 
 // ログインしたら（auth.js から呼ぶ）
 function onNotifyAuthReady() {
-  if (typeof Notification !== 'undefined' && Notification.permission === 'granted' && 'serviceWorker' in navigator) ensurePush();
+  if (notifPerm() === 'granted' && (nativePushApp() || 'serviceWorker' in navigator)) ensurePush();
   else renderNotifySettings();
 }
 
@@ -202,7 +243,8 @@ function notifyMarkStudied() {
 }
 
 // 通知を出す（サービスワーカー経由。無ければ Notification で）
-async function showLocalNotification(title, body, tag) {
+async function showLocalNotification(title, body, tag, kind, url) {
+  if (nativePushApp()) { try { if (nativePushOk()) window.SusuruApp.showNotification(title, body || '', tag || 'susuru', kind || '', url || './'); } catch (e) {} return; }
   try {
     const reg = _swReg || (navigator.serviceWorker && await navigator.serviceWorker.ready);
     if (reg && reg.showNotification) return reg.showNotification(title, { body, icon: 'icons/icon-192.png', badge: 'icons/badge-96.png', tag: tag || 'susuru', lang: 'ja', data: { url: './' } });
@@ -210,14 +252,14 @@ async function showLocalNotification(title, body, tag) {
   try { new Notification(title, { body, icon: 'icons/icon-192.png', tag }); } catch (e) {}
 }
 function sendTestNotification(silentIfDenied) {
-  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') { if (!silentIfDenied) alert('先に「🔔 通知をオンにする」を押してください。'); return; }
+  if (notifPerm() !== 'granted') { if (!silentIfDenied) alert('先に「🔔 通知をオンにする」を押してください。'); return; }
   showLocalNotification('🔔 すするanki', '通知はこのように届きます。', 'test');
 }
 
 // アプリを開いている（裏に回っている）間：時刻になったら催促する
 setInterval(async () => {
   const p = getNotifyPrefs();
-  if (!p.reminder || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+  if (!p.reminder || notifPerm() !== 'granted') return;
   if (document.visibilityState === 'visible') return;
   if (_pushState.token && _pushState.serverAlive) return;
   const today = localDateStr();
@@ -243,7 +285,7 @@ function onNotifyPrefChange() {
   const tn = document.getElementById('chkNotifyTaunt'); if (tn) p.taunt = tn.checked;
   const ev = document.getElementById('selNotifyEvery'); if (ev) p.every = Number(ev.value) || 1;
   saveNotifyPrefs(p);
-  if ((p.reminder || p.updates || p.friends) && typeof Notification !== 'undefined' && Notification.permission === 'default') enableNotifications();
+  if ((p.reminder || p.updates || p.friends) && notifPerm() === 'default') enableNotifications();
   renderNotifySettings();
 }
 
@@ -251,18 +293,19 @@ function renderNotifySettings() {
   const box = document.getElementById('notifySettings');
   if (!box) return;
   const p = getNotifyPrefs();
-  const hasNotif = typeof Notification !== 'undefined';
-  const perm = hasNotif ? Notification.permission : 'unsupported';
+  const perm = notifPerm();
   const standalone = isStandaloneApp();
   let installHTML;
-  if (standalone) installHTML = '<div class="hint-small">✅ アプリとして使っています</div>';
+  if (standalone || nativePushApp()) installHTML = '<div class="hint-small">✅ アプリとして使っています</div>';
   else if (_deferredInstall) installHTML = '<button class="btn btn-accent" onclick="installApp()">📲 アプリとしてインストール（ホーム画面に追加）</button>';
   else if (isIOSDevice()) installHTML = '<div class="hint-small">📲 アプリにするには：Safari の共有ボタン（□に↑）→「ホーム画面に追加」</div>';
   else installHTML = '<button class="btn btn-secondary" onclick="installApp()">📲 アプリとしてインストールする方法</button>';
   const apkHTML = ''; // ★【0.03.25】APK のボタンは、設定画面にいつも出す（index.html）
   let permHTML;
   if (perm === 'granted') permHTML = '<div class="hint-small" style="color:var(--success);">✅ 通知は許可されています</div>';
+  else if (perm === 'denied' && nativePushApp()) permHTML = '<div class="hint-small" style="color:var(--danger);">🚫 通知がオフになっています。</div><button class="btn" style="margin-top:6px;" onclick="enableNotifications()">🔔 通知をオンにする（設定を開く）</button>';
   else if (perm === 'denied') permHTML = '<div class="hint-small" style="color:var(--danger);">🚫 通知がブロックされています。ブラウザ（端末）の設定で、このサイトの通知を許可してください。</div>';
+  else if (perm === 'unsupported' && nativePushApp()) permHTML = `<div class="hint-small">${window.SusuruApp.pushSupported ? '通知の準備がまだできていません（次のアプリの更新で使えるようになります）。' : 'このアプリは古いので、通知を使えません。設定の「アプリを更新」から、アプリを新しくしてください。'}</div>`;
   else if (perm === 'unsupported') permHTML = `<div class="hint-small">${isIOSDevice() && !standalone ? 'iPhone・iPad では、ホーム画面に追加したアプリから開くと通知をオンにできます（iOS 16.4 以降）。' : 'このブラウザは通知に対応していません。'}</div>`;
   else permHTML = '<button class="btn" onclick="enableNotifications()">🔔 通知をオンにする</button>';
   let how;
@@ -271,7 +314,7 @@ function renderNotifySettings() {
   else if (perm === 'granted' && !currentUser) how = '📡 プッシュ通知：ログインすると、アプリを閉じていても届くようになります';
   else if (_pushState.error) how = '📡 ' + _pushState.error;
   else how = '';
-  const bg = _periodicOk ? '🔄 バックグラウンド確認：有効' : (perm === 'granted' ? '🔄 バックグラウンド確認：この端末では使えません（ホーム画面に追加した Android の Chrome などで使えます）' : '');
+ const bg = nativePushApp() ? '' : _periodicOk ? '🔄 バックグラウンド確認：有効' : (perm === 'granted' ? '🔄 バックグラウンド確認：この端末では使えません（ホーム画面に追加した Android の Chrome などで使えます）' : '');
   box.innerHTML = `
     ${installHTML}${apkHTML}
     <div style="margin-top:12px;">${permHTML}</div>
@@ -319,7 +362,7 @@ async function checkForAppUpdate() {
     maybeAutoUpdate();
     // 裏にいるときは通知でも（プッシュ通知・バックグラウンド確認と同じバージョンを二重に出さない）
     const notified = typeof notifyKvGet === 'function' ? await notifyKvGet('notifiedVersion') : null;
-    if (notified !== v && document.visibilityState !== 'visible' && getNotifyPrefs().updates && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    if (notified !== v && document.visibilityState !== 'visible' && getNotifyPrefs().updates && notifPerm() === 'granted') {
       if (typeof notifyKvSet === 'function') notifyKvSet('notifiedVersion', v);
       showLocalNotification(`🆕 すするanki v${v} が出ました`, (title ? title + '。' : '') + '開いて「再読み込み」すると新しいバージョンになります', 'update');
     }
