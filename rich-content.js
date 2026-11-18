@@ -253,8 +253,38 @@ const CHEM_THEME = {
   I: '#8e44ad', P: '#d97706', S: '#d4a20b', B: '#e67e22', SI: '#e67e22', BACKGROUND: 'transparent'
 };
 
+// ★【0.04.34】構造式の中の記号：「□」は空欄、[R]・[R1]・[X] など元素でない記号はそのまま描く。
+//  描く部品（SmilesDrawer）は元素しか描けないので、使わない元素（Rf, Db…）に置きかえて描き、あとで文字を戻す
+const CHEM_PLACEHOLDER_POOL = ['Rf', 'Db', 'Sg', 'Bh', 'Hs', 'Mt', 'Ds', 'Rg', 'Cn', 'Nh', 'Fl', 'Mc', 'Lv', 'Ts', 'Og'];
+const CHEM_BRACKET_ATOM_RE = /^\d*([A-Z][a-z]?|b|c|n|o|p|s|se|as|\*)(@{0,2})(H\d*)?([+-]+\d*)?(:\d+)?$/;
+function chemPrepare(smiles) {
+  const map = {}, used = {};
+  let k = 0;
+  const sym = label => { if (used[label]) return used[label]; const s0 = CHEM_PLACEHOLDER_POOL[k++] || 'Og'; used[label] = s0; map[s0] = label; return s0; };
+  let out = String(smiles || '').replace(/\[([^\]]+)\]/g, (m, inner) => {
+    const a = inner.trim(), mm = a.match(CHEM_BRACKET_ATOM_RE);
+    const isElem = mm && (mm[1] === '*' || /^[a-z]/.test(mm[1]) || typeof ELEMENT_SYMBOLS === 'undefined' || ELEMENT_SYMBOLS.has(mm[1]));
+    return isElem ? m : `[${sym(a)}]`;
+  });
+  out = out.replace(/[□▢☐]/g, () => `[${sym('□')}]`);
+  return { smiles: out, map };
+}
+// 「A → B + C」「A | B」→ [{ smiles }, { op }]（→ ⇄ ＋ は前後に空白、| は並べるだけ）
+function chemSplitParts(body) {
+  const parts = [];
+  String(body || '').trim().split(/(\s+(?:→|⇄|⟶|⇌|\+|＋)\s+|\s*\|\s*)/).forEach(t => {
+    if (t === undefined || t === '') return;
+    const op = t.trim();
+    if (/^(→|⇄|⟶|⇌|\+|＋)$/.test(op) && /\s/.test(t)) parts.push({ op: op === '+' ? '＋' : op });
+    else if (op === '|') parts.push({ op: '' });
+    else if (op) parts.push({ smiles: op });
+  });
+  return parts;
+}
 // SMILES を svg 要素に描画する。成功なら true を返す Promise。
 function drawSmilesInto(svg, smiles, scale = 1.4) {
+  const prep = chemPrepare(smiles);
+  smiles = prep.smiles;
   return ensureSmilesDrawer().then(() => new Promise((resolve) => {
     const drawer = new SmilesDrawer.SvgDrawer({ width: 300, height: 300, terminalCarbons: true, compactDrawing: false, padding: 10, themes: { anki: CHEM_THEME } });
     labelNonBenzeneCarbons(drawer);
@@ -262,6 +292,7 @@ function drawSmilesInto(svg, smiles, scale = 1.4) {
       try {
         drawer.draw(tree, svg, 'anki', null, false);
         removeAttachmentLabels(svg);
+        chemRestoreLabels(svg, prep.map);
         fitChemSvg(svg, scale);
         resolve(true);
       } catch (e) { resolve(false); }
@@ -307,6 +338,17 @@ function removeAttachmentLabels(svg) {
     if (t.textContent.trim() !== '*') return;
     const g = t.parentNode;
     if (g && g !== svg && g.tagName.toLowerCase() === 'g' && g.querySelectorAll('text').length === 1) g.remove(); else t.remove();
+  });
+}
+
+// 置きかえた元素の文字を、元の記号（□・R など）に戻す
+function chemRestoreLabels(svg, map) {
+  if (!map || !Object.keys(map).length) return;
+  svg.querySelectorAll('text').forEach(t => {
+    const label = map[t.textContent.trim()];
+    if (!label) return;
+    t.textContent = label;
+    if (label === '□') { t.classList.add('chem-blank'); t.setAttribute('font-size', String((parseFloat(t.getAttribute('font-size')) || 10) * 1.6)); }
   });
 }
 
@@ -356,7 +398,10 @@ function renderRichText(text, opts = {}) {
     out += conv(src.slice(last, m.index));
     const body = m[2];
     if (richBlockType(m[1]) === 'chem') {
-      out += `<span class="chem-struct" data-smiles="${escapeRichAttr(body.trim())}"></span>`;
+      // ★【0.04.34】「A → B + C」「A | B」は、構造式を並べて描く
+      const parts = chemSplitParts(body);
+      if (parts.length > 1) out += `<span class="chem-multi">${parts.map(p => p.smiles !== undefined ? `<span class="chem-struct" data-smiles="${escapeRichAttr(p.smiles)}"></span>` : `<span class="chem-op">${escapeHtml(p.op)}</span>`).join('')}</span>`;
+      else out += `<span class="chem-struct" data-smiles="${escapeRichAttr(body.trim())}"></span>`;
     } else {
       out += renderKanbunHTML(parseKanbun(body), { maxRows: opts.kanbunRows });
     }

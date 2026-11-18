@@ -482,6 +482,8 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 
 /* ★【0.03.00】構造式 */
 .chem-struct { display: inline-block; vertical-align: middle; max-width: 100%; margin: 4px 2px; }
+.chem-multi { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; vertical-align: middle; max-width: 100%; }
+.chem-op { font-size: 1.4rem; font-weight: 700; color: var(--text2); padding: 0 4px; }
 .chem-svg { max-width: 100%; height: auto; display: block; color: var(--text); }
 .chem-err { font-size: 0.75rem; color: var(--danger); }
 
@@ -1495,6 +1497,10 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
       <input type="text" id="txtChemSearch" class="form-control" placeholder="例: サリチル酸 / C2H6O / CH3COOH / カルボキシ基" oninput="renderChemSearchResults(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault(); searchChemOnline();}">
       <button type="button" class="btn btn-secondary" style="width:auto; padding:0 12px; font-size:0.8rem; white-space:nowrap;" onclick="searchChemOnline()">🌐 ネット検索</button>
     </div>
+    <div class="form-row" style="margin-top:6px; align-items:center;">
+      <button type="button" class="chip" onclick="chemAiDraw()">🤖 AI で描く</button>
+      <label class="toggle-pill" style="display:flex; align-items:center; gap:6px;"><input type="checkbox" id="chkChemAppend">選んだものを足していく（複数の構造式）</label>
+    </div>
     <div id="chemSearchStatus" class="hint-small" style="margin-top:4px;"></div>
     <div id="chemSearchResults" class="chip-row" style="max-height:120px; overflow-y:auto;"></div>
 
@@ -1510,7 +1516,11 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
         ・同じ数字で環を閉じる　例: C1CCCCC1（シクロヘキサン）<br>
         ・<b>/ \</b> でシス・トランス　例: C/C=C\C（シス）、C/C=C/C（トランス）<br>
         ・<b>*</b> は結合の腕（線だけ残ります）　例: *C(=O)O（−COOH）、*C(=O)O*（エステル結合）<br>
-        ・<b>.</b> で区切ると、別々の分子を並べて描けます　例: CC(=O)O.OCC
+        ・<b>.</b> で区切ると、別々の分子を並べて描けます　例: CC(=O)O.OCC<br>
+        ・<b>□</b> は空欄（穴埋め）　例: CC(=O)□<br>
+        ・<b>[R]</b> <b>[R1]</b> <b>[X]</b> など、元素でない記号はそのまま描きます　例: [R]C(=O)O[R']（エステル）<br>
+        ・<b> → </b> <b> + </b> で反応式、<b> | </b> で構造式を並べます（前後に空白）　例: CC(=O)O + OCC → CC(=O)OCC + O<br>
+        ・ネットで見つからないものは「🤖 AI で描く」（AI のキー が必要。描いたものは必ず確かめてください）
       </div>
     </details>
 

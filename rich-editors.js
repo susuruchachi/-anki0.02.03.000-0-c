@@ -54,7 +54,9 @@ const CHEM_DICTIONARY = [
 const CHEM_FRAGMENTS = [
   ['ベンゼン環', 'C1=CC=CC=C1'], ['-OH', 'O'], ['-COOH', 'C(=O)O'], ['-CHO', 'C=O'], ['-NH2', 'N'], ['-NO2', 'N(=O)=O'],
   ['-SO3H', 'S(=O)(=O)O'], ['-Cl', 'Cl'], ['-Br', 'Br'], ['-CH3', 'C'], ['エステル', 'C(=O)O'], ['二重結合 =', '='], ['三重結合 #', '#'],
-  ['枝 ( )', '()'], ['環を閉じる 1', '1'], ['結合の腕 *', '*']
+  ['枝 ( )', '()'], ['環を閉じる 1', '1'], ['結合の腕 *', '*'],
+  // ★【0.04.34】空欄・記号・複数の構造式
+  ['空欄 □', '□'], ['記号 [R]', '[R]'], ['記号 [X]', '[X]'], ['→ 反応の矢印', ' → '], ['＋ 足す', ' + '], ['｜ 並べる', ' | ']
 ];
 
 let _richEditorTarget = null; // 挿入先のテキストエリア
@@ -139,10 +141,16 @@ function chemResultChip(label, smiles, title) {
   const b = document.createElement('button');
   b.type = 'button'; b.className = 'chip chip-strong'; b.innerText = label;
   if (title) b.title = title;
-  b.onclick = () => { document.getElementById('txtChemSmiles').value = smiles; updateChemPreview(); };
+  b.onclick = () => chemUseSmiles(smiles);
   return b;
 }
 
+// ★【0.04.34】選んだ構造：「足していく」がオンで、もう構造式があれば「 | 」で並べる（複数の構造式）
+function chemUseSmiles(smiles) {
+  const el = document.getElementById('txtChemSmiles'), add = document.getElementById('chkChemAppend');
+  el.value = add && add.checked && el.value.trim() ? `${el.value.trim()} | ${smiles}` : smiles;
+  updateChemPreview();
+}
 function renderChemSearchResults(query) {
   const box = document.getElementById('chemSearchResults');
   if (!box) return;
@@ -197,20 +205,41 @@ async function searchChemOnline() {
     if (/[ぁ-んァ-ヶ一-龠]/.test(q)) {
       status.innerText = '🌐 日本語名で検索中...';
       const r = await lookupJapaneseChemName(q);
-      document.getElementById('txtChemSmiles').value = r.smiles;
+      chemUseSmiles(r.smiles);
       status.innerText = `✅ 「${r.title}」が見つかりました（${r.source}${r.cid ? ' CID: ' + r.cid : ''}）。プレビューで確認してください`;
       updateChemPreview();
       return;
     }
     status.innerText = '🌐 PubChemで検索中...';
     const r = await pubchemByName(q);
-    document.getElementById('txtChemSmiles').value = r.smiles;
+    chemUseSmiles(r.smiles);
     status.innerText = `✅ 「${r.title}」が見つかりました（PubChem CID: ${r.cid}）`;
     updateChemPreview();
   } catch (e) {
+    // ★【0.04.34】見つからなければ AI に SMILES で描いてもらう
+    if (typeof aiAvailable === 'function' && aiAvailable()) return chemAiDraw(q, true);
     status.innerText = counts ? '⚠️ その分子式の化合物が見つかりませんでした。'
-      : '⚠️ 見つかりませんでした。別の名前（慣用名・英語名）や分子式で試してください。';
+      : '⚠️ 見つかりませんでした。別の名前（慣用名・英語名）や分子式で試してください（設定 → 🤖 AI でキーを入れると、見つからないものは AI が描きます）。';
   }
+}
+// ★【0.04.34】AI に SMILES で描いてもらう（見つからない化合物・官能基・部分構造・反応式も）
+async function chemAiDraw(q, afterSearch) {
+  q = String(q || document.getElementById('txtChemSearch').value || '').trim();
+  const status = document.getElementById('chemSearchStatus');
+  if (!q) { status.innerText = '描きたいもの（化合物名・官能基・説明）を上の欄に入れてください。'; return; }
+  if (typeof aiAvailable !== 'function' || !aiAvailable()) { status.innerText = '⚠️ AI のキーが設定されていません（設定 → 🤖 AI）。'; return; }
+  status.innerText = `${afterSearch ? 'ネットでは見つからなかったので、' : ''}🤖 AI が構造式を考えています…`;
+  const t0 = Date.now();
+  try {
+    const txt = await aiRequest('あなたは高校化学の先生です。指示どおりに、JSONだけを出力します。', [{ text:
+      `「${q}」の構造式を SMILES で書いてください。\n決まり：\n・高校化学の教科書の書き方。ベンゼン環はケクレ構造（C1=CC=CC=C1 のように二重結合を書く。小文字の芳香族表記は使わない）\n・官能基・置換基・結合など、何も付いていない結合の腕は * （例：カルボキシ基 *C(=O)O、エステル結合 *C(=O)O*）\n・R・R'・X などの記号は [R] [R'] [X] のように角かっこで\n・空欄にする所は □\n・反応式なら、物質を「 + 」、左辺と右辺を「 → 」で区切る（前後に空白）\n・いくつかの物質を並べるなら「 | 」で区切る\n・分からない・化合物でないときは smiles を空に\nJSONだけ：{"smiles":"…","name":"日本語の名前","note":"一言（構造の説明）"}` }],
+      { json: true, maxTokens: 600, timeout: 20000, totalTimeout: 40000 });
+    const r = parseAiJson(txt) || {};
+    const sm = String(r.smiles || '').trim();
+    if (!sm) { status.innerText = `⚠️ AI にも分かりませんでした${r.note ? '（' + r.note + '）' : ''}。名前を変えて試すか、SMILES を直接書いてください。`; return; }
+    chemUseSmiles(sm);
+    status.innerHTML = `🤖 AI が描きました：${escapeHtml(r.name || q)}${r.note ? `（${escapeHtml(r.note)}）` : ''}。<b>正しいか、プレビューで必ず確かめてください。</b> ${typeof aiModelTag === 'function' ? aiModelTag(aiModelSince(t0)) : ''}`;
+  } catch (e) { status.innerText = '⚠️ AI に頼めませんでした：' + (e.message || e); }
 }
 // 以前の名前でも呼べるように
 const searchChemOnPubChem = searchChemOnline;
@@ -225,13 +254,19 @@ function updateChemPreview() {
   const smiles = document.getElementById('txtChemSmiles').value.trim();
   _chemPreviewOk = false;
   if (!smiles) { box.innerHTML = '<div class="hint-small">ここにプレビューが表示されます</div>'; return; }
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  // ★【0.04.34】「 → 」「 + 」「 | 」で区切った複数の構造式は、並べて描く
+  const parts = chemSplitParts(smiles);
   box.innerHTML = '';
-  box.appendChild(svg);
-  drawSmilesInto(svg, smiles, 1.5).then(ok => {
+  const wrap = document.createElement('div'); wrap.className = 'chem-multi'; box.appendChild(wrap);
+  const jobs = parts.map(p => {
+    if (p.smiles === undefined) { const o = document.createElement('span'); o.className = 'chem-op'; o.textContent = p.op; wrap.appendChild(o); return Promise.resolve(true); }
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); wrap.appendChild(svg);
+    return drawSmilesInto(svg, p.smiles, parts.length > 1 ? 1.1 : 1.5);
+  });
+  Promise.all(jobs).then(res => {
     if (document.getElementById('txtChemSmiles').value.trim() !== smiles) return; // 入力が進んでいたら無視
-    _chemPreviewOk = ok;
-    if (!ok) box.innerHTML = '<div class="chem-err">⚠️ この書き方では構造式を描けません。カッコや環の番号の対応を確認してください。</div>';
+    _chemPreviewOk = res.every(Boolean);
+    if (!_chemPreviewOk) box.insertAdjacentHTML('beforeend', '<div class="chem-err">⚠️ この書き方では描けない構造式があります。カッコや環の番号の対応を確認してください。</div>');
   }).catch(() => { box.innerHTML = '<div class="chem-err">⚠️ 構造式ライブラリを読み込めません（通信状況を確認してください）</div>'; });
 }
 
