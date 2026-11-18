@@ -636,10 +636,15 @@ async function calSubRefresh(force, only) {
       } catch (e) {}
       if (force && only) alert(`🔗 「${s.name}」を読みました（${n}件）。`);
     } catch (e) {
-      // ブラウザから読めないサイト：サーバーに読んでもらう
-      if (!isAndroidApp()) ref.update({ reqAt: Date.now() }).catch(() => {});
+      const native = isAndroidApp() && !!window.SusuruApp.fetchText;
+      // ブラウザ（と、まだ読む機能のない古い Android アプリ）から読めないサイト：サーバーに読んでもらう
+      if (!native) ref.update({ reqAt: Date.now() }).catch(() => {});
       else ref.update({ err: String(e.message || e).slice(0, 200) }).catch(() => {});
-      if (force && only && isAndroidApp()) alert('⚠️ 読めませんでした: ' + (e.message || e));
+      if (force && only) {
+        if (native) alert('⚠️ 読めませんでした: ' + (e.message || e) + '\nURL が合っているか確かめてください。');
+        else if (isAndroidApp()) { if (confirm('⚠️ このアプリは古いので、このサイトのカレンダーを直接読めません。\nアプリを新しくすると読めます（学習データはそのまま）。今すぐ更新しますか？\n（更新しなくても、サーバーが15分ほどで読んで届けます）') && typeof appInstallApk === 'function') appInstallApk(); }
+        else alert('このサイトのカレンダーは、ブラウザから直接は読めません（サイトの設定のため）。\nサーバーが15分ほどで読んで届けます。Android アプリで開くと、その場で読めます。');
+      }
     }
     _calSubBusy[s.sid] = false; box();
   }
