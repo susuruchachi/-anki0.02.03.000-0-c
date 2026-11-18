@@ -495,6 +495,8 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 .kb-furi { left: 100%; margin-left: 0.1em; color: var(--text2); }
 .kb-okuri { left: 100%; margin-left: 0.1em; color: var(--primary); }
 .kb-kaeri { right: 100%; margin-right: 0.1em; color: var(--warn); }
+.kb-sai { position: absolute; right: 100%; margin-right: 0.1em; writing-mode: vertical-rl; font-size: 0.55em; line-height: 1; white-space: nowrap; font-weight: 700; font-family: 'Noto Sans JP', sans-serif; color: var(--text2); }
+.kb-hy { position: absolute; left: 50%; width: 0; height: 0.3em; border-left: 1.5px solid currentColor; transform: translateX(-50%); }
 #lblQuizQuestion .kb { font-size: 1.35em; }
 .q-card .kb { font-size: 1.15rem; }
 
@@ -511,6 +513,8 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 .kb-tile-ch { font-size: 1.3rem; font-weight: 700; }
 .kb-tile-okuri { position: absolute; right: 2px; bottom: 2px; font-size: 0.55rem; color: var(--primary); font-family: 'Noto Sans JP', sans-serif; font-weight: 700; }
 .kb-tile-kaeri { position: absolute; left: 3px; bottom: 2px; font-size: 0.6rem; color: var(--warn); font-weight: 700; }
+.kb-tile-ord { position: absolute; left: 2px; top: 1px; font-size: 0.6rem; font-weight: 800; color: #fff; background: var(--primary); border-radius: 6px; padding: 0 3px; font-family: 'Noto Sans JP', sans-serif; }
+.kb-tile.numbering { border-style: dashed; }
 .kb-tile-furi { position: absolute; right: 2px; top: 1px; font-size: 0.5rem; color: var(--text2); font-family: 'Noto Sans JP', sans-serif; }
 .kb-unit-panel { border: 1px solid var(--border); border-radius: 10px; padding: 10px; margin-top: 10px; background: var(--bg2); }
 .kb-sel-char { font-family: 'Noto Serif JP', serif; font-size: 1.6rem; font-weight: 700; color: var(--primary); }
@@ -1529,8 +1533,12 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
     <label class="section-label">① 白文（漢字の本文）を入力</label>
     <input type="text" id="txtKanbunPlain" class="form-control" style="font-family:'Noto Serif JP', serif; font-size:1.1rem;" placeholder="例: 学而時習之" oninput="onKanbunPlainInput()">
 
-    <label class="section-label" style="margin-top:12px;">② 字をタップして返り点・送り仮名を付ける</label>
+    <label class="section-label" style="margin-top:12px;">② 字をタップしてふりがな・送り仮名を付ける ／ 🔢 読む順にタップすると返り点を自動で付ける</label>
+    <div id="kbNumBar" class="chip-row" style="margin-bottom:6px;"></div>
+    <div id="kbNumHint" class="hint-small" style="margin-bottom:4px;"></div>
     <div id="kanbunTiles" class="kb-tiles"></div>
+    <div id="kbNumStatus" class="hint-small" style="margin-top:4px;"></div>
+    <details style="margin-top:4px;"><summary class="hint-small" style="cursor:pointer;">ℹ️ 読む順の番号の付け方</summary><div class="hint-small">・「🔢 読む順にタップ」をオンにして、先頭から読む順に字をタップします（1, 2, 3…）。<br>・所以（ゆゑん）のように、まとめて読む熟語は「＝ 次も同じ番号」を押してから2字目をタップ（同じ番号になります）。<br>・未・将・当などの再読文字は、1回目に読むところでタップし、2回目に読むところでもう一度タップします。<br>・置き字（而・於 など）はタップしません（置き字になります）。<br>・句形の A・B などは熟語が入るものとして、レ点ではなく一二点で返ります。<br>・全部の字に番号が付くと、返り点（レ・一二・上下・甲乙・天地）と熟語の竪点（-）が付きます。</div></details>
 
     <div id="kanbunUnitPanel" class="kb-unit-panel" style="display:none;">
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
@@ -1553,7 +1561,9 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
       <div class="toggle-grid" style="margin-top:8px;">
         <label class="toggle-pill"><input type="checkbox" id="chkKanbunOki" onchange="onKanbunFieldInput('oki')">置き字（読まない）</label>
         <label class="toggle-pill"><input type="checkbox" id="chkKanbunKana" onchange="onKanbunFieldInput('kana')">書き下しでは読みをひらがなで</label>
+        <label class="toggle-pill"><input type="checkbox" id="chkKanbunHy" onchange="onKanbunFieldInput('hy')">次の字と熟語（竪点 -）</label>
       </div>
+      <div style="margin-top:6px;"><div class="hint-small">再読文字の2回目の読み（例：未 → ず。空なら再読しない）</div><input type="text" id="txtKanbunSai" class="form-control" style="padding:8px;" placeholder="例: ず" oninput="onKanbunFieldInput('sai')"></div>
     </div>
 
     <label class="section-label" style="margin-top:12px;">👀 プレビュー</label>

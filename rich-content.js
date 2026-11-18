@@ -94,6 +94,8 @@ function parseKanbun(src) {
           const t = body.trim();
           if (t === '置') last.oki = true;
           else if (t === '仮') last.kana = true;
+          else if (t === '-' || t === '－') last.hy = true; // ★【0.04.33】竪点（次の字と熟語）
+          else if (/^再/.test(t)) last.sai = t.slice(1).trim() || 'ず'; // ★【0.04.33】再読文字（2回目の読み）
           else { const k = parseKaeriToken(t); if (k) { last.re = k.re; last.mark = k.mark; } }
         } else if (c === '《') {
           last.furi = body.trim();
@@ -116,6 +118,8 @@ function serializeKanbun(units) {
     let out = u.ch;
     const k = kaeriLabel(u);
     if (k) out += `[${k}]`;
+    if (u.hy) out += '[-]';
+    if (u.sai) out += `[再${u.sai}]`;
     if (u.furi) out += `《${u.furi}》`;
     if (u.okuri) out += `(${u.okuri})`;
     if (u.oki) out += '[置]';
@@ -126,42 +130,59 @@ function serializeKanbun(units) {
 
 // 返り点に従って読む順番（unitsのインデックス列）を求める。
 //  ・レ点: その字は「次の字」を読んだ直後に読む
-//  ・一二点/上下点/甲乙点/天地点: 二以降の字は、同じ系列の「一(上/甲/天)」の字を読んだ直後に順に読む
+//  ・一二点/上下点/甲乙点/天地点: 一（上/甲/天）の字を読んだら、そのすぐ上にある二（中・下…）に返り、そこからさらに上の三…へ
+//  ★【0.04.33】竪点（[-]）でつないだ字は、まとめて1つ（熟語）として読む（返り点はその最初の字に付ける）
+//  ★【0.04.33】再読文字（[再ず] など）は、その場で1回目を読み、返り点で返ってきたときに2回目を読む（インデックスが2回出る）
+function kanbunBlocks(units) {
+  const B = [];
+  units.forEach((u, i) => { if (B.length && units[i - 1] && units[i - 1].hy) B[B.length - 1].push(i); else B.push([i]); });
+  return B;
+}
 function kanbunReadingOrder(units) {
-  const n = units.length;
-  const done = new Array(n).fill(false);
-  const order = [];
-  const pending = { num: [], ue: [], koh: [], ten: [] };
-  const emit = (i) => {
-    if (done[i]) return;
-    done[i] = true; order.push(i);
-    // レ点：直前の字がこの字を待っていれば、すぐに返って読む
-    if (i > 0 && units[i - 1].re && !done[i - 1]) emit(i - 1);
-    const mk = units[i].mark && KAERI_MARKS[units[i].mark];
+  const B = kanbunBlocks(units), m = B.length;
+  const info = b => { const us = B[b].map(i => units[i]); return { re: us.some(u => u.re), mark: (us.find(u => u.mark) || {}).mark || null, sai: us.length === 1 && !!us[0].sai }; };
+  const done = new Array(m).fill(false), order = [], pend = [];
+  const emit = b => {
+    if (done[b]) return;
+    done[b] = true; B[b].forEach(i => order.push(i));
+    // レ点：すぐ上の字（まとまり）がこれを待っていれば、すぐに返って読む
+    if (b > 0 && info(b - 1).re && !done[b - 1]) emit(b - 1);
+    const mk = info(b).mark && KAERI_MARKS[info(b).mark];
     if (mk && mk.rank === 1) {
-      const list = pending[mk.fam].sort((a, b) => a.rank - b.rank);
-      pending[mk.fam] = [];
-      list.forEach(p => emit(p.idx));
+      // 次に大きい順位（二→三…。「上・下」のように「中」が無いこともある）の、いちばん近い上の字へ
+      let pos = b, rank = 1;
+      for (;;) {
+        let best = -1;
+        pend.forEach((p, k) => {
+          if (p.fam !== mk.fam || p.rank <= rank || p.b >= pos) return;
+          if (best < 0 || p.rank < pend[best].rank || (p.rank === pend[best].rank && p.b > pend[best].b)) best = k;
+        });
+        if (best < 0) break;
+        const p = pend.splice(best, 1)[0];
+        pos = p.b; rank = p.rank; emit(p.b);
+      }
     }
   };
-  for (let i = 0; i < n; i++) {
-    const u = units[i];
-    if (u.re) continue; // 次の字を読んだときに読む
-    const mk = u.mark && KAERI_MARKS[u.mark];
-    if (mk && mk.rank > 1) { pending[mk.fam].push({ idx: i, rank: mk.rank }); continue; }
-    emit(i);
+  for (let b = 0; b < m; b++) {
+    const f = info(b), mk = f.mark && KAERI_MARKS[f.mark];
+    if (f.re) { if (f.sai) order.push(B[b][0]); continue; } // 次の字を読んだときに読む（再読文字は1回目をここで）
+    if (mk && mk.rank > 1) { pend.push({ b, fam: mk.fam, rank: mk.rank }); if (f.sai) order.push(B[b][0]); continue; }
+    emit(b);
   }
   // 返り点の付け方がおかしく読み残しが出た場合は、元の順番で後ろに付け足す
-  for (let i = 0; i < n; i++) if (!done[i]) order.push(i);
+  for (let b = 0; b < m; b++) if (!done[b]) B[b].forEach(i => order.push(i));
   return order;
 }
 
 // 書き下し文を自動生成する（送り仮名はひらがなに、置き字は読まない、[仮]の字は読みをひらがなで書く）。
-// 再読文字などは自動では扱えないので、必要に応じて手で直してもらう前提。
+// ★【0.04.33】再読文字は、1回目は字＋送り仮名、2回目は [再…] の読み（ひらがな）
 function kanbunToKakikudashi(units) {
+  const seen = new Set();
   return kanbunReadingOrder(units).map(i => {
     const u = units[i];
     if (u.oki) return '';
+    if (u.sai && seen.has(i)) return toHiragana(u.sai);
+    seen.add(i);
     const head = (u.kana && u.furi) ? toHiragana(u.furi) : u.ch;
     return head + toHiragana(u.okuri || '');
   }).join('');
@@ -186,9 +207,10 @@ function renderKanbunHTML(units, opts = {}) {
     const okuriStart = Math.max(0.55, furiEnd);
     const okuriEnd = u.okuri ? okuriStart + Array.from(u.okuri).length * A : 0;
     const kaeri = kaeriLabel(u);
-    const kaeriStart = 0.62;
+    const saiEnd = u.sai ? Array.from(u.sai).length * A : 0; // ★【0.04.33】再読文字の2回目の読み（左上）
+    const kaeriStart = Math.max(0.62, saiEnd);
     const kaeriEnd = kaeri ? kaeriStart + Array.from(kaeri).length * A : 0;
-    const h = Math.max(1, furiEnd, okuriEnd, kaeriEnd);
+    const h = Math.max(1, furiEnd, okuriEnd, kaeriEnd, saiEnd) + (u.hy ? 0.2 : 0);
     totalLen += h;
     // 注記要素の中では 1em = 本文のA em なので、本文em → 注記em は ÷A
     const toA = (v) => (v / A).toFixed(2) + 'em';
@@ -196,6 +218,8 @@ function renderKanbunHTML(units, opts = {}) {
     if (u.furi) inner += `<span class="kb-furi" style="top:${toA(furiStart)}">${escapeHtml(u.furi)}</span>`;
     if (u.okuri) inner += `<span class="kb-okuri" style="top:${toA(okuriStart)}">${escapeHtml(u.okuri)}</span>`;
     if (kaeri) inner += `<span class="kb-kaeri" style="top:${toA(kaeriStart)}">${escapeHtml(kaeri)}</span>`;
+    if (u.sai) inner += `<span class="kb-sai" style="top:0">${escapeHtml(toKatakana(u.sai))}</span>`;
+    if (u.hy) inner += `<span class="kb-hy" style="top:${(h - 0.25).toFixed(2)}em"></span>`;
     const cell = `<span class="kb-c" style="height:${h.toFixed(2)}em">${inner}</span>`;
     if (idx > 0 && KANBUN_VERTICAL_PUNCT[u.ch] && groups.length) groups[groups.length - 1].push(cell);
     else groups.push([cell]);
