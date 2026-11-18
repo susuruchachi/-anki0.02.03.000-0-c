@@ -327,6 +327,32 @@ public class MainActivity extends Activity {
             getSharedPreferences(StreakWidget.PREFS, MODE_PRIVATE).edit().putString("data", json == null ? "{}" : json).apply();
             StreakWidget.refreshAll(MainActivity.this);
         }
+        // ★【0.04.22】カレンダーの購読（.ics の URL）を読む。ブラウザからは読めない（CORS の）サーバーでも、アプリなら読める
+        //   https だけ・5MB まで。終わったら window.__susuruFetchDone(id, ok, 中身 or エラー)
+        @JavascriptInterface public void fetchText(String id, String url) {
+            bg.execute(() -> {
+                boolean ok = false; String body;
+                try {
+                    URL u = new URL(url);
+                    if (!"https".equals(u.getProtocol())) throw new Exception("https のURLだけ読めます");
+                    HttpURLConnection c = (HttpURLConnection) u.openConnection();
+                    c.setConnectTimeout(15000); c.setReadTimeout(30000); c.setInstanceFollowRedirects(true);
+                    c.setRequestProperty("Accept", "text/calendar, text/plain, */*");
+                    try {
+                        int code = c.getResponseCode();
+                        if (code >= 400) throw new Exception("HTTP " + code);
+                        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+                        try (InputStream in = c.getInputStream()) {
+                            byte[] buf = new byte[65536]; int n;
+                            while ((n = in.read(buf)) > 0) { out.write(buf, 0, n); if (out.size() > 5 * 1024 * 1024) throw new Exception("大きすぎます（5MB まで）"); }
+                        }
+                        body = new String(out.toByteArray(), java.nio.charset.StandardCharsets.UTF_8); ok = true;
+                    } finally { c.disconnect(); }
+                } catch (Exception e) { body = String.valueOf(e.getMessage()); }
+                String js = "window.__susuruFetchDone&&window.__susuruFetchDone(" + JSONObject.quote(id == null ? "" : id) + "," + ok + "," + JSONObject.quote(body) + ")";
+                runOnUiThread(() -> web.evaluateJavascript(js, null));
+            });
+        }
         @JavascriptInterface public void openInApp(String url) { runOnUiThread(() -> MainActivity.this.openInApp(Uri.parse(url))); }
         @JavascriptInterface public void openExternal(String url) {
             try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url))); } catch (Exception e) { toast("開けるアプリがありません"); }

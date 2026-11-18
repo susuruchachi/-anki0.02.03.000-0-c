@@ -32,6 +32,8 @@ function calAllEvents() {
     if (typeof groupIsMember === 'function' && !groupIsMember(g)) return;
     Object.entries(g.events || {}).forEach(([id, e]) => { if (e && !e.deleted && e.date) out.push(Object.assign({}, e, { id, gid: g.id })); });
   });
+  // ★【0.04.22】URL で購読しているカレンダーの予定（見るだけ）
+  Object.entries(calSubEvents).forEach(([sid, list]) => { if (calSubs.some(s => s.sid === sid)) (list || []).forEach(e => out.push(Object.assign({}, e, { gid: '', sub: sid }))); });
   return out;
 }
 // その日にある予定か
@@ -77,7 +79,7 @@ function calUpcoming(days = 30) {
 }
 
 // ---------------- 画面 ----------------
-function openCalendar() { openPage('pgCalendar'); }
+function openCalendar() { openPage('pgCalendar'); setTimeout(() => calSubRefresh(false), 300); }
 function renderCalendar() {
   const box = document.getElementById('calApp'); if (!box) return;
   const today = calToday();
@@ -112,7 +114,7 @@ function renderCalendar() {
 }
 function calItemHTML(e, ds) {
   const t = calType(e), g = e.gid ? (typeof groupNameOf === 'function' ? groupNameOf(e.gid) : 'グループ') : '';
-  const sub = [t.label, calRepeatText(e), e.end && e.end > e.date ? `${calMD(e.date)}〜${calMD(e.end)}` : '', e.place ? '📍' + e.place : '', g ? '👪 ' + g : '', e.gid && e.byName ? `${e.byName} さん` : ''].filter(Boolean).join('・');
+  const sub = [t.label, calRepeatText(e), e.end && e.end > e.date ? `${calMD(e.date)}〜${calMD(e.end)}` : '', e.place ? '📍' + e.place : '', g ? '👪 ' + g : '', e.sub ? '🔗 ' + ((calSubs.find(x => x.sid === e.sub) || {}).name || '購読') : '', e.gid && e.byName ? `${e.byName} さん` : ''].filter(Boolean).join('・');
   return `<div class="cal-item" style="border-left-color:${t.color}" onclick="calEditEvent(${jsArg(e.id)}, ${jsArg(e.gid)}, '${ds}')">
     <div style="min-width:0; flex:1;"><b>${t.icon} ${escapeHtml(e.title)}</b><div class="hint-small">${calTimeText(e)}・${escapeHtml(sub)}</div>${e.note ? `<div class="hint-small cal-note">${linkifyHTML ? linkifyHTML(escapeHtml(e.note)) : escapeHtml(e.note)}</div>` : ''}</div>
     <button class="chip" onclick="event.stopPropagation(); calGoogleAdd(${jsArg(e.id)}, ${jsArg(e.gid)})" title="Google カレンダーに追加">G＋</button></div>`;
@@ -147,10 +149,12 @@ function renderCalHome() {
 // ---------------- 予定の登録・編集 ----------------
 function calFindEvent(id, gid) {
   if (gid) { const g = typeof groupById === 'function' ? groupById(gid) : null; const e = g && (g.events || {})[id]; return e ? Object.assign({}, e, { id, gid }) : null; }
-  const e = (calEvents || {})[id]; return e && !e.deleted ? Object.assign({}, e, { id, gid: '' }) : null;
+  const e = (calEvents || {})[id]; if (e && !e.deleted) return Object.assign({}, e, { id, gid: '' });
+  for (const [sid, list] of Object.entries(calSubEvents)) { const x = (list || []).find(v => v.id === id); if (x) return Object.assign({}, x, { gid: '', sub: sid }); }
+  return null;
 }
 function calNewEvent(ds, gid) { calEditor({ id: '', type: 'test', title: '', date: ds || _calSel || calToday(), gid: gid || '' }); }
-function calEditEvent(id, gid, ds) { const e = calFindEvent(id, gid); if (e) calEditor(e, ds); }
+function calEditEvent(id, gid, ds) { const e = calFindEvent(id, gid); if (e) (e.sub ? calSubInfo(e) : calEditor(e, ds)); }
 function calEditor(e, occ) {
   let ov = document.getElementById('calOverlay');
   if (!ov) { ov = document.createElement('div'); ov.id = 'calOverlay'; ov.className = 'ctx-overlay'; ov.style.zIndex = '1060'; ov.onclick = () => { ov.style.display = 'none'; }; document.body.appendChild(ov); }
@@ -510,13 +514,154 @@ function calCloseMenu() { const ov = document.getElementById('calOverlay'); if (
 function calMenu() {
   let ov = document.getElementById('calOverlay');
   if (!ov) { ov = document.createElement('div'); ov.id = 'calOverlay'; ov.className = 'ctx-overlay'; ov.style.zIndex = '1060'; ov.onclick = () => { ov.style.display = 'none'; }; document.body.appendChild(ov); }
-  ov.innerHTML = `<div class="menu-card editor-card" onclick="event.stopPropagation()">
-    <div class="cat-edit-title">🔄 Google カレンダーと</div>
+  ov.innerHTML = `<div class="menu-card editor-card cal-editor" onclick="event.stopPropagation()">
+    <div class="cat-edit-title">🔄 ほかのカレンダーと（Google・Studyplus など）</div>
     <button class="btn btn-secondary" style="margin-top:8px;" onclick="calExportIcs()">📤 書き出す（.ics ファイル）</button>
     <div class="hint-small" style="margin:4px 2px 10px;">Google カレンダー（パソコンのブラウザ）の ⚙️ 設定 →「インポート / エクスポート」→「インポート」で、このファイルを選ぶと入ります。繰り返し・試験期間もそのまま入ります。1件だけなら、予定の「G＋」から追加できます。</div>
     <button class="btn btn-secondary" onclick="calImportIcsPick()">📥 取り込む（.ics ファイル）</button>
     <div class="hint-small" style="margin:4px 2px 10px;">Google カレンダーの ⚙️ 設定 →「インポート / エクスポート」→「エクスポート」で届く zip を開くと、カレンダーごとの .ics ファイルがあります。または、カレンダーの設定の「iCal 形式の非公開 URL」を開くと .ics を保存できます。テスト・授業・期限などの種類は名前から見分けます（あとで直せます）。</div>
+    <div class="section-label" style="margin-top:6px;">🔗 URL で購読（Studyplus・Google の iCal の URL など）</div>
+    <div id="calSubList">${calSubListHTML()}</div>
+    <input type="url" id="calSubUrl" class="form-control" placeholder="https://… .ics（webcal:// でもOK）" style="margin-top:6px;">
+    <input type="text" id="calSubName" class="form-control" placeholder="名前（例：Studyplus・学校）" style="margin-top:6px;">
+    <button class="btn btn-primary" style="margin-top:6px;" onclick="calSubAdd()">🔗 購読する</button>
+    <div class="hint-small" style="margin:4px 2px 10px;">元のカレンダーが変わると、こちらにも届きます（アプリを開いたとき・カレンダーを開いたとき。30分に1回まで）。購読した予定は見るだけで、直すときは元のカレンダーで直します。週間プランの「カレンダーの予定に合わせる」でも選べます。<br>Android アプリはその場で読みます。iPad・ブラウザでは、読めないサイト（Studyplus など）の分を、サーバーが15分ごとに読んで届けます（はじめは少し待つことがあります）。<br>Google カレンダーの URL は、カレンダーの設定 →「iCal 形式の非公開アドレス」です。URL は自分のアカウントにだけ保存します。</div>
     <button class="btn btn-secondary" onclick="calCloseMenu()">閉じる</button></div>`;
   ov.style.display = 'flex';
 }
+
+// ================================================================
+// ★【0.04.22】🔗 URL で購読するカレンダー（.ics の URL）
+// 購読の記録：Firestore の susuru_anki_ical/{uid}_{sid} = { uid, sid, url, name, gz(.ics を gzip したもの), fetchedAt, err, reqAt }
+//  ・Android アプリ：アプリが直接読む（SusuruApp.fetchText）→ 予定にして、gz を書いておく（ほかの端末もそれを読む）
+//  ・ブラウザ：まず直接読む（CORS を許しているサイトなら読める）。読めなければ reqAt を書き、サーバー（tools/push-notify.js）が読んで gz を書く
+//  ・予定はこの端末に覚えておく（calSubEvents。同期はしない＝gz から作り直す）
+// ================================================================
+const CAL_SUB_COL = 'susuru_anki_ical', CAL_SUB_CACHE = 'susuru_anki_cal_subs';
+let calSubs = [], _calSubUnsub = null, _calSubBusy = {};
+let calSubEvents = (() => { try { return (JSON.parse(localStorage.getItem(CAL_SUB_CACHE) || '{}') || {}).ev || {}; } catch (e) { return {}; } })();
+let _calSubAt = (() => { try { return (JSON.parse(localStorage.getItem(CAL_SUB_CACHE) || '{}') || {}).at || {}; } catch (e) { return {}; } })();
+function calSubSaveCache() { try { localStorage.setItem(CAL_SUB_CACHE, JSON.stringify({ ev: calSubEvents, at: _calSubAt })); } catch (e) {} }
+function calSubNormUrl(u) { u = String(u || '').trim(); if (/^webcals?:\/\//i.test(u)) u = 'https://' + u.replace(/^webcals?:\/\//i, ''); return u; }
+function calStartSubWatch() {
+  if (_calSubUnsub) { try { _calSubUnsub(); } catch (e) {} _calSubUnsub = null; }
+  if (typeof currentUser === 'undefined' || !currentUser) { calSubs = []; return; }
+  _calSubUnsub = firestore.collection(CAL_SUB_COL).where('uid', '==', currentUser.uid).onSnapshot(snap => {
+    calSubs = snap.docs.map(d => Object.assign({ docId: d.id }, d.data())).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+    let changed = false;
+    calSubs.forEach(s => {
+      // サーバーやほかの端末が新しく読んだ分を、予定にする
+      if (s.gz && (s.fetchedAt || 0) > (_calSubAt[s.sid] || 0)) {
+        try { const b = typeof s.gz.toUint8Array === 'function' ? s.gz.toUint8Array() : s.gz; calSubApply(s.sid, pako.ungzip(b, { to: 'string' }), s.fetchedAt); changed = true; } catch (e) { console.warn('購読カレンダーを読めませんでした', e); }
+      }
+    });
+    Object.keys(calSubEvents).forEach(sid => { if (!calSubs.some(s => s.sid === sid)) { delete calSubEvents[sid]; delete _calSubAt[sid]; changed = true; } });
+    if (changed) { calSubSaveCache(); calRefreshViews(); }
+    const box = document.getElementById('calSubList'); if (box) box.innerHTML = calSubListHTML();
+    calSubRefresh(false);
+  }, e => console.warn('購読カレンダーの読み込みに失敗:', e.message));
+}
+function calRefreshViews() {
+  const pg = document.getElementById('pgCalendar');
+  if (pg && pg.classList.contains('active')) renderCalendar();
+  renderCalHome();
+}
+// .ics の中身 → 予定（1か月以上前に終わったものは除く。同じ名前で何回もあるものは繰り返しにまとめる）
+function calSubApply(sid, text, at) {
+  const list = calParseIcs(text).filter(x => !x.old).map(x => Object.assign({}, x.ev, { id: 's' + sid + '_' + x.id }));
+  calSubEvents[sid] = list; _calSubAt[sid] = at || Date.now();
+  return list.length;
+}
+function calSubListHTML() {
+  if (typeof currentUser === 'undefined' || !currentUser) return '<div class="hint-small">ログインすると、URL でカレンダーを購読できます。</div>';
+  if (!calSubs.length) return '<div class="hint-small">まだ購読していません。</div>';
+  return calSubs.map(s => {
+    const n = (calSubEvents[s.sid] || []).length, at = _calSubAt[s.sid] || s.fetchedAt;
+    const st = _calSubBusy[s.sid] ? '⏳ 読んでいます…' : s.err && !(calSubEvents[s.sid] || []).length ? `⚠️ ${escapeHtml(s.err)}` : at ? `${n}件・${new Date(at).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} 更新` : '⏳ サーバーが読むのを待っています（15分ほど）';
+    return `<div class="group-cat"><div style="min-width:0;"><b>🔗 ${escapeHtml(s.name || 'カレンダー')}</b><div class="hint-small">${st}</div></div>
+      <div style="display:flex; gap:4px; flex-shrink:0;"><button class="chip" onclick="calSubRefresh(true, ${jsArg(s.sid)})">🔄</button><button class="chip" onclick="calSubRemove(${jsArg(s.sid)})">外す</button></div></div>`;
+  }).join('');
+}
+async function calSubAdd() {
+  if (!currentUser) return alert('ログインしてください。');
+  const url = calSubNormUrl(document.getElementById('calSubUrl').value);
+  if (!/^https:\/\/[^\s/]+\.[^\s/]+\/\S*/i.test(url)) return alert('https:// か webcal:// で始まる .ics の URL を入れてください。');
+  if (calSubs.some(s => s.url === url)) return alert('この URL はもう購読しています。');
+  const name = (document.getElementById('calSubName').value || '').trim() || (url.match(/^https:\/\/([^/]+)/) || [])[1] || 'カレンダー';
+  const sid = calHash(url + Date.now());
+  try {
+    await firestore.collection(CAL_SUB_COL).doc(currentUser.uid + '_' + sid).set({ uid: currentUser.uid, sid, url, name: name.slice(0, 40), createdAt: Date.now(), reqAt: Date.now(), fetchedAt: 0, err: '' });
+    calSubs.push({ sid, url, name, uid: currentUser.uid, docId: currentUser.uid + '_' + sid });
+    document.getElementById('calSubUrl').value = ''; document.getElementById('calSubName').value = '';
+    calSubRefresh(true, sid);
+  } catch (e) { alert('⚠️ 購読できませんでした: ' + (e.code || e.message) + '\n（Firestore のルールが新しくなっていないかもしれません）'); }
+}
+async function calSubRemove(sid) {
+  const s = calSubs.find(x => x.sid === sid); if (!s) return;
+  if (!confirm(`「${s.name}」の購読をやめますか？（このカレンダーの予定は消えます）`)) return;
+  try { await firestore.collection(CAL_SUB_COL).doc(s.docId || (currentUser.uid + '_' + sid)).delete(); } catch (e) { return alert('⚠️ ' + (e.code || e.message)); }
+  calSubs = calSubs.filter(x => x.sid !== sid); delete calSubEvents[sid]; delete _calSubAt[sid]; calSubSaveCache();
+  const box = document.getElementById('calSubList'); if (box) box.innerHTML = calSubListHTML();
+  calRefreshViews();
+}
+// URL を読む：Android アプリはアプリが読む。ブラウザは直接（CORS を許すサイトだけ読める）
+let _calFetchSeq = 0; const _calFetchWait = {};
+window.__susuruFetchDone = (id, ok, body) => { const f = _calFetchWait[id]; if (f) { delete _calFetchWait[id]; f(ok, body); } };
+function calFetchText(url) {
+  if (isAndroidApp() && window.SusuruApp.fetchText) {
+    return new Promise((res, rej) => { const id = 'f' + (++_calFetchSeq); _calFetchWait[id] = (ok, body) => ok ? res(body) : rej(new Error(body)); try { window.SusuruApp.fetchText(id, url); } catch (e) { delete _calFetchWait[id]; rej(e); } setTimeout(() => { if (_calFetchWait[id]) { delete _calFetchWait[id]; rej(new Error('時間切れ')); } }, 60000); });
+  }
+  return fetch(url, { cache: 'no-store' }).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); });
+}
+// 30分より前に読んだもの（force なら全部・指定の1つ）を読み直す
+async function calSubRefresh(force, only) {
+  if (typeof currentUser === 'undefined' || !currentUser) return;
+  for (const s of calSubs) {
+    if (only && s.sid !== only) continue;
+    const last = Math.max(_calSubAt[s.sid] || 0, s.fetchedAt || 0);
+    if (_calSubBusy[s.sid] || (!force && Date.now() - last < 30 * 60000)) continue;
+    _calSubBusy[s.sid] = true;
+    const box = () => { const b = document.getElementById('calSubList'); if (b) b.innerHTML = calSubListHTML(); };
+    box();
+    const ref = firestore.collection(CAL_SUB_COL).doc(s.docId || (currentUser.uid + '_' + s.sid));
+    try {
+      const text = await calFetchText(s.url);
+      if (!/BEGIN:VCALENDAR/i.test(text)) throw new Error('カレンダー（.ics）ではありませんでした');
+      const at = Date.now(), n = calSubApply(s.sid, text, at);
+      calSubSaveCache(); calRefreshViews();
+      // ほかの端末（iPad など）でも読めるように、縮めて置いておく
+      try {
+        const gz = pako.gzip(text);
+        await ref.update(gz.length < 900000 ? { gz: firebase.firestore.Blob.fromUint8Array(gz), fetchedAt: at, err: '' } : { fetchedAt: at, err: '' });
+      } catch (e) {}
+      if (force && only) alert(`🔗 「${s.name}」を読みました（${n}件）。`);
+    } catch (e) {
+      // ブラウザから読めないサイト：サーバーに読んでもらう
+      if (!isAndroidApp()) ref.update({ reqAt: Date.now() }).catch(() => {});
+      else ref.update({ err: String(e.message || e).slice(0, 200) }).catch(() => {});
+      if (force && only && isAndroidApp()) alert('⚠️ 読めませんでした: ' + (e.message || e));
+    }
+    _calSubBusy[s.sid] = false; box();
+  }
+}
+// 購読した予定は見るだけ
+function calSubInfo(e) {
+  const s = calSubs.find(x => x.sid === e.sub), t = calType(e);
+  let ov = document.getElementById('calOverlay');
+  if (!ov) { ov = document.createElement('div'); ov.id = 'calOverlay'; ov.className = 'ctx-overlay'; ov.style.zIndex = '1060'; ov.onclick = () => { ov.style.display = 'none'; }; document.body.appendChild(ov); }
+  ov.innerHTML = `<div class="menu-card editor-card" onclick="event.stopPropagation()">
+    <div class="cat-edit-title">${t.icon} ${escapeHtml(e.title)}</div>
+    <div class="hint-small" style="margin:6px 0;">${calTimeText(e)}・${escapeHtml([t.label, calRepeatText(e), e.end && e.end > e.date ? `${calMD(e.date)}〜${calMD(e.end)}` : calMD(e.date), e.place ? '📍' + e.place : ''].filter(Boolean).join('・'))}</div>
+    ${e.note ? `<div class="hint-small cal-note">${linkifyHTML(escapeHtml(e.note))}</div>` : ''}
+    <div class="hint-small" style="margin-top:8px;">🔗 購読しているカレンダー「${escapeHtml(s ? s.name : '')}」の予定です。直すときは、元のカレンダーで直してください（ここには自動で届きます）。</div>
+    <div class="plan-btns" style="margin-top:10px;"><button class="btn btn-secondary" onclick="calCopySub(${jsArg(e.id)})">📋 自分の予定にコピー</button><button class="btn btn-secondary" onclick="calCloseMenu()">閉じる</button></div></div>`;
+  ov.style.display = 'flex';
+}
+// 購読の予定を、直せる自分の予定にする
+function calCopySub(id) {
+  const e = calFindEvent(id, ''); if (!e) return;
+  const c = JSON.parse(JSON.stringify(e)); delete c.sub; delete c.id; delete c.gid;
+  calEditor(Object.assign(c, { id: '', gid: '' }));
+}
 window.addEventListener('load', () => setTimeout(() => { try { renderCalHome(); } catch (e) {} }, 1500));
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') setTimeout(() => calSubRefresh(false), 2000); });

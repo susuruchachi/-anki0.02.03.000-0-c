@@ -324,7 +324,37 @@ async function sendFriendNotices() {
   console.log(`フレンド申請のお知らせ: ${sent} 件送信`);
 }
 
+// ★【0.04.22】URL で購読しているカレンダー（.ics）を読んで置いておく
+// ブラウザからは読めない（CORS を許していない）サイト（Studyplus など）の分。アプリの「🔗 URL で購読」が使う
+//  ・1時間より前に読んだもの、または読んでほしいと頼まれた（reqAt）ものだけ。https だけ・5MB まで・20秒まで
+async function refreshIcalFeeds() {
+  const zlib = require('zlib');
+  const snap = await db.collection('susuru_anki_ical').get();
+  let n = 0, ng = 0;
+  for (const doc of snap.docs) {
+    const d = doc.data(), now = Date.now(), last = Math.max(d.fetchedAt || 0, d.errAt || 0);
+    if (!d.url || (now - last < 60 * 60000 && !((d.reqAt || 0) > last))) continue;
+    try {
+      const u = new URL(d.url);
+      if (u.protocol !== 'https:' || /^(localhost|\d+\.\d+\.\d+\.\d+|\[.*\])$/i.test(u.hostname) || /\.(local|internal)$/i.test(u.hostname)) throw new Error('この URL は読めません');
+      const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 20000);
+      const r = await fetch(u, { signal: ctl.signal, headers: { Accept: 'text/calendar, text/plain, */*', 'User-Agent': 'susuruanki-calendar' } }).finally(() => clearTimeout(t));
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const buf = Buffer.from(await r.arrayBuffer());
+      if (buf.length > 5 * 1024 * 1024) throw new Error('大きすぎます（5MB まで）');
+      const text = buf.toString('utf8');
+      if (!/BEGIN:VCALENDAR/i.test(text)) throw new Error('カレンダー（.ics）ではありませんでした');
+      const gz = zlib.gzipSync(buf);
+      if (gz.length > 900000) throw new Error('大きすぎます');
+      await doc.ref.update({ gz, fetchedAt: now, err: '', errAt: 0 });
+      n++;
+    } catch (e) { ng++; await doc.ref.update({ err: String(e.message || e).slice(0, 200), errAt: now }).catch(() => {}); }
+  }
+  console.log(`購読カレンダー: ${n} 件読んだ・${ng} 件失敗`);
+}
+
 (async () => {
+  if (MODE === 'all' || MODE === 'ical') await refreshIcalFeeds().catch(e => console.log('購読カレンダーの読み込みに失敗:', e.message));
   if (MODE === 'all' || MODE === 'friends' || MODE === 'reports') await sendReportNotices().catch(e => console.log('要望・報告のお知らせに失敗:', e.message));
   if (MODE === 'all' || MODE === 'friends') await sendFriendNotices().catch(e => console.log('フレンド申請のお知らせに失敗:', e.message));
   if (MODE === 'all' || MODE === 'reminders') await sendReminders();
