@@ -30,6 +30,8 @@ android {
         resValue 'string', 'widgetDescription', '連続記録と、週間プランの次の課題'
         resValue 'string', 'boardName', 'すするanki ランキング'
         resValue 'string', 'boardDescription', 'フレンドとの今週のランキングと、自分の進み具合'
+        resValue 'string', 'calWidgetName', 'すするanki カレンダー'
+        resValue 'string', 'calWidgetDescription', '今日の予定と、これからのテスト・期限'
         resValue 'string', 'launchUrl', "https://${host}${path}?source=app"
         resValue 'string', 'hostName', host
         resValue 'string', 'pathPrefix', path

@@ -97,6 +97,7 @@ public class StreakWidget extends AppWidgetProvider {
     static void refreshAll(Context ctx) {
         updateAll(ctx);
         BoardWidget.updateAll(ctx);
+        CalendarWidget.updateAll(ctx);
         scheduleNext(ctx);
     }
 

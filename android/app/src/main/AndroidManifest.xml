@@ -42,6 +42,13 @@
             </intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_streak_info" />
         </receiver>
+        <!-- ★【0.04.25】カレンダーのウィジェット（今日の予定・これからのテスト・期限） -->
+        <receiver android:name=".CalendarWidget" android:exported="false" android:label="@string/calWidgetName">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_calendar_info" />
+        </receiver>
         <!-- ★【0.04.24】アプリの自動更新（入れた結果・閉じて1分後に起こす） -->
         <receiver android:name=".InstallResultReceiver" android:exported="false" />
         <!-- ★【0.04.19】大きいウィジェット（フレンドとのランキング・自分の進み具合） -->

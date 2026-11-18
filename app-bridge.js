@@ -180,6 +180,7 @@ function appWidgetSync(now) {
         if (n > 1) data.foot = `すするanki ・ 残りの課題 ${n}つ`;
       }
       data.board = widgetBoardMine();
+      try { if (typeof calWidgetData === 'function') data.cal = calWidgetData(); } catch (e) {} // ★【0.04.25】カレンダーのウィジェット
       if (_widgetFriends) data.board.rank = widgetRank(_widgetFriends.list), data.board.rankAt = _widgetFriends.at;
       window.SusuruApp.setWidgetData(JSON.stringify(data));
       // フレンドの成績は10分に1回だけ読み直す（読み終わったら、もう一度ウィジェットに送る）

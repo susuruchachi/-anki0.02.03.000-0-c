@@ -170,11 +170,13 @@ function calEditor(e, occ) {
       <div style="flex:1;"><label class="section-label cal-lbl" id="calEdDateLbl">日付</label><input type="date" id="calEdDate" class="form-control" value="${escAttr(e.date)}"></div>
       <div style="flex:1;" class="cal-r-end"><label class="section-label cal-lbl">最後の日</label><input type="date" id="calEdEnd" class="form-control" value="${escAttr(e.end || '')}"></div>
     </div>
-    <label class="toggle-pill cal-r-time" style="margin-top:8px; display:flex; align-items:center; gap:8px;"><input type="checkbox" id="calEdAllDay" ${e.start ? '' : 'checked'} onchange="calEdUpdate()">終日（時刻なし）</label>
-    <div class="form-row cal-r-times" style="margin-top:6px;">
-      <div style="flex:1;"><label class="section-label cal-lbl">開始</label><input type="time" id="calEdStart" class="form-control" value="${escAttr(e.start || '')}"></div>
-      <div style="flex:1;"><label class="section-label cal-lbl">終了</label><input type="time" id="calEdEndTime" class="form-control" value="${escAttr(e.endTime || '')}"></div>
+    <!-- ★【0.04.25】どの種類でも、何時から何時までを入れられる（入れなければ終日） -->
+    <div class="form-row cal-r-times" style="margin-top:8px; align-items:flex-end;">
+      <div style="flex:1;"><label class="section-label cal-lbl" id="calEdStartLbl">開始</label><input type="time" id="calEdStart" class="form-control" value="${escAttr(e.start || '')}"></div>
+      <div style="flex:1;"><label class="section-label cal-lbl" id="calEdEndLbl">終了</label><input type="time" id="calEdEndTime" class="form-control" value="${escAttr(e.endTime || '')}"></div>
+      <button class="chip" style="margin-bottom:6px;" onclick="document.getElementById('calEdStart').value=''; document.getElementById('calEdEndTime').value='';">終日</button>
     </div>
+    <div class="hint-small">時刻を入れなければ終日の予定になります。</div>
     <div class="cal-r-rep" style="margin-top:8px;"><label class="section-label cal-lbl">🔁 繰り返し</label>
       <select id="calEdRepeat" class="form-control" onchange="calEdUpdate()"><option value="" ${!rep ? 'selected' : ''}>しない</option><option value="weekly" ${rep === 'weekly' ? 'selected' : ''}>毎週</option><option value="biweekly" ${rep === 'biweekly' ? 'selected' : ''}>隔週</option></select>
       <div class="cal-r-days" style="margin-top:6px;"><div class="cal-days">${CAL_DOW.map((w, i) => `<label class="cal-daychk"><input type="checkbox" class="calEdDay" value="${i}" ${days.includes(i) ? 'checked' : ''}>${w}</label>`).join('')}</div>
@@ -201,9 +203,9 @@ function calEdSetType(k) {
   document.getElementById('calEdType').value = k;
   document.querySelectorAll('[data-caltype]').forEach(b => b.classList.toggle('active', b.dataset.caltype === k));
   if (prev !== k) {
-    const allDay = document.getElementById('calEdAllDay'), rep = document.getElementById('calEdRepeat');
-    if (k === 'class') { allDay.checked = false; if (!rep.value) rep.value = 'weekly'; }
-    if (k === 'exam' || k === 'deadline') { allDay.checked = true; rep.value = ''; }
+    const rep = document.getElementById('calEdRepeat');
+    if (k === 'class') { if (!rep.value) rep.value = 'weekly'; }
+    if (k === 'exam' || k === 'deadline') rep.value = '';
     if (k === 'exam' && !document.getElementById('calEdEnd').value) document.getElementById('calEdEnd').value = calAddDays(document.getElementById('calEdDate').value || calToday(), 4);
   }
   calEdUpdate();
@@ -214,15 +216,16 @@ function calEdUpdate() {
   show('.cal-r-end', k === 'exam');
   show('.cal-r-rep', k !== 'exam');
   show('.cal-r-days', !!rep && k !== 'exam');
-  show('.cal-r-times', !document.getElementById('calEdAllDay').checked);
+  document.getElementById('calEdStartLbl').textContent = k === 'exam' ? '毎日の開始' : k === 'deadline' ? '開始（締め切りの時刻など）' : '開始';
+  document.getElementById('calEdEndLbl').textContent = k === 'exam' ? '毎日の終了' : '終了';
   document.getElementById('calEdDateLbl').textContent = k === 'exam' ? '最初の日' : rep ? '最初の日（この日から）' : '日付';
 }
 function calReadEditor() {
   const v = id => (document.getElementById(id) || {}).value || '';
-  const type = v('calEdType') || 'event', allDay = document.getElementById('calEdAllDay').checked;
+  const type = v('calEdType') || 'event';
   const e = { type, title: v('calEdTitle').trim(), date: v('calEdDate'), place: v('calEdPlace').trim(), note: v('calEdNote').trim() };
   if (type === 'exam' && v('calEdEnd') > e.date) e.end = v('calEdEnd');
-  if (!allDay && v('calEdStart')) { e.start = v('calEdStart'); if (v('calEdEndTime')) e.endTime = v('calEdEndTime'); }
+  if (v('calEdStart')) { e.start = v('calEdStart'); if (v('calEdEndTime')) e.endTime = v('calEdEndTime'); }
   const rep = type === 'exam' ? '' : v('calEdRepeat');
   if (rep) {
     e.repeat = rep;
@@ -277,7 +280,23 @@ async function calSkipOne(id, gid, ds) {
   document.getElementById('calOverlay').style.display = 'none';
   calAfterChange();
 }
+// ★【0.04.25】Android のカレンダーのウィジェットに渡す予定（今日から45日。授業は7日まで。何日か続く予定は1つ）
+//  日付が変わっても、ウィジェットの側で「今日」「あと何日」を数え直す
+function calWidgetData() {
+  const all = calAllEvents(), today = calToday(), out = [];
+  for (let i = 0; i <= 45 && out.length < 80; i++) {
+    const ds = calAddDays(today, i);
+    calOn(ds, all).forEach(e => {
+      if (e.type === 'class' && i > 7) return;
+      const multi = e.end && e.end > e.date;
+      if (multi && ds > e.date && i > 0) return;
+      out.push({ d: multi ? e.date : ds, e2: multi ? e.end : '', s: e.start || '', t2: e.endTime || '', n: String(e.title).slice(0, 40), i: calType(e).icon, k: e.type || 'event' });
+    });
+  }
+  return out.slice(0, 80);
+}
 function calAfterChange() {
+  if (typeof appWidgetSync === 'function') appWidgetSync();
   renderCalendar(); renderCalHome();
   if (typeof renderPlanViews === 'function') try { renderPlanViews(); } catch (e) {}
 }
@@ -360,7 +379,8 @@ function calFirstDate(e) {
 }
 function calPlusHour(t) { const [h, m] = t.split(':').map(Number); return `${String(Math.min(23, h + 1)).padStart(2, '0')}:${String(m).padStart(2, '0')}`; }
 function calRrule(e) {
-  if (!e.repeat) return '';
+  // 時刻のある試験期間：その期間、毎日その時刻
+  if (!e.repeat) return e.start && e.end && e.end > e.date ? `RRULE:FREQ=DAILY;UNTIL=${calIcsDate(e.end)}T235959Z` : '';
   const days = e.days && e.days.length ? e.days : [calDow(e.date)];
   return `RRULE:FREQ=WEEKLY${e.repeat === 'biweekly' ? ';INTERVAL=2' : ''};BYDAY=${days.map(d => CAL_BYDAY[d]).join(',')}${e.until ? `;UNTIL=${calIcsDate(e.until)}${e.start ? 'T235959Z' : ''}` : ''}`;
 }
@@ -455,6 +475,8 @@ function calParseIcs(text) {
     if (v.DESCRIPTION) e.note = ((e.note ? e.note + '\n' : '') + calIcsUnesc(v.DESCRIPTION)).trim().slice(0, 1000);
     const t = (v['X-SUSURU-TYPE'] || '').trim();
     e.type = CAL_TYPES[t] ? t : calGuessType(title, !!e.end, !!e.repeat, !!e.start);
+    // 毎日の試験期間（時刻あり）は、何日か続く予定に戻す
+    if (e.type === 'exam' && e.repeat === 'weekly' && (e.days || []).length === 7 && e.until && e.until < '9999') { e.end = e.until; delete e.repeat; delete e.days; delete e.until; }
     const uid = v.UID || (title + s.date + (s.time || ''));
     const m = String(uid).match(/^(ev[a-z0-9]+)@susuruanki$/);
     res.push({ id: m ? m[1] : 'ics' + calHash(uid), ev: e, old: last < calAddDays(today, -30) });
@@ -562,6 +584,7 @@ function calStartSubWatch() {
   }, e => console.warn('購読カレンダーの読み込みに失敗:', e.message));
 }
 function calRefreshViews() {
+  if (typeof appWidgetSync === 'function') appWidgetSync();
   const pg = document.getElementById('pgCalendar');
   if (pg && pg.classList.contains('active')) renderCalendar();
   renderCalHome();
