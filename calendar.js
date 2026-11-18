@@ -455,7 +455,32 @@ function calParseIcs(text) {
     const m = String(uid).match(/^(ev[a-z0-9]+)@susuruanki$/);
     res.push({ id: m ? m[1] : 'ics' + calHash(uid), ev: e, old: last < calAddDays(today, -30) });
   });
-  return res;
+  return calMergeRepeats(res);
+}
+// ★【0.04.21】繰り返しの予定でなくても、同じ名前・同じ時刻の1日だけの予定が3回以上あれば、1つの繰り返しの予定にまとめる
+//（Google カレンダーで1回ずつ入れた授業・週テストなど。まとめると、直すのも消すのも1回で済む）
+// 曜日は出てきた曜日すべて。どれも2週おきなら隔週。あいだで抜けている日は「この日だけ消す」にする
+function calMergeRepeats(res) {
+  const groups = {};
+  res.forEach(x => { const e = x.ev; if (e.repeat || e.end) return; const k = [e.title, e.start || '', e.endTime || ''].join('\u0001'); (groups[k] = groups[k] || []).push(x); });
+  const today = calToday(), drop = new Set(), add = [];
+  Object.values(groups).forEach(xs => {
+    const dates = [...new Set(xs.map(x => x.ev.date))].sort();
+    if (dates.length < 3) return;
+    const first = dates[0], last = dates[dates.length - 1], m0 = planMonday(planParseDate(first));
+    const wk = ds => Math.round((planMonday(planParseDate(ds)) - m0) / (7 * DAY_MS));
+    const days = [...new Set(dates.map(calDow))].sort();
+    const ev = Object.assign({}, xs.find(x => x.ev.date === first).ev, { date: first, until: last, repeat: dates.every(d => wk(d) % 2 === 0) ? 'biweekly' : 'weekly', days });
+    // 型どおりなら出るはずなのに、無かった日
+    const have = new Set(dates), skip = [];
+    for (let ds = first; ds <= last; ds = calAddDays(ds, 1)) if (!have.has(ds) && calOccursOn(Object.assign({}, ev, { skip: [] }), ds)) skip.push(ds);
+    if (skip.length) ev.skip = skip; else delete ev.skip;
+    if (ev.type === 'event') ev.type = calGuessType(ev.title, false, true, !!ev.start); // 時刻のある繰り返しは授業として見る
+    const note = xs.map(x => x.ev.note).find(Boolean); if (note) ev.note = note; else delete ev.note;
+    xs.forEach(x => drop.add(x));
+    add.push({ id: 'icsr' + calHash(ev.title + '|' + (ev.start || '') + '|' + (ev.endTime || '')), ev, old: last < calAddDays(today, -30), merged: xs.map(x => x.id), n: dates.length });
+  });
+  return res.filter(x => !drop.has(x)).concat(add);
 }
 function calImportIcsPick() {
   const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.ics,text/calendar';
@@ -468,9 +493,14 @@ function calImportIcsText(text) {
   const list = all.filter(x => !x.old), past = all.length - list.length;
   if (!list.length) return alert(`予定は ${all.length} 件ありましたが、どれも1か月以上前に終わった予定でした。`);
   const counts = {}; list.forEach(x => { counts[x.ev.type] = (counts[x.ev.type] || 0) + 1; });
-  if (!confirm(`${list.length} 件の予定を「自分だけ」の予定として取り込みます。${past ? `\n（1か月以上前に終わった ${past} 件は取り込みません）` : ''}\n\n${Object.entries(counts).map(([k, n]) => `${CAL_TYPES[k].icon} ${CAL_TYPES[k].label}：${n}件`).join('\n')}\n\n種類はあとで直せます。同じ予定をもう一度取り込んだときは、上書きします。`)) return;
+  const merged = list.filter(x => x.merged);
+  if (!confirm(`${list.length} 件の予定を「自分だけ」の予定として取り込みます。${past ? `\n（1か月以上前に終わった ${past} 件は取り込みません）` : ''}${merged.length ? `\n\n🔁 同じ名前で何回もある予定は、繰り返しの予定にまとめます：\n${merged.slice(0, 8).map(x => `・${x.ev.title}（${x.n}回 → ${calRepeatText(x.ev)}）`).join('\n')}${merged.length > 8 ? `\n…ほか ${merged.length - 8} 件` : ''}` : ''}\n\n${Object.entries(counts).map(([k, n]) => `${CAL_TYPES[k].icon} ${CAL_TYPES[k].label}：${n}件`).join('\n')}\n\n種類はあとで直せます。同じ予定をもう一度取り込んだときは、上書きします。`)) return;
   const now = Date.now();
-  list.forEach(x => { calEvents[x.id] = Object.assign(x.ev, { at: now }); });
+  list.forEach(x => {
+    calEvents[x.id] = Object.assign(x.ev, { at: now });
+    // 前に1回ずつ取り込んだ分は消す（まとめた繰り返しの予定と重ならないように）
+    (x.merged || []).forEach(id => { if (calEvents[id] && !calEvents[id].deleted) calEvents[id] = { deleted: true, at: now }; });
+  });
   saveData(true);
   calCloseMenu();
   calAfterChange();
