@@ -689,7 +689,8 @@ async function drillJudgeCore(it, sn, st, v) {
     const ex = !!(st.extra && st.extra.length), many = Object.values(st.at).some(n => n >= 3);
     const none = !hs.length && !(r.extra && r.extra.length);
     if (r.form || r.wrong || many || none || (st.mn === 'bad' && !ex)) {
-      return { status: 'wrong', tip: r.form ? '品詞（語尾）の形が合っていません。' : r.wrong ? (drillAiOk() ? '意味が違います。' : '単語帳の訳と違います（AI が使えないため、言い換えは判定できません）。') : none ? '他の意味を答えられませんでした。' : many ? '単語帳の訳を思い出せませんでした。' : '自動詞・他動詞の言及が違います。' };
+      // ★【0.04.31】form：意味は合っていて、品詞（語尾）の形だけがちがう（カードモードでは「もう一度」にする）
+      return { status: 'wrong', form: !!r.form && !r.wrong && !many && !none, tip: r.form ? '品詞（語尾）の形が合っていません。' : r.wrong ? (drillAiOk() ? '意味が違います。' : '単語帳の訳と違います（AI が使えないため、言い換えは判定できません）。') : none ? '他の意味を答えられませんでした。' : many ? '単語帳の訳を思い出せませんでした。' : '自動詞・他動詞の言及が違います。' };
     }
     if (st.cv.length < sn.length) {
       return { status: 'more', hs, msg: hs.some(h => !h.exact) ? '意味は合っています。単語帳に載っている訳で答えてください。' : ex && !hs.length ? '辞書的には正しい意味ですが、単語帳には載っていません。単語帳に載っている意味を答えてください。' : '' };

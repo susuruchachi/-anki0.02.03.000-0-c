@@ -191,10 +191,14 @@ async function fcTestSubmit(choice) {
     try { fc.cur.sn = fc.cur.sn || await drillGetSn(u.it); res = await drillJudgeCore(u.it, fc.cur.sn, fc.cur.st, v); } catch (e) { res = { status: 'error' }; }
     fc.cur.busy = false;
     if (!fc || !fc.cur || fc.cur.u !== u) return;
-    if (res.status === 'repeat' || res.status === 'more') {
-      // 意味がいくつかある語：ほかの意味も聞く
+    // ★【0.04.31】まちがいではないもの（意味が足りない・同じ意味のくり返し・語尾（品詞の形）がちがう・単語帳と違う言い方）は、もう一度聞く
+    if (res.status === 'repeat' || res.status === 'more' || (res.status === 'wrong' && res.form)) {
       const got = (fc.cur.st.cv || []).map(i => String((fc.cur.sn[i] || {}).t || '').split('，')[0]).filter(Boolean);
-      fc.cur.msg = `${got.length ? '⭕ ' + got.join('、') + '　' : ''}${res.status === 'repeat' ? 'その意味はもう答えました。' : (res.msg || '')}ほかの意味もあります（あと${Math.max(1, fc.cur.sn.length - (fc.cur.st.cv || []).length)}つ）`;
+      const left = Math.max(1, fc.cur.sn.length - (fc.cur.st.cv || []).length);
+      const why = res.status === 'repeat' ? 'その意味はもう答えました。ほかの意味を答えてください。'
+        : res.form ? '意味は合っていますが、品詞（語尾）の形がちがいます。形を直して、もう一度答えてください。'
+        : `${res.msg || ''}${got.length ? `ほかの意味もあります（あと${left}つ）。` : 'もう一度答えてください。'}`;
+      fc.cur.msg = `${got.length ? '⭕ ' + got.join('、') + '　' : ''}${why}`;
       fcDraw(); const i2 = document.getElementById('fcAns'); if (i2) { i2.value = ''; i2.focus(); }
       return;
     }
@@ -209,15 +213,6 @@ async function fcTestSubmit(choice) {
   fcSaveSess();
   fcDraw();
   if (typeof drillTtsOn === 'function' && drillTtsOn()) fcSpeakA();
-}
-// 間違えたテスト：あと1つでも合っていれば「やっぱり正解」にできる
-function fcTestOverride() {
-  if (!fc || !fc.cur || !fc.cur.done || fc.cur.ok) return;
-  const u = fc.cur.u;
-  fc.queue = fc.queue.filter((id, i) => !(id === u.id && i === fc.queue.lastIndexOf(u.id)));
-  const p = fcProg(u.id);
-  fcSetProg(u.id, { p: true, k: FC_KNOW, d: Math.max(0, (p.d || 0) - 2) });
-  fc.cur.ok = true; fcSaveSess(); fcDraw();
 }
 
 // ---------------- 表示 ----------------
@@ -269,9 +264,10 @@ function fcDraw() {
       : choices ? `<div class="fc-choice-btns">${choices.map((x, i) => `<button class="btn btn-secondary" onclick="fcTestSubmit(${jsArg(x)})">${'①②③④⑤⑥⑦⑧⑨'[i] || ''} ${dE(x)}</button>`).join('')}</div>`
       : `${c.msg ? `<div class="hint-small fc-msg">${escapeHtml(c.msg)}</div>` : ''}
         <input type="text" id="fcAns" class="form-control" placeholder="意味を書いてください（全部の意味）" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault(); fcTestSubmit();}">
-        <button id="fcJudgeBtn" class="btn btn-primary" style="margin-top:8px;" onclick="fcTestSubmit()">✔ 判定</button>`}
+        <button id="fcJudgeBtn" class="btn btn-primary" style="margin-top:8px;" onclick="fcTestSubmit()">✔ 判定</button>
+        ${typeof drillAiOk === 'function' && !drillAiOk() ? '<div class="hint-small" style="margin-top:6px;">⚠️ AI が使えないため、単語帳の訳と同じ言葉だけを正解にします（設定 → 🤖 AI でキーを入れると、暗記テストと同じく言い換えも判定します）</div>' : ''}`}
     </div></div>
-    ${c.done ? `<div class="fc-btns">${!c.ok ? '<button class="btn btn-secondary" onclick="fcTestOverride()">⭕ やっぱり正解</button>' : ''}<button class="btn btn-primary" onclick="fcNext()">次へ →</button></div>` : ''}`;
+    ${c.done ? `<div class="fc-btns"><button class="btn btn-primary" onclick="fcNext()">次へ →</button></div>` : ''}`;
   if (!c.done && !choices) setTimeout(() => { const i = document.getElementById('fcAns'); if (i) i.focus(); }, 50);
 }
 function fcSpeakQ() { if (fc && fc.cur && typeof speakText === 'function') speakText(typeof spoilerSafeSpeech === 'function' ? spoilerSafeSpeech(fc.cur.u.w) : fc.cur.u.w); }
