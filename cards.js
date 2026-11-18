@@ -181,8 +181,25 @@ async function fcTestSubmit(choice) {
   if (!fc || !fc.cur || fc.cur.mode !== 'test' || fc.cur.done || fc.cur.busy) return;
   const u = fc.cur.u;
   let ok;
-  if (u.ck) ok = String(choice) === String(u.ck.ans) || (typeof isAnswerCorrect === 'function' && isAnswerCorrect(String(choice), u.ck.ans));
-  else {
+  if (u.ck && u.ck.choices && choice !== undefined) ok = String(choice) === String(u.ck.ans) || (typeof isAnswerCorrect === 'function' && isAnswerCorrect(String(choice), u.ck.ans));
+  else if (u.ck) {
+    // ★【0.04.32】選択肢のない Check!（● …の意味は？ など）：書いた答えを、暗記テストと同じ判定で（決まらなければ AI）
+    const inp = document.getElementById('fcAns'), v = String(inp && inp.value || '').trim();
+    if (!v) return;
+    fc.cur.given = v;
+    const lc = drillCheckLocal(v, u.ck.ans);
+    if (lc.decided) ok = lc.ok;
+    else if (typeof drillAiOk === 'function' && drillAiOk()) {
+      fc.cur.busy = true;
+      const btn = document.getElementById('fcJudgeBtn'); if (btn) { btn.disabled = true; btn.textContent = '🤖 確認中…'; }
+      try {
+        const r = await drillAi(`問題:${u.ck.q}\n正解:${u.ck.ans}\n生徒の答え:${v}\n正解の中の（ ）は、省略してよい語か言い換え（「根本的（劇的）な変化」なら「根本的な変化」「劇的な変化」どちらも ok）。意味が同じなら ok。順序の違い・表記の軽微な違いは許容。JSONのみ：{"v":"ok|x"}`);
+        ok = r && r.v === 'ok';
+      } catch (e) { ok = typeof isAnswerCorrect === 'function' && isAnswerCorrect(v, u.ck.ans); }
+      fc.cur.busy = false;
+      if (!fc || !fc.cur || fc.cur.u !== u) return;
+    } else ok = false;
+  } else {
     const inp = document.getElementById('fcAns'), v = String(inp && inp.value || '').trim();
     if (!v) return;
     fc.cur.st = fc.cur.st || {}; fc.cur.busy = true;

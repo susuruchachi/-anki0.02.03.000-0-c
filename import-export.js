@@ -352,8 +352,10 @@ function exportTextOpen() {
       ${textCats().map(c => `<label class="bulkdel-row" style="padding-left:${depth(c) * 16}px;"><input type="checkbox" class="txtExpCat" value="${escAttr(c)}" onchange="textPickChildren(this)"><div>${escapeHtml(c)} <span class="hint-small">${count(c)}${total(c) !== count(c) ? `／中も合わせて ${total(c)}` : ''}枚</span></div></label>`).join('')}
     </div>
     <label class="section-label" style="margin-top:8px;">形</label>
-    <select id="txtExpFormat" class="form-control"><option value="tab">1行に「問題 タブ 答え」（フォルダーの一括追加と同じ）</option><option value="lines">2行ずつ（問題の行・答えの行）</option></select>
+    <select id="txtExpFormat" class="form-control" onchange="textFmtHint()"><option value="vt">📄 単語帳の形（暗記の「テキストから問題を作る」で読める。番号・派生語・熟語・例文・Check!・導入の文もそのまま）</option><option value="tab">1行に「問題 タブ 答え」（フォルダーの一括追加と同じ）</option><option value="lines">2行ずつ（問題の行・答えの行）</option></select>
+    <div id="txtFmtHint" class="hint-small" style="margin-top:4px;"></div>
     <div class="plan-btns" style="margin-top:10px; flex-wrap:wrap;"><button class="btn btn-primary" onclick="exportTextDo('file')">💾 保存</button><button class="btn btn-secondary" onclick="exportTextDo('copy')">📋 コピー</button><button class="btn btn-secondary" onclick="textCloseOverlay()">やめる</button></div>`);
+  textFmtHint();
 }
 function textPickAll(on) { document.querySelectorAll('.txtExpCat').forEach(x => { x.checked = on; }); }
 function textPickChildren(el) {
@@ -373,10 +375,31 @@ function exportTextBuild(cats, fmt) {
   });
   return { text: L.join('\n') + '\n', n };
 }
+function textFmtHint() {
+  const el = document.getElementById('txtFmtHint'), f = (document.getElementById('txtExpFormat') || {}).value; if (!el) return;
+  el.textContent = f === 'vt' ? 'セクションのフォルダー（例：鉄壁 › #28 産業）ごとに書き出します。「🧠 暗記」→「📄 テキストから問題を作る」に貼ると、同じカードになります（成績は書き出しません）。'
+    : 'カードの問題と答えだけを書き出します（メモ・選択肢・番号は書きません）。設定の「📝 テキスト入力」やフォルダーの「一括追加」で戻せます。';
+}
 async function exportTextDo(how) {
   const cats = [...document.querySelectorAll('.txtExpCat:checked')].map(x => x.value);
   if (!cats.length) return alert('フォルダーを選んでください。');
-  const { text, n } = exportTextBuild(cats, document.getElementById('txtExpFormat').value);
+  const fmt = document.getElementById('txtExpFormat').value;
+  if (fmt === 'vt') {
+    // ★【0.04.32】単語帳の形：書いたテキストを読み直して、元のカードと同じになるか確かめてから
+    const r = vtxExport(cats);
+    if (!r.n) return alert('選んだフォルダーにカードがありません。');
+    const bad = r.checks.filter(x => !x.v.same);
+    if (bad.length) {
+      const lines = bad.flatMap(x => x.v.diffs).slice(0, 8).join('\n'), cnt = bad.reduce((s, x) => s + x.v.diffs.length, 0);
+      if (!confirm(`⚠️ 読み込み直したときに、元と同じにならないカードが ${cnt}枚あります（単語帳の形で表せない形のカード）：\n${lines}${cnt > 8 ? '\n…' : ''}\n\nこのまま書き出しますか？`)) return;
+    }
+    if (how === 'copy') { try { await navigator.clipboard.writeText(r.text); alert(`📋 ${r.secs.length}セクション（${r.n}枚）をコピーしました。`); } catch (e) { alert('⚠️ コピーできませんでした。「保存」を使ってください。'); } return; }
+    const name = r.secs.length === 1 ? r.secs[0].replace(/[\\/:*?"<>|#]/g, '_').trim() : 'すするanki-単語帳';
+    saveBlobFile(new Blob([r.text], { type: 'text/plain;charset=utf-8' }), `${name}-${new Date().toISOString().slice(0, 10)}.txt`);
+    textCloseOverlay();
+    return;
+  }
+  const { text, n } = exportTextBuild(cats, fmt);
   if (!n) return alert('選んだフォルダーにカードがありません。');
   if (how === 'copy') {
     try { await navigator.clipboard.writeText(text); alert(`📋 ${n}枚のカードをコピーしました。`); } catch (e) { alert('⚠️ コピーできませんでした。「ファイルに保存」を使ってください。'); }
