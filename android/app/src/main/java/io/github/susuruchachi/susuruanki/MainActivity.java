@@ -73,6 +73,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        ApkUpdater.appAlive = true;
         Window w = getWindow();
         w.setStatusBarColor(Color.parseColor("#080C14"));
         w.setNavigationBarColor(Color.parseColor("#080C14"));
@@ -184,8 +185,23 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() { super.onPause(); CookieManager.getInstance().flush(); }
 
+    // ★【0.04.24】アプリの自動更新：閉じて（裏に回して）1分たち、プレイ中でなく、確認なしで入れられるなら入れ替える
+    //  （裏に回ったアプリは止められることがあるので、アラームで起こしてもらう。InstallResultReceiver が入れる）
+    static volatile boolean jsIdle = false;
     @Override
-    protected void onDestroy() { if (tts != null) { tts.stop(); tts.shutdown(); } super.onDestroy(); }
+    protected void onStart() { super.onStart(); ApkUpdater.onShown(this); }
+    @Override
+    protected void onStop() { super.onStop(); ApkUpdater.onHidden(this); }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // 裏で入れようとしたら確認が要った：開いたときに確認を出す
+        if (InstallResultReceiver.askLater) { InstallResultReceiver.askLater = false; bg.execute(() -> ApkUpdater.install(getApplicationContext())); }
+    }
+
+    @Override
+    protected void onDestroy() { ApkUpdater.appAlive = false; if (tts != null) { tts.stop(); tts.shutdown(); } super.onDestroy(); }
 
     private void ttsDone(String id) {
         String js = "window.__susuruTtsDone&&window.__susuruTtsDone(" + JSONObject.quote(id == null ? "" : id) + ")";
@@ -353,6 +369,29 @@ public class MainActivity extends Activity {
                 runOnUiThread(() -> web.evaluateJavascript(js, null));
             });
         }
+        // ★【0.04.24】アプリの自動更新（app-bridge.js から）
+        //  apkPrepare：裏でダウンロード（終わったら window.__susuruApkReady(ok, 確認なしで入れられるか)）
+        @JavascriptInterface public void apkPrepare(String url, long code) {
+            if (!isOwnPage(Uri.parse(url))) return;
+            bg.execute(() -> {
+                boolean ok = ApkUpdater.download(getApplicationContext(), url, code);
+                boolean silent = ApkUpdater.canSilent(MainActivity.this);
+                runOnUiThread(() -> web.evaluateJavascript("window.__susuruApkReady&&window.__susuruApkReady(" + ok + "," + silent + ")", null));
+            });
+        }
+        @JavascriptInterface public boolean apkCanSilent() { return ApkUpdater.canSilent(MainActivity.this); }
+        @JavascriptInterface public boolean apkReady() { return ApkUpdater.ready(MainActivity.this); }
+        // いま入れる（確認が要れば確認の画面が出る）
+        @JavascriptInterface public void apkInstallNow() {
+            if (!getPackageManager().canRequestPackageInstalls()) {
+                toast("「この提供元のアプリを許可」をオンにしてから、もう一度更新してください");
+                try { startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + getPackageName()))); } catch (Exception e) {}
+                return;
+            }
+            bg.execute(() -> { if (!ApkUpdater.install(getApplicationContext())) toast("更新を始められませんでした"); });
+        }
+        // いまプレイ中でないか（裏に回ったときに入れ替えてよいか）
+        @JavascriptInterface public void apkSetIdle(boolean idle) { jsIdle = idle; }
         @JavascriptInterface public void openInApp(String url) { runOnUiThread(() -> MainActivity.this.openInApp(Uri.parse(url))); }
         @JavascriptInterface public void openExternal(String url) {
             try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url))); } catch (Exception e) { toast("開けるアプリがありません"); }

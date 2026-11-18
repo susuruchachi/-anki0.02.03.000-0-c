@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ★【0.04.25】カレンダーのウィジェット：今日の予定と、これからのテスト・期限（ウィジェットで使える部品だけ：LinearLayout・TextView） -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/c_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="12dp"
+    android:background="@drawable/widget_bg">
+
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:gravity="center_vertical">
+        <TextView android:id="@+id/c_date" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+            android:text="📅 今日" android:textSize="14sp" android:textStyle="bold" android:textColor="#9AD1FF" />
+        <TextView android:id="@+id/c_count" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="" android:textSize="10sp" android:textColor="#5E6B82" />
+    </LinearLayout>
+
+    <TextView android:id="@+id/c_today" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="4dp" android:text="アプリを開くと、予定が届きます" android:textSize="13sp"
+        android:textColor="#E8EDF5" android:lineSpacingExtra="2dp" android:maxLines="6" android:ellipsize="end" />
+
+    <LinearLayout android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginTop="8dp"
+        android:layout_marginBottom="6dp" android:background="#33FFFFFF" android:orientation="horizontal" />
+
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:text="⏳ これからのテスト・期限" android:textSize="12sp" android:textStyle="bold" android:textColor="#FFD166" />
+    <TextView android:id="@+id/c_up" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="2dp" android:text="" android:textSize="12sp" android:textColor="#E8EDF5"
+        android:lineSpacingExtra="2dp" android:maxLines="6" android:ellipsize="end" />
+</LinearLayout>

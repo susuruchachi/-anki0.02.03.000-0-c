@@ -39,6 +39,12 @@ public class BrowserActivity extends Activity {
         return b;
     }
 
+    // ★【0.04.24】アプリの中のブラウザを見ているあいだは、自動更新しない
+    @Override
+    protected void onStart() { super.onStart(); ApkUpdater.onShown(this); }
+    @Override
+    protected void onStop() { super.onStop(); ApkUpdater.onHidden(this); }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);

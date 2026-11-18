@@ -339,7 +339,7 @@ function showUpdateBar() {
 //  クイズ・対戦・暗記テストの問題・聞き流しの再生中・ダイアログを開いている・文字を入力している間は決して読み込み直さない
 const AUTO_UPDATE_PAGES = ['pgHome', 'pgDrill', 'pgListen', 'pgStats', 'pgTree', 'pgBox', 'pgUpdates', 'pgFriends', 'pgPublicCategories', 'pgCompareStats', 'pgBackup', 'pgMatchHistory', 'pgTutorial'];
 let _autoUpdating = false;
-function appIdleForUpdate() {
+function appIdleForUpdate(ignoreVisible) { // ★【0.04.24】ignoreVisible：裏に回るときに（Android アプリの自動更新）
   if (document.body.classList.contains('in-quiz') || window.currentOnlineMatch) return false;
   const act = document.querySelector('.screen.active'), id = act ? act.id : '';
   if (!AUTO_UPDATE_PAGES.includes(id)) return false;
@@ -348,7 +348,7 @@ function appIdleForUpdate() {
   const sm = document.getElementById('sideMenu'); if (sm && sm.classList.contains('open')) return false;
   if ([...document.querySelectorAll('[id$="Overlay"], .ctx-overlay')].some(el => el.id !== 'menuOverlay' && getComputedStyle(el).display !== 'none')) return false;
   const ae = document.activeElement; if (ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) && ae.type !== 'checkbox' && ae.type !== 'button') return false;
-  return document.visibilityState === 'visible';
+  return !!ignoreVisible || document.visibilityState === 'visible';
 }
 function maybeAutoUpdate() {
   if (!_updateFound || _autoUpdating || !appIdleForUpdate()) return;
