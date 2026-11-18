@@ -41,7 +41,7 @@ android {
         resValue 'string', 'fbApiKey', 'AIzaSyAGoYBRoupEFHng_cXoiHmZf9eAlX8ZCHA'
         resValue 'string', 'fbProjectId', 'susuruanki'
         resValue 'string', 'fbSenderId', '926791749187'
-        resValue 'string', 'fbAndroidAppId', (project.findProperty('fbAndroidAppId') ?: System.getenv('FIREBASE_ANDROID_APP_ID') ?: '')
+        resValue 'string', 'fbAndroidAppId', (project.findProperty('fbAndroidAppId') ?: System.getenv('FIREBASE_ANDROID_APP_ID') ?: '1:926791749187:android:0a7e4a71dfc29b09c7cef6')
         resValue 'string', 'webClientId', '926791749187-pq139a7m09tnp8pupfineqp8ibruhu9v.apps.googleusercontent.com'
     }
 
