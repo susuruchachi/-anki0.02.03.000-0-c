@@ -53,7 +53,18 @@ function planSetLog(i, field, value) {
   saveData();
 }
 // 単語の期限（その週の期限の曜日の 23:59）
-function planWordsDeadline(i) { const d = planWeekBegin(i), W = planWeekOffset(); d.setDate(d.getDate() + (planPos(CP.wordsDue ?? 4) - W + 7) % 7); d.setHours(23, 59, 59, 999); return d; }
+function planWordsDeadline(i) {
+  const d = planWeekBegin(i), W = planWeekOffset(); d.setDate(d.getDate() + (planPos(CP.wordsDue ?? 4) - W + 7) % 7);
+  // ★【0.04.20】カレンダーの予定（テスト・授業）に合わせたプランは、その予定の始まる時刻まで（同じ曜日なら次の週のその日）
+  if (CP.dueTime && /^\d{1,2}:\d{2}$/.test(CP.dueTime)) { const [h, m] = CP.dueTime.split(':').map(Number); d.setDate(d.getDate() + (CP.dueShift || 0)); d.setHours(h, m, 0, 0); }
+  else d.setHours(23, 59, 59, 999);
+  return d;
+}
+// 期限の言い方（「木曜の夜まで」「火曜 9:00 まで」）
+function planDueText(p = CP) {
+  const due = p.wordsDue ?? 4;
+  return p.dueTime ? `${PLAN_DAYS[(due + (p.dueShift || 0)) % 7]}曜 ${p.dueTime} まで${p.dueEvTitle ? `・${p.dueEvTitle}` : ''}` : `${PLAN_DAYS[due]}曜の夜まで`;
+}
 
 // 範囲のカード
 function planCards(cat) { if (!cat) return []; const set = new Set(getAllSubcategories(cat)); return db.filter(q => set.has(q.category)); }
@@ -109,9 +120,9 @@ function planTasks(now = new Date()) {
     const answered = planAnsweredSince(words, weekStart);
     if (dayPos >= fromPos || L.words) {
       tasks.push({ key: 'words', title: `🧠 単語：${cur}`, cards: words, done: !!L.words, deadline, overdue: !L.words && now > deadline,
-        sub: L.words ? `✅ 終わりました${L.wordsOnTime === false ? '（期限後）' : ''}` : `暗記テストで全部〇に（${PLAN_DAYS[due]}曜の夜まで）・今週解いた単語 ${answered}/${words.length}`,
+        sub: L.words ? `✅ 終わりました${L.wordsOnTime === false ? '（期限後）' : ''}` : `暗記テストで全部〇に（${planDueText()}）・今週解いた単語 ${answered}/${words.length}`,
         progress: words.length ? answered / words.length : 0, action: `planStartTask(${jsArg(CP.id)}, 'words')` });
-    } else tasks.push({ key: 'words', title: `🧠 単語：${cur}`, cards: words, done: false, upcoming: true, sub: `${PLAN_DAYS[from]}曜から（${PLAN_DAYS[due]}曜の夜まで）`, action: `planStartTask(${jsArg(CP.id)}, 'words')` });
+    } else tasks.push({ key: 'words', title: `🧠 単語：${cur}`, cards: words, done: false, upcoming: true, sub: `${PLAN_DAYS[from]}曜から（${planDueText()}）`, action: `planStartTask(${jsArg(CP.id)}, 'words')` });
     // ★【0.03.41】単語（暗記テスト）に合格 → チャンツ（通常のクイズで全部合格）→ 例文
     const ch = planChantCards(cur);
     let chDone = true;
@@ -326,7 +337,7 @@ function renderPlanSettings() {
   const editing = _planEditId === 'new' ? null : (planById(_planEditId) || null);
   if (!editing && _planEditId !== 'new') {
     // プランの一覧（編集・解除・追加）
-    box.innerHTML = (list.length ? list.map(p => `<div class="plan-row"><div style="min-width:0;"><b>📚 ${escapeHtml(p.root)}</b><div class="hint-small">${p.weeks.length}週・${escapeHtml(p.start)} の週から・単語は${PLAN_DAYS[p.wordsFrom ?? 2]}〜${PLAN_DAYS[p.wordsDue ?? 4]}曜</div></div>
+    box.innerHTML = (list.length ? list.map(p => `<div class="plan-row"><div style="min-width:0;"><b>📚 ${escapeHtml(p.root)}</b><div class="hint-small">${p.weeks.length}週・${escapeHtml(p.start)} の週から・単語は${PLAN_DAYS[p.wordsFrom ?? 2]}曜から（${escapeHtml(planDueText(p))}）</div></div>
         <div style="display:flex; gap:6px; flex-shrink:0;"><button class="chip" onclick="planEdit(${jsArg(p.id)})">✏️ 編集</button><button class="chip" onclick="stopStudyPlan(${jsArg(p.id)})">🗑️ 解除</button></div></div>`).join('')
       : '<div class="hint-small">まだプランはありません。</div>') +
       `<button class="btn btn-secondary" style="margin-top:8px;" onclick="planEdit('new')">＋ 新しいプランを登録</button>`;
@@ -345,7 +356,7 @@ function renderPlanSettings() {
   // ★【0.03.49】1週の範囲は「何を1週にするか」を例つきで
   const ex = u => { const f = root ? planUnitFolders(root, u) : []; return f.length ? `${f.length}週：${f.slice(0, 2).join('、')}${f.length > 2 ? ' …' : ''}` : '0週'; };
   const unitOpts = [['leaves', '単語が入っているフォルダーごと'], ['children', `「${root}」のすぐ下のフォルダーごと`]].concat(Array.from({ length: Math.max(0, depth - 1) }, (_, k) => ['d' + (k + 2), `${k + 2}つ下のフォルダーごと`]));
-  const daySel = (id, v) => `<select id="${id}" class="form-control">${PLAN_DAYS.map((d, i) => `<option value="${i}" ${Number(v) === i ? 'selected' : ''}>${d}曜</option>`).join('')}</select>`;
+  const daySel = (id, v) => `<select id="${id}" class="form-control" ${id === 'planFrom' || id === 'planDue' ? 'onchange="calPlanManual && calPlanManual()"' : ''}>${PLAN_DAYS.map((d, i) => `<option value="${i}" ${Number(v) === i ? 'selected' : ''}>${d}曜</option>`).join('')}</select>`;
   box.innerHTML = `
     <div class="hint-small" style="margin-bottom:8px;">${editing ? `✏️ ${escapeHtml(p.root)} のプランを編集` : '＋ 新しいプラン：1週間に1つのフォルダーずつ進めます（いくつでも登録できます）'}</div>
     <div class="plan-step"><span class="plan-step-no">1</span>📚 単語帳（全体のフォルダー）</div>
@@ -362,6 +373,7 @@ function renderPlanSettings() {
       <div style="flex:1;"><label class="section-label" style="font-weight:500;">🧠 単語を始める日</label>${daySel('planFrom', p.wordsFrom ?? 2)}</div>
       <div style="flex:1;"><label class="section-label" style="font-weight:500;">⏰ 単語の期限（夜まで）</label>${daySel('planDue', p.wordsDue ?? 4)}</div>
     </div>
+    ${typeof calPlanPickerHTML === 'function' ? calPlanPickerHTML(p) : ''}
     <div class="form-row" style="margin-top:8px; align-items:center;">
       <div style="flex:1;"><label class="section-label" style="font-weight:500;">🔁 先週の復習の日</label>${daySel('planReviewDay', p.reviewDay ?? 0)}</div>
       <div style="flex:1;"><label class="section-label" style="font-weight:500;">復習する単語</label><select id="planSunday" class="form-control">
@@ -433,6 +445,7 @@ function saveStudyPlan() {
     monthly: m !== 'off', monthlyStars: m === 'off' ? 2 : Number(m), log: old && old.root === root ? old.log || {} : {},
     autoOpen: !!(document.getElementById('planAutoOpen') || { checked: true }).checked,
     repeat: !!(document.getElementById('planRepeat') || { checked: weeks.length === 1 }).checked,
+    ...(typeof calPlanFormValues === 'function' ? calPlanFormValues() : {}),
     createdAt: old ? (old.createdAt || 0) : Date.now(), planAt: Date.now()
   };
   studyPlan = normalizeStudyPlans(studyPlan);

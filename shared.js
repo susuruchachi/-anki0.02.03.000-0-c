@@ -107,7 +107,7 @@ async function syncSubscriptions() {
       }
       const data = snap.data();
       const isOwner = (data.ownerId === currentUser.uid);
-      const canEdit = isOwner || (data.friends && data.friends.includes(currentUser.uid));
+      const canEdit = isOwner || (data.friends && data.friends.includes(currentUser.uid)) || (typeof groupCanEditShared === 'function' && groupCanEditShared(data));
       sharedDocPermissions[docId] = { canEdit, isOwner };
       if (isOwner && !ownedDocs.includes(docId)) { ownedDocs.push(docId); changed = true; }
       
@@ -288,16 +288,17 @@ async function addCardsToSharedDoc(docId, cards) {
   } catch (e) { console.error("Cloud bulk add failed", e); }
 }
 
-async function shareCategory(catName) {
+async function shareCategory(catName, opts = {}) {
+  // ★【0.04.20】opts.groupId：グループで共有する（メンバーは編集できる）。opts.quiet：リンクを出さずに docId を返す
   if (!currentUser) return alert("管理画面からログインしてください。");
   const already = getCategoryShareInfo(catName);
   if (already.shared) return alert("このフォルダーは既に共有・公開カテゴリーに含まれています。");
   const allTargets = getAllSubcategories(catName); const subset = db.filter(q => allTargets.includes(q.category));
   let partialTree = {}; allTargets.forEach(t => { if(categoryTree[t]) partialTree[t] = categoryTree[t]; });
   try {
-    const docRef = await firestore.collection("susuru_anki_shared").add(JSON.parse(JSON.stringify({ catName: catName, cards: subset.map(toSharedCard), categories: allTargets, categoryTree: partialTree, ownerId: currentUser.uid, ownerName: currentUser.displayName || currentUser.email || '不明', friends: [] })));
+    const docRef = await firestore.collection("susuru_anki_shared").add(JSON.parse(JSON.stringify({ catName: catName, cards: subset.map(toSharedCard), categories: allTargets, categoryTree: partialTree, ownerId: currentUser.uid, ownerName: currentUser.displayName || currentUser.email || '不明', friends: [], ...(opts.groupId ? { groupId: opts.groupId, groupName: opts.groupName || '' } : {}) })));
     await docRef.update({ createdAt: firebase.firestore.FieldValue.serverTimestamp() }).catch(() => {});
-    syncPublicIndex(docRef.id, { catName, cards: subset, ownerId: currentUser.uid, ownerName: currentUser.displayName || currentUser.email || '不明', isPublic: true, subscriberUids: [currentUser.uid] });
+    if (!opts.groupId) syncPublicIndex(docRef.id, { catName, cards: subset, ownerId: currentUser.uid, ownerName: currentUser.displayName || currentUser.email || '不明', isPublic: true, subscriberUids: [currentUser.uid] });
     
     // 自分が作ったものも同期対象にする
     if (!subscribedDocs.includes(docRef.id)) subscribedDocs.push(docRef.id);
@@ -308,12 +309,14 @@ async function shareCategory(catName) {
     const ids = new Set(subset.map(s => s.id));
     db.forEach(q => { if (ids.has(q.id)) { q.sharedDocId = docRef.id; touchCard(q); } });
     saveData(); syncSubscriptions();
+    if (opts.quiet) return docRef.id;
     
     const code = await assignNewShareCode(docRef.id).catch(() => null) || '（発行できませんでした）';
     const shareUrl = window.location.origin + window.location.pathname + "?share_id=" + docRef.id;
     try { await navigator.clipboard.writeText(shareUrl); } catch (e) {}
     alert(`✅ 共有URLを発行・コピーしました！\nURL: ${shareUrl}\n🔑 共有コード: ${code}\n（相手は「🌐 公開カテゴリー」画面の「共有コードで参加」にコードを入力しても開けます）\n\n（※今後、あなたがこのカテゴリー内の問題を編集・追加すると、全員に自動同期されます）`);
-  } catch(err) { alert("⚠️ URLの発行に失敗しました。ルールの確認を。"); }
+    return docRef.id;
+  } catch(err) { alert("⚠️ URLの発行に失敗しました。ルールの確認を。"); return null; }
 }
 
 function listenToSharedDoc(docId) {
@@ -350,7 +353,7 @@ function renderSharedPage() {
   if (!currentSharedData) return; 
   const data = currentSharedData;
   document.getElementById('sharedTitle').innerText = `🌐 ${escapeHtml(data.catName)}`; 
-  document.getElementById('sharedOwnerName').innerText = escapeHtml(data.ownerName); 
+  document.getElementById('sharedOwnerName').innerText = (data.ownerName || '') + (data.groupId ? `（👪 グループ「${data.groupName || ''}」で共有）` : ''); 
   document.getElementById('sharedCardCount').innerText = (data.cards || []).length;
   const codeRow = document.getElementById('sharedCodeRow');
   if (codeRow) {
@@ -363,7 +366,7 @@ function renderSharedPage() {
   }
   
   const isOwner = currentUser && currentUser.uid === data.ownerId; 
-  const isFriend = currentUser && data.friends && data.friends.includes(currentUser.uid); 
+  const isFriend = currentUser && ((data.friends && data.friends.includes(currentUser.uid)) || (typeof groupCanEditShared === 'function' && groupCanEditShared(data))); // ★【0.04.20】グループのメンバーも編集できる
   const canEdit = isOwner || isFriend;
   
   document.getElementById('sharedOwnerPanel').style.display = isOwner ? 'block' : 'none'; 

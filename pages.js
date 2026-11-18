@@ -110,7 +110,7 @@ function executePageTransition(pageId, isBackAction) {
   document.querySelectorAll('.screen').forEach(s => { s.classList.remove('active'); s.style.display='none'; });
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   // ★【0.03.00】下部ナビの選択状態と、クイズ中の表示切り替え
-  const navOwner = { pgUpdates: 'pgHome', pgTutorial: 'pgHome', pgPublicCategories: 'pgBox', pgShared: 'pgBox', pgMatchHistory: 'pgOnlineMatch', pgFriends: 'pgBackup', pgCompareStats: 'pgBackup', pgQuizResult: 'pgHome', pgListen: 'pgHome' };
+  const navOwner = { pgUpdates: 'pgHome', pgTutorial: 'pgHome', pgPublicCategories: 'pgBox', pgShared: 'pgBox', pgMatchHistory: 'pgOnlineMatch', pgFriends: 'pgBackup', pgCompareStats: 'pgBackup', pgQuizResult: 'pgHome', pgListen: 'pgHome', pgCalendar: 'pgHome' };
   const navPage = navOwner[pageId] || pageId;
   document.querySelectorAll('.bnav-item').forEach(b => b.classList.toggle('active', b.dataset.page === navPage));
   const wasInQuiz = document.body.classList.contains('in-quiz');
@@ -127,6 +127,9 @@ function executePageTransition(pageId, isBackAction) {
   if(pageId==='pgStats') { const el = document.getElementById('navStats'); if(el) el.classList.add('active'); renderStatsAndCharts(); }
   if(pageId==='pgOnlineMatch') { const el = document.getElementById('navOnlineMatch'); if(el) el.classList.add('active'); initOnlineMatchPage(); }
   if(pageId==='pgListen' && typeof renderListenPage === 'function') renderListenPage();
+  if(pageId==='pgCalendar' && typeof renderCalendar === 'function') renderCalendar(); // ★【0.04.20】
+  if(pageId==='pgHome' && typeof renderCalHome === 'function') renderCalHome();
+  if(pageId==='pgFriends' && typeof renderGroupCard === 'function') renderGroupCard();
   if(pageId==='pgPublicCategories') { loadPublicCategories(); loadMyPublicCategories(); }
   if(pageId==='pgCompareStats') { if (typeof renderCompareCatBtn === 'function') renderCompareCatBtn(); loadFriendsForComparison(); }
   if(pageId==='pgBackup') { const el = document.getElementById('navBackup'); if(el) el.classList.add('active'); if (typeof renderMySharedDocsSettings === 'function') renderMySharedDocsSettings(); if (typeof renderSnapshotList === 'function') renderSnapshotList(); if (typeof renderNotifySettings === 'function') renderNotifySettings(); if (typeof renderAiSettings === 'function') renderAiSettings(); if (typeof renderTtsMixSetting === 'function') renderTtsMixSetting(); }

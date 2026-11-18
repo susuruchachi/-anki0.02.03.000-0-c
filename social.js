@@ -163,7 +163,7 @@ function startFriendRequestWatch() {
   if (location.hash === '#friends') { history.replaceState(null, '', location.pathname + location.search); openPage('pgFriends'); loadAppFriends(); }
 }
 function renderFriendRequests() {
-  const n = _friendReqIn.length + _friendIntros.length;
+  const n = _friendReqIn.length + _friendIntros.length + (typeof groupInvites !== 'undefined' ? groupInvites.length : 0); // ★【0.04.20】グループへの招待も数える
   document.querySelectorAll('.friend-req-badge').forEach(b => { b.textContent = n; b.style.display = n ? 'inline-flex' : 'none'; });
   const box = document.getElementById('friendRequestsBox');
   if (!box) return;
