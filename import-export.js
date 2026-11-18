@@ -192,6 +192,12 @@ function importCSV(e) {
     let plan;
     try { plan = planCSVImport(parseCSVText(evt.target.result)); }
     catch (err) { console.error(err); alert("CSV解析に失敗しました。"); return; }
+    csvApplyPlanAsk(plan, 'CSV');
+  }; r.readAsText(file);
+}
+
+// 取り込んだ結果を見せて、「追加して更新」か「追加だけ」を選んでから入れる（CSV・テキストで共通）
+function csvApplyPlanAsk(plan, label) {
     if (!plan) return;
     const adds = plan.filter(x => x.type === 'add').length;
     const ups = plan.filter(x => x.type === 'update');
@@ -199,13 +205,12 @@ function importCSV(e) {
     if (!ups.length) { applyCSVImport(plan, false); return; }
     const ansCh = ups.filter(x => x.changes.includes('答え') || x.changes.includes('問題')).length;
     const sample = ups.slice(0, 3).map(x => `・${escapeHtml(String(x.ex.question).slice(0, 18))}（${x.changes.join('・')}）`).join('<br>');
-    openContextMenu(`📊 CSV：新しいカード ${adds}枚／既にあるカードの変更 ${ups.length}枚`, [
+    openContextMenu(`📊 ${label}：新しいカード ${adds}枚／既にあるカードの変更 ${ups.length}枚`, [
       { html: `🔄 追加して、既にあるカードも更新する<br><span style="font-size:0.75rem; color:var(--text3);">問題・答えが変わるカード ${ansCh}枚、メモ・選択肢などが変わるカード ${ups.length - ansCh}枚。成績はそのまま。CSVで空欄のメモは消しません<br>${sample}</span>`, action: () => applyCSVImport(plan, true) },
       { html: `➕ 新しいカードだけ追加する（既にあるカードは変えない）`, action: () => applyCSVImport(plan, false) },
       { type: 'separator' },
       { html: 'キャンセル', action: () => {} }
     ]);
-  }; r.readAsText(file);
 }
 
 function planCSVImport(rows) {
@@ -315,3 +320,108 @@ function factoryReset() {
   saveData(true); alert("💥 初期化完了。"); openPage('pgHome'); 
 }
 function escapeHtml(s) { if(!s) return ''; return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;"); }
+
+// ================================================================
+// ★【0.04.26】📝 テキストで書き出す・取り込む（フォルダーの「一括追加」と同じ形）
+// ・1行に「問題<タブ>答え」。「## 親>子」の行の下は、そのフォルダーのカード。「#」で始まる行は説明（読まない）
+// ・問題・答えの中の改行は \n（文字）、タブは空白にして書く（取り込むときに改行に戻す）
+// ・フォルダーを選んで書き出せる。「2行ずつ（問題の行・答えの行）」の形も選べる
+// ・取り込みは CSV と同じ（同じフォルダーに同じ問題があれば、増やさずに更新するか選べる）
+// ================================================================
+// 「\」は「\\」、改行は「\n」、タブは「\t」にする（数式の \neq などがこわれないように、\ も書きかえる）
+//  行の先頭の「#」は「\#」（説明・フォルダーの行と見分けるため）
+function textEsc(t) { return String(t == null ? '' : t).replace(/\r/g, '').replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/\t/g, '\\t').replace(/^#/, '\\#'); }
+function textUnesc(t) { return String(t || '').replace(/\\([\\nt#])/g, (m, c) => c === 'n' ? '\n' : c === 't' ? '\t' : c); }
+const TEXT_EXPORT_MARK = '# すするanki テキスト書き出し';
+function textOverlay(html) {
+  let ov = document.getElementById('textIoOverlay');
+  if (!ov) { ov = document.createElement('div'); ov.id = 'textIoOverlay'; ov.className = 'ctx-overlay'; ov.style.zIndex = '1060'; ov.onclick = () => { ov.style.display = 'none'; }; document.body.appendChild(ov); }
+  ov.innerHTML = `<div class="menu-card editor-card cal-editor" onclick="event.stopPropagation()">${html}</div>`;
+  ov.style.display = 'flex';
+}
+function textCloseOverlay() { const ov = document.getElementById('textIoOverlay'); if (ov) ov.style.display = 'none'; }
+function textCats() { return getSortedCategoriesForMenu().filter(c => !/^__.*__$/.test(c)); }
+function exportTextOpen() {
+  const depth = c => { try { return getCategoryPath(c).length - 1; } catch (e) { return 0; } };
+  const count = c => db.filter(q => q.category === c).length;
+  const total = c => { const set = new Set(getAllSubcategories(c)); return db.filter(q => set.has(q.category)).length; };
+  textOverlay(`<div class="cat-edit-title">📝 テキストで書き出す</div>
+    <div class="hint-small" style="margin:6px 0;">書き出すフォルダーを選んでください（親を選ぶと、中のフォルダーも選ばれます）。</div>
+    <div style="display:flex; gap:6px; margin-bottom:6px;"><button class="chip" onclick="textPickAll(true)">すべて</button><button class="chip" onclick="textPickAll(false)">なし</button></div>
+    <div style="max-height:40vh; overflow-y:auto; border:1px solid var(--border); border-radius:8px; padding:4px 8px;">
+      ${textCats().map(c => `<label class="bulkdel-row" style="padding-left:${depth(c) * 16}px;"><input type="checkbox" class="txtExpCat" value="${escAttr(c)}" onchange="textPickChildren(this)"><div>${escapeHtml(c)} <span class="hint-small">${count(c)}${total(c) !== count(c) ? `／中も合わせて ${total(c)}` : ''}枚</span></div></label>`).join('')}
+    </div>
+    <label class="section-label" style="margin-top:8px;">形</label>
+    <select id="txtExpFormat" class="form-control"><option value="tab">1行に「問題 タブ 答え」（フォルダーの一括追加と同じ）</option><option value="lines">2行ずつ（問題の行・答えの行）</option></select>
+    <div class="plan-btns" style="margin-top:10px; flex-wrap:wrap;"><button class="btn btn-primary" onclick="exportTextDo('file')">💾 保存</button><button class="btn btn-secondary" onclick="exportTextDo('copy')">📋 コピー</button><button class="btn btn-secondary" onclick="textCloseOverlay()">やめる</button></div>`);
+}
+function textPickAll(on) { document.querySelectorAll('.txtExpCat').forEach(x => { x.checked = on; }); }
+function textPickChildren(el) {
+  const kids = new Set(getAllSubcategories(el.value));
+  document.querySelectorAll('.txtExpCat').forEach(x => { if (kids.has(x.value)) x.checked = el.checked; });
+}
+function exportTextBuild(cats, fmt) {
+  const sortFn = typeof sortCardsByNumber === 'function' ? sortCardsByNumber : (x => x);
+  const L = [`${TEXT_EXPORT_MARK}（${new Date().toLocaleDateString('ja-JP')}）`,
+    `# 「## フォルダー」の下は、そのフォルダーのカード。${fmt === 'lines' ? '2行ずつ（問題の行・答えの行）' : '1行に「問題<タブ>答え」（フォルダーの一括追加と同じ形）'}。問題・答えの中の改行は \\n、\\ は \\\\ と書いています`];
+  let n = 0;
+  cats.forEach(c => {
+    const cards = sortFn(db.filter(q => q.category === c && q.question && q.answer));
+    if (!cards.length) return;
+    L.push('', '## ' + getCategoryPathString(c));
+    cards.forEach(q => { if (fmt === 'lines') L.push(textEsc(q.question), textEsc(q.answer)); else L.push(textEsc(q.question) + '\t' + textEsc(q.answer)); n++; });
+  });
+  return { text: L.join('\n') + '\n', n };
+}
+async function exportTextDo(how) {
+  const cats = [...document.querySelectorAll('.txtExpCat:checked')].map(x => x.value);
+  if (!cats.length) return alert('フォルダーを選んでください。');
+  const { text, n } = exportTextBuild(cats, document.getElementById('txtExpFormat').value);
+  if (!n) return alert('選んだフォルダーにカードがありません。');
+  if (how === 'copy') {
+    try { await navigator.clipboard.writeText(text); alert(`📋 ${n}枚のカードをコピーしました。`); } catch (e) { alert('⚠️ コピーできませんでした。「ファイルに保存」を使ってください。'); }
+    return;
+  }
+  const name = cats.length === 1 ? cats[0].replace(/[\\/:*?"<>|]/g, '_') : 'すするanki';
+  saveBlobFile(new Blob([text], { type: 'text/plain;charset=utf-8' }), `${name}-${new Date().toISOString().slice(0, 10)}.txt`);
+  textCloseOverlay();
+}
+// 取り込み：貼り付けるか、ファイルを選ぶ
+function importTextOpen() {
+  textOverlay(`<div class="cat-edit-title">📝 テキストから取り込む</div>
+    <div class="hint-small" style="margin:6px 0;">「📝 テキスト出力」で書き出した形（「## フォルダー」と、1行に「問題 タブ 答え」、または2行ずつ）を読みます。「## フォルダー」が無い部分は、下で選んだフォルダーに入れます。</div>
+    <textarea id="txtImpText" class="form-control" rows="8" placeholder="ここに貼り付けるか、ファイルを選んでください" style="font-family:'JetBrains Mono', monospace; font-size:0.78rem;"></textarea>
+    <button class="btn btn-secondary" style="margin-top:6px;" onclick="document.getElementById('fileTextImp').click()">📂 ファイルを選ぶ（.txt）</button>
+    <input type="file" id="fileTextImp" accept=".txt,text/plain" style="display:none;" onchange="textReadFile(this)">
+    <label class="section-label" style="margin-top:8px;">「## フォルダー」が無い部分の入れ先</label>
+    <select id="txtImpDefault" class="form-control">${textCats().map(c => `<option value="${escAttr(getCategoryPathString(c))}" ${c === '未分類' ? 'selected' : ''}>${escapeHtml(getCategoryPathString(c))}</option>`).join('')}</select>
+    <div class="plan-btns" style="margin-top:10px;"><button class="btn btn-primary" onclick="importTextDo()">📥 取り込む</button><button class="btn btn-secondary" onclick="textCloseOverlay()">やめる</button></div>`);
+}
+function textReadFile(inp) {
+  const f = inp.files && inp.files[0]; if (!f) return;
+  const r = new FileReader(); r.onload = () => { document.getElementById('txtImpText').value = r.result; }; r.readAsText(f); inp.value = '';
+}
+function parseTextImport(text, defPath) {
+  const rows = [['問題', '答え', 'フォルダー']];
+  let cur = { path: defPath || '未分類', lines: [] }; const blocks = [cur];
+  String(text || '').replace(/\r/g, '').split('\n').forEach(raw => {
+    const l = raw.trim(); let m;
+    if ((m = l.match(/^##\s*(.+)$/))) { cur = { path: m[1].trim(), lines: [] }; blocks.push(cur); return; }
+    if (!l || l.startsWith('#')) return;
+    cur.lines.push(l);
+  });
+  const tabMode = blocks.some(b => b.lines.some(l => l.includes('\t')));
+  blocks.forEach(b => {
+    if (tabMode) b.lines.forEach(l => { const i = l.indexOf('\t'); if (i > 0) rows.push([textUnesc(l.slice(0, i).trim()), textUnesc(l.slice(i + 1).trim()), b.path]); });
+    else for (let i = 0; i + 1 < b.lines.length; i += 2) rows.push([textUnesc(b.lines[i]), textUnesc(b.lines[i + 1]), b.path]);
+  });
+  return rows;
+}
+function importTextDo() {
+  const text = document.getElementById('txtImpText').value;
+  if (!text.trim()) return alert('テキストを貼り付けるか、ファイルを選んでください。');
+  const rows = parseTextImport(text, document.getElementById('txtImpDefault').value);
+  if (rows.length < 2) return alert('⚠️ カードが見つかりませんでした（1行に「問題 タブ 答え」、または2行ずつの形にしてください）。');
+  textCloseOverlay();
+  csvApplyPlanAsk(planCSVImport(rows), 'テキスト');
+}

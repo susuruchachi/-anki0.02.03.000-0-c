@@ -980,6 +980,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
         <button class="btn btn-secondary" id="btnFbLogout" style="display:none;" onclick="firebaseLogout()">🚪 ログアウト</button>
         <button class="btn btn-success" onclick="syncToCloud(false)">☁️ 手動同期</button>
       </div>
+      <div id="loginMethodsBox"></div>
       <div class="hint-small" style="margin-top:8px;">ログイン中はカードの追加・編集のたびに自動で同期されます。</div>
     </div>
 
@@ -1050,7 +1051,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
     </div>
 
     <div class="card">
-      <div class="setting-box-title">📦 バックアップ（JSON / CSV）</div>
+      <div class="setting-box-title">📦 バックアップ（JSON / CSV / テキスト）</div>
       <div class="form-row" style="margin-bottom:10px;">
         <button class="btn btn-secondary" onclick="exportJSON()">📤 JSON出力</button>
         <button class="btn btn-secondary" onclick="document.getElementById('fileJSON').click()">📥 JSON入力</button>
@@ -1060,6 +1061,10 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
         <button class="btn btn-secondary" onclick="exportCSV()">📤 CSV出力</button>
         <button class="btn btn-secondary" onclick="document.getElementById('fileCSV').click()">📥 CSV入力</button>
         <input type="file" id="fileCSV" accept=".csv, text/csv" style="display:none;" onchange="importCSV(event)">
+      </div>
+      <div class="form-row" style="margin-top:10px;">
+        <button class="btn btn-secondary" onclick="exportTextOpen()">📝 テキスト出力</button>
+        <button class="btn btn-secondary" onclick="importTextOpen()">📝 テキスト入力</button>
       </div>
       <div class="hint-small" style="margin-top:8px;">JSONは学習記録・画像も含む完全バックアップ、CSVはカードのみです。構造式・漢文はテキストなのでどちらにも含まれます。<br>CSVの列：問題・答え・フォルダー（「親>子」で入れ子）・メモ・選択肢（「a / b / c」）・形式（「例文」「テスト」）。同じフォルダーに同じ問題があれば、重複させずに更新するかどうかを確認します（空欄のメモは消しません）。</div>
       <button class="btn btn-secondary" style="margin-top:10px;" onclick="repairInflatedStats()">🩹 異常な成績（正解数・誤答数が1000回以上）を修復</button>
@@ -1133,13 +1138,13 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
       </div>
 
       <div class="card" style="margin-bottom:15px;">
-        <div class="setting-box-title">👪 グループ</div>
+        <div class="setting-box-title">👪 グループ <span class="friend-req-badge group-inv-badge" style="display:none;"></span></div>
         <div class="hint-small" style="margin-bottom:6px;">フレンドを招待してグループを作ると、グループの中だけでカテゴリー（みんなで編集できる）や予定を共有できます。</div>
         <div id="groupBox"></div>
       </div>
 
       <div class="card" style="margin-bottom:15px;">
-        <div class="setting-box-title">📨 フレンド申請 <span class="friend-req-badge" style="display:none;"></span></div>
+        <div class="setting-box-title">📨 フレンド申請 <span class="friend-req-badge friend-only-badge" style="display:none;"></span></div>
         <div id="friendRequestsBox" class="hint-small">ログインすると表示されます。</div>
       </div>
 

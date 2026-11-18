@@ -163,8 +163,12 @@ function startFriendRequestWatch() {
   if (location.hash === '#friends') { history.replaceState(null, '', location.pathname + location.search); openPage('pgFriends'); loadAppFriends(); }
 }
 function renderFriendRequests() {
-  const n = _friendReqIn.length + _friendIntros.length + (typeof groupInvites !== 'undefined' ? groupInvites.length : 0); // ★【0.04.20】グループへの招待も数える
-  document.querySelectorAll('.friend-req-badge').forEach(b => { b.textContent = n; b.style.display = n ? 'inline-flex' : 'none'; });
+  // ★【0.04.26】フレンド申請の欄にはフレンド申請・紹介だけ、グループの欄にはグループへの招待だけ。設定のボタン・下のメニューには両方の合計
+  const nf = _friendReqIn.length + _friendIntros.length, ng = typeof groupInvites !== 'undefined' ? groupInvites.length : 0, n = nf;
+  document.querySelectorAll('.friend-req-badge').forEach(b => {
+    const k = b.classList.contains('group-inv-badge') ? ng : b.classList.contains('friend-only-badge') ? nf : nf + ng;
+    b.textContent = k; b.style.display = k ? 'inline-flex' : 'none';
+  });
   const box = document.getElementById('friendRequestsBox');
   if (!box) return;
   const rows = [];
