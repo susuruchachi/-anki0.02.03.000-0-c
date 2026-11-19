@@ -225,6 +225,9 @@ function renderKanbunHTML(units, opts = {}) {
     else { groups.push([cell]); gH.push(h); }
   });
   const rows = Math.min(maxRows, Math.ceil(totalLen + 0.2));
+  // ★【0.04.38】.kb は上下に 0.2em ずつの余白があり、高さに余白も含む（border-box）ので、その分を足す
+  //  （足りないと「未《いま》ダ・Ｖセ」のような短い文でも、2字目が次の列に分かれていた）
+  const boxH = (rows + 0.4).toFixed(1);
   // ★【0.04.37】幅に入りきらないとき（opts.maxCols）は、列を何段かに分けて、上の段から順に並べる（段組み）
   if (opts.maxCols) {
     const cols = []; let cur = [], hs = 0;
@@ -233,11 +236,11 @@ function renderKanbunHTML(units, opts = {}) {
     if (cols.length > opts.maxCols) {
       const blocks = [];
       for (let i = 0; i < cols.length; i += opts.maxCols) blocks.push(cols.slice(i, i + opts.maxCols));
-      return `<span class="kb-blocks">${blocks.map(bl => `<span class="kb" style="height:${rows}em">${bl.flat().map(g => `<span class="kb-g">${g.join('')}</span>`).join('\u200B')}</span>`).join('')}</span>`;
+      return `<span class="kb-blocks">${blocks.map(bl => `<span class="kb" style="height:${boxH}em">${bl.flat().map(g => `<span class="kb-g">${g.join('')}</span>`).join('\u200B')}</span>`).join('')}</span>`;
     }
   }
   const html = groups.map(g => `<span class="kb-g">${g.join('')}</span>`).join('\u200B');
-  return `<span class="kb" style="height:${rows}em">${html}</span>`;
+  return `<span class="kb" style="height:${boxH}em">${html}</span>`;
 }
 
 // ----------------------------------------------------------------
@@ -475,4 +478,22 @@ function setRichContent(el, text, opts = {}) {
 function richTextToSpeech(text) {
   return (typeof markPlain === 'function' ? markPlain(text) : String(text == null ? '' : text)).replace(RICH_BLOCK_RE, (_, kw, body) =>
     richBlockType(kw) === 'chem' ? ' 構造式 ' : kanbunToKakikudashi(parseKanbun(body)));
+}
+
+// ★【0.04.38】暗記テスト・カードモード用
+// 埋め込みブロック（漢文の図・構造式）を外した文字。答えを書いて判定する部分・読み上げる部分に使う
+function richStripBlocks(text) {
+  return String(text == null ? '' : text).replace(new RegExp(RICH_BLOCK_RE.source, 'g'), ' ')
+    .replace(/[ \t\u3000]*\n[ \t\u3000]*/g, '\n').replace(/\n{2,}/g, '\n').replace(/[ \t]{2,}/g, ' ').trim();
+}
+// 文字（改行は <br>）と図をいっしょに表示用の HTML にする（図の HTML には改行が入らない）
+function richTextHTML(text, opts = {}) {
+  return renderRichText(text, Object.assign({ escape: true }, opts)).replace(/\n/g, '<br>');
+}
+// 埋め込みブロックだけを並べた表示用の HTML（答えの文字の下に図として出す）
+function richBlocksHTML(text, opts = {}) {
+  const re = new RegExp(RICH_BLOCK_RE.source, 'g'), src = String(text == null ? '' : text), out = [];
+  let m;
+  while ((m = re.exec(src)) !== null) out.push(renderRichText(m[0], Object.assign({ escape: true }, opts)));
+  return out.length ? `<div class="rich-figs">${out.join('')}</div>` : '';
 }

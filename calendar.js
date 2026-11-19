@@ -36,9 +36,9 @@ function calAllEvents() {
   Object.entries(calSubEvents).forEach(([sid, list]) => { if (calSubs.some(s => s.sid === sid)) (list || []).forEach(e => out.push(Object.assign({}, e, { gid: '', sub: sid }))); });
   return out;
 }
-// ★【0.04.38】何日か続く予定（end が最後の日）の日数（1日だけなら 0）
+// ★【0.04.39】何日か続く予定（end が最後の日）の日数（1日だけなら 0）
 function calSpan(ev) { return ev.end && ev.end > ev.date ? Math.round((planParseDate(ev.end) - planParseDate(ev.date)) / DAY_MS) : 0; }
-// ★【0.04.38】何日か続く予定を繰り返すとき（航海日誌で作った「毎年 12/28〜1/3」など）：繰り返しの日が、その回のはじめの日。
+// ★【0.04.39】何日か続く予定を繰り返すとき（航海日誌で作った「毎年 12/28〜1/3」など）：繰り返しの日が、その回のはじめの日。
 //  そこから同じ日数だけ続く。「この日だけ消す」（skip）は、その回のはじめの日で覚える（航海日誌の excludedDates と同じ）
 function calIsSpanRepeat(ev) { return calSpan(ev) > 0 && calIsRepeat(ev); }
 // その日が入っている回の、はじめの日（入っていなければ ''）。繰り返さない予定は ev.date
@@ -270,7 +270,7 @@ function calEdSetType(k) {
 function calEdUpdate() {
   const k = document.getElementById('calEdType').value, show = (sel, on) => document.querySelectorAll(sel).forEach(x => { x.style.display = on ? '' : 'none'; });
   const rep = document.getElementById('calEdRepeat').value;
-  // ★【0.04.38】どの種類でも「最後の日」（何日か続く予定）を入れられ、試験期間も繰り返せる（毎年の合宿など）
+  // ★【0.04.39】どの種類でも「最後の日」（何日か続く予定）を入れられ、試験期間も繰り返せる（毎年の合宿など）
   show('.cal-r-end', true);
   show('.cal-r-rep', true);
   show('.cal-r-days', rep === 'weekly' || rep === 'biweekly');
@@ -284,7 +284,7 @@ function calReadEditor() {
   const v = id => (document.getElementById(id) || {}).value || '';
   const type = v('calEdType') || 'event';
   const e = { type, title: v('calEdTitle').trim(), date: v('calEdDate'), place: v('calEdPlace').trim(), note: v('calEdNote').trim() };
-  if (v('calEdEnd') > e.date) e.end = v('calEdEnd'); // ★【0.04.38】どの種類でも
+  if (v('calEdEnd') > e.date) e.end = v('calEdEnd'); // ★【0.04.39】どの種類でも
   if (v('calEdStart')) { e.start = v('calEdStart'); if (v('calEdEndTime')) e.endTime = v('calEdEndTime'); }
   const rep = v('calEdRepeat');
   if (rep === 'rec') e.keepRec = true;
@@ -305,7 +305,7 @@ async function calSaveEvent() {
   if (old && old.skip) e.skip = old.skip;
   if (e.keepRec && old && old.rec) e.rec = old.rec;
   delete e.keepRec;
-  // ★【0.04.38】何日か続く予定を繰り返すとき：1回の長さが、次の回までより短いこと（重ならないように）
+  // ★【0.04.39】何日か続く予定を繰り返すとき：1回の長さが、次の回までより短いこと（重ならないように）
   if (calIsSpanRepeat(e)) {
     let gap = 7;
     if (e.rec) { const iv = Math.max(1, parseInt(e.rec.interval, 10) || 1); gap = ({ daily: iv, weekly: 7 * iv, monthly: 28 * iv, yearly: 365 * iv })[e.rec.freq] || 1; }
@@ -347,7 +347,7 @@ async function calDeleteEvent(id, gid) {
 }
 async function calSkipOne(id, gid, ds) {
   const e = calFindEvent(id, gid); if (!e) return;
-  if (calIsSpanRepeat(e)) ds = calInstanceStart(e, ds) || ds; // ★【0.04.38】何日か続く予定の繰り返しは、その回ごと消す
+  if (calIsSpanRepeat(e)) ds = calInstanceStart(e, ds) || ds; // ★【0.04.39】何日か続く予定の繰り返しは、その回ごと消す
   e.skip = [...new Set([...(e.skip || []), ds])]; e.at = Date.now();
   try { await calPut(id, gid, e); } catch (err) { return alert('⚠️ ' + (err.code || err.message)); }
   document.getElementById('calOverlay').style.display = 'none';
@@ -544,12 +544,12 @@ function calParseIcs(text) {
         if (r.UNTIL) { const u = calIcsParseDT(r.UNTIL); if (u) e.until = u.date; }
         else if (r.COUNT) e.until = calAddDays(s.date, Math.ceil(Number(r.COUNT) / e.days.length) * 7 * (e.repeat === 'biweekly' ? 2 : 1));
         last = e.until || '9999-12-31';
-        // ★【0.04.38】何日か続く予定の毎週・隔週（終日で、次の回と重ならない長さ）は、何日か続くまま繰り返す
+        // ★【0.04.39】何日か続く予定の毎週・隔週（終日で、次の回と重ならない長さ）は、何日か続くまま繰り返す
         if (!(e.end && r.FREQ === 'WEEKLY' && iv <= 2 && calSpan(e) < 7 * iv && e.days.length === 1)) delete e.end;
         else if (e.until) last = calAddDays(e.until, calSpan(e));
         if (r.FREQ === 'WEEKLY' && iv > 2) { e.note = `（${iv}週ごと：毎週として取り込みました）`; e.repeat = 'weekly'; }
       } else if (r.FREQ === 'MONTHLY' || r.FREQ === 'YEARLY') {
-        // ★【0.04.38】毎月・毎年の予定は、航海日誌の繰り返しの形（rec）で取り込む（何日か続く予定も、そのまま毎回続く）
+        // ★【0.04.39】毎月・毎年の予定は、航海日誌の繰り返しの形（rec）で取り込む（何日か続く予定も、そのまま毎回続く）
         e.rec = { freq: r.FREQ.toLowerCase(), interval: iv, daysOfWeek: [], endType: r.UNTIL ? 'until' : r.COUNT ? 'count' : 'never',
           endDate: r.UNTIL ? ((calIcsParseDT(r.UNTIL) || {}).date || null) : null, endCount: r.COUNT ? Number(r.COUNT) : null };
         last = e.rec.endDate ? calAddDays(e.rec.endDate, calSpan(e)) : '9999-12-31';

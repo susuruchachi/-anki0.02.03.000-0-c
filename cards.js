@@ -165,6 +165,7 @@ function fcFlip() {
   const el = document.getElementById('fcCard'); if (el) el.classList.toggle('flipped', fc.cur.flipped);
   const h = el && el.querySelector('.fc-hint'); if (h) h.textContent = fc.cur.flipped ? '→ わかる ／ ← わからない' : 'タップで答え';
   const fb = document.getElementById('fcFlipBtn'); if (fb) fb.textContent = fc.cur.flipped ? '🔄 問題' : '👀 答え';
+  if (fc.cur.flipped && el) fcHydrate(el); // 答えが見えてから、長い漢文を幅に合わせる
   if (fc.cur.flipped && typeof drillTtsOn === 'function' && drillTtsOn()) fcSpeakA();
 }
 function fcFly(dir, then) {
@@ -238,8 +239,12 @@ function fcAnsHTML(u) {
   const seg = parseStructuredAnswer(u.m);
   const body = seg ? seg.map(x => `<div class="fc-seg">${x.label ? `<span class="fc-pos">${escapeHtml(x.label)}</span>` : ''}${dE(x.text)}</div>`).join('') : `<div class="fc-seg">${dE(u.m).replace(/\n/g, '<br>')}</div>`;
   const note = u.card && u.card.note ? `<div class="fc-note">${dE(u.card.note).replace(/\n/g, '<br>')}</div>` : '';
-  return body + note;
+  const fig = typeof drillFigHTML === 'function' ? drillFigHTML(u.card) : ''; // ★【0.04.38】答えの漢文の図・構造式
+  return body + fig + note;
 }
+// ★【0.04.38】問題の漢文の図・構造式も描く（Check! はそのまま）
+function fcQHTML(u) { return !u.ck && u.it && typeof drillWordHTML === 'function' ? drillWordHTML(u.it) : dE(u.w); }
+function fcHydrate(box) { if (typeof hydrateRich === 'function') { try { hydrateRich(box); } catch (e) {} } }
 function fcDots(id) { const p = fcProg(id); return '●'.repeat(Math.min(FC_KNOW, p.k || 0)) + '○'.repeat(Math.max(0, FC_KNOW - (p.k || 0))); }
 function fcHeadHTML() {
   const ch = fc.chunks[fc.ci], done = ch.items.filter(u => fcProg(u.id).p).length;
@@ -258,7 +263,7 @@ function fcDraw() {
         <div id="fcCard" class="fc-card${c.flipped ? ' flipped' : ''}">
           <div class="fc-tag fc-tag-ok">わかる</div><div class="fc-tag fc-tag-ng">わからない</div>
           <div class="fc-top">${no}<span class="fc-dots" title="わかる ${p.k || 0}/${FC_KNOW}">${fcDots(u.id)}</span></div>
-          <div class="fc-q">${dE(u.w)}</div>
+          <div class="fc-q">${fcQHTML(u)}</div>
           ${u.ck && u.ck.choices ? `<div class="fc-choices">${u.ck.choices.map((x, i) => `<div>${'①②③④⑤⑥⑦⑧⑨'[i] || '・'} ${dE(x)}</div>`).join('')}</div>` : ''}
           <div class="fc-a">${fcAnsHTML(u)}</div>
           <div class="fc-hint">${c.flipped ? '→ わかる ／ ← わからない' : 'タップで答え'}</div>
@@ -266,6 +271,7 @@ function fcDraw() {
       </div>
       <div class="fc-btns"><button class="btn fc-ng" onclick="fcDont()">← わからない</button><button id="fcFlipBtn" class="btn btn-secondary" onclick="fcFlip()">${c.flipped ? '🔄 問題' : '👀 答え'}</button><button class="btn fc-ok" onclick="fcKnow()">わかる →</button></div>
       <div class="hint-small" style="text-align:center; margin-top:6px;">わかる ${p.k || 0}/${FC_KNOW}（${FC_KNOW}回で記述のテスト）・わからない ${p.d || 0}回</div>`;
+    fcHydrate(box);
     fcBindSwipe();
     return;
   }
@@ -274,7 +280,7 @@ function fcDraw() {
   box.innerHTML = fcHeadHTML() + `
     <div class="fc-stage"><div class="fc-card fc-test">
       <div class="fc-top">${no}<span class="fc-badge">✍️ テスト</span></div>
-      <div class="fc-q">${dE(u.w)}</div>
+      <div class="fc-q">${fcQHTML(u)}</div>
       ${c.done ? `<div class="fc-result ${c.ok ? 'ok' : 'ng'}">${c.ok ? '🎉 正解！「覚えた」になりました' : `✕ ちがいます${c.tip ? `（${escapeHtml(c.tip)}）` : ''}<div class="hint-small">「わかる」を0に戻して、「わからない」を2回ぶん足しました。</div>`}</div>
         ${c.given ? `<div class="hint-small">あなたの答え：${escapeHtml(c.given)}</div>` : ''}
         <div class="fc-a fc-a-show">${fcAnsHTML(u)}</div>`
@@ -285,6 +291,7 @@ function fcDraw() {
         ${typeof drillAiOk === 'function' && !drillAiOk() ? '<div class="hint-small" style="margin-top:6px;">⚠️ AI が使えないため、単語帳の訳と同じ言葉だけを正解にします（設定 → 🤖 AI でキーを入れると、暗記テストと同じく言い換えも判定します）</div>' : ''}`}
     </div></div>
     ${c.done ? `<div class="fc-btns"><button class="btn btn-primary" onclick="fcNext()">次へ →</button></div>` : ''}`;
+  fcHydrate(box);
   if (!c.done && !choices) setTimeout(() => { const i = document.getElementById('fcAns'); if (i) i.focus(); }, 50);
 }
 function fcSpeakQ() { if (fc && fc.cur && typeof speakText === 'function') speakText(typeof spoilerSafeSpeech === 'function' ? spoilerSafeSpeech(fc.cur.u.w) : fc.cur.u.w); }

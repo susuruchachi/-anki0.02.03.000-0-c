@@ -490,6 +490,9 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 /* ★【0.03.00】漢文（縦書き・返り点・送り仮名） */
 .kb { writing-mode: vertical-rl; display: inline-block; font-family: 'Noto Serif JP', 'Hiragino Mincho ProN', 'Yu Mincho', serif; line-height: 2.6; text-align: start; max-width: 100%; overflow-x: auto; overflow-y: hidden; vertical-align: middle; font-weight: 500; padding: 0.2em 0.3em; margin: 4px 0; }
 .kb-blocks { display: block; max-width: 100%; }
+/* ★【0.04.38】暗記テスト・カードモードの漢文の図（問題の大きな字の中では少し小さく。答えの下の図） */
+.drill-word .kb, .fc-q .kb { font-size: 0.7em; font-weight: 500; }
+.rich-figs { margin-top: 6px; }
 .kb-blocks > .kb { display: block; margin: 4px 0 4px auto; width: fit-content; }
 .kb-g { display: inline-block; writing-mode: horizontal-tb; width: 1em; line-height: 1; vertical-align: middle; }
 .kb-c { display: block; position: relative; width: 1em; }
