@@ -370,6 +370,7 @@ function calWidgetData() {
 }
 function calAfterChange() {
   if (typeof appWidgetSync === 'function') appWidgetSync();
+  if (typeof planRelinkFromCalendar === 'function') { try { planRelinkFromCalendar(); } catch (e) { console.warn(e); } } // ★【0.04.40】予定が動いたら週間プランも
   if (calLinkOn()) calLinkPush(); // ★【0.04.36】航海日誌と同期
   renderCalendar(); renderCalHome();
   if (typeof renderPlanViews === 'function') try { renderPlanViews(); } catch (e) {}
@@ -406,6 +407,27 @@ function calPlanPickerHTML(p) {
   </div>`;
 }
 function calSlotOf(val) { return calWeeklySlots().find(s => s.val === val) || null; }
+// ★【0.04.40】結びつけた予定を探す（予定の曜日が変わっていたら、その予定の同じ曜日 → 最初の曜日）
+function calSlotFind(val) {
+  if (!val) return null;
+  const exact = calSlotOf(val); if (exact) return exact;
+  const [gid, id, dow] = String(val).split('~');
+  const list = calWeeklySlots().filter(x => (x.ev.gid || '') === (gid || '') && x.ev.id === id);
+  return list.find(x => String(x.dow) === dow) || list[0] || null;
+}
+// 予定から、週間プランの「単語を始める日」「期限」を計算する（calPlanApply と同じ決まり）。予定が見つからなければ null
+function calPlanCompute(fromVal, dueVal, fromDefault) {
+  const f = calSlotFind(fromVal), d = calSlotFind(dueVal);
+  if (!f && !d) return null;
+  const out = {}, from = f ? f.dow : fromDefault;
+  if (f) { out.wordsFrom = f.dow; out.fromEv = f.val; }
+  if (d) {
+    if (d.ev.start) { if (d.dow === from) { out.wordsDue = (d.dow + 6) % 7; out.dueShift = 1; } else { out.wordsDue = d.dow; out.dueShift = 0; } out.dueTime = d.ev.start; }
+    else { out.wordsDue = (d.dow + 6) % 7; out.dueShift = 0; out.dueTime = ''; }
+    out.dueEvTitle = d.ev.title; out.dueEv = d.val;
+  }
+  return out;
+}
 function calPlanApply() {
   const f = calSlotOf((document.getElementById('calPlanFrom') || {}).value), d = calSlotOf((document.getElementById('calPlanDue') || {}).value);
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
@@ -674,6 +696,7 @@ function calStartSubWatch() {
 }
 function calRefreshViews() {
   if (typeof appWidgetSync === 'function') appWidgetSync();
+  if (typeof planRelinkFromCalendar === 'function') { try { planRelinkFromCalendar(); } catch (e) { console.warn(e); } }
   const pg = document.getElementById('pgCalendar');
   if (pg && pg.classList.contains('active')) renderCalendar();
   renderCalHome();

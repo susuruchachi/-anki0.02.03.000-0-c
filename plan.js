@@ -343,6 +343,8 @@ function renderPlanSettings() {
       `<button class="btn btn-secondary" style="margin-top:8px;" onclick="planEdit('new')">＋ 新しいプランを登録</button>`;
     return;
   }
+  // ★【0.04.40】グループの週間プランは、作成者の設定に従う（ほかのメンバーは見るだけ。自分用の項目だけ変えられる）
+  if (editing && planIsFollower(editing)) { box.innerHTML = planFollowerHTML(editing); return; }
   const p = editing || {};
   planUse(editing);
   // ★【0.03.30】どの階層のフォルダーでも選べる。1週の範囲は「直下」「2つ下」…「いちばん下」から選ぶ
@@ -468,6 +470,54 @@ function stopStudyPlan(id) {
   _planEditId = null;
   saveData(true); renderPlanViews();
 }
+// グループの週間プランで、自分が作成者でないか
+function planIsFollower(p) { return !!(p && p.groupId && p.gpBy && typeof currentUser !== 'undefined' && currentUser && p.gpBy !== currentUser.uid); }
+function planFollowerHTML(p) {
+  const prev = CP; planUse(p);
+  const i = planWeekIndex(), cur = planWeekFolder(i), cyc = planCycleText(i);
+  planUse(prev);
+  const row = (k, v) => `<div class="hint-small" style="margin:3px 0;"><b>${k}</b>：${escapeHtml(v)}</div>`;
+  return `<div class="hint-small" style="margin-bottom:8px;">👪 「${escapeHtml(p.groupName || 'グループ')}」の週間プランです。期限・曜日・今週の範囲などは、作成者（${escapeHtml(p.byName || 'メンバー')} さん）の設定に従います。</div>
+    ${row('📚 単語帳', p.root)}${row('📍 今週', `${cur || '—'}（${cyc}）`)}${row('🧠 単語', `${PLAN_DAYS[p.wordsFrom ?? 2]}曜から（${planDueText(p)}）`)}
+    ${row('🔁 先週の復習', p.sunday === 'off' ? 'しない' : `${PLAN_DAYS[p.reviewDay ?? 0]}曜（${p.sunday === 'all' ? '全部' : 'まだ卒業していない単語'}）`)}
+    ${row('🗓️ 1か月前の復習', p.monthly === false ? 'しない' : `★${p.monthlyStars || 2}以上`)}
+    <label class="toggle-pill" style="margin-top:8px; display:flex; align-items:center; gap:8px;"><input type="checkbox" id="planAutoOpen" ${p.autoOpen === false ? '' : 'checked'}>▶️ アプリを開いたら、残っている課題を自動で開く（自分だけの設定）</label>
+    <div class="plan-btns" style="margin-top:10px; flex-wrap:wrap;"><button class="btn btn-primary" onclick="planSaveFollower(${jsArg(p.id)})">💾 保存</button><button class="btn btn-secondary" onclick="planEdit(null)">戻る</button><button class="btn btn-secondary" onclick="stopStudyPlan(${jsArg(p.id)})">🙈 やめる</button></div>`;
+}
+function planSaveFollower(id) {
+  studyPlan = normalizeStudyPlans(studyPlan);
+  const p = studyPlan.plans[id]; if (!p) return;
+  p.autoOpen = !!(document.getElementById('planAutoOpen') || { checked: true }).checked; p.planAt = Date.now();
+  _planEditId = null; saveData(true); renderPlanViews();
+}
+// ★【0.04.40】プランを結びつけた予定（授業・テスト）が動いたら、プランの「単語を始める日」「期限」も直す。
+//  今週の範囲は変えない（週の区切りが動いても、今やっているフォルダーのまま）。グループのプランは作成者の端末で直して、メンバーに届ける
+function planRelinkFromCalendar() {
+  if (typeof calPlanCompute !== 'function') return;
+  studyPlan = normalizeStudyPlans(studyPlan);
+  const me = typeof currentUser !== 'undefined' && currentUser ? currentUser.uid : '';
+  const prev = CP; let changed = false; const pushes = [];
+  Object.values(studyPlan.plans).forEach(p => {
+    if (!p || p.deleted || p.optOut || (!p.fromEv && !p.dueEv) || !planIsValid(p)) return;
+    if (p.groupId && p.gpBy && p.gpBy !== me) return; // グループのプランは作成者だけ
+    const c = calPlanCompute(p.fromEv, p.dueEv, p.wordsFrom ?? 2); if (!c) return;
+    if (!Object.keys(c).some(k => (p[k] ?? '') !== (c[k] ?? ''))) return;
+    planUse(p); const before = planWeekIndex();
+    Object.assign(p, c, { planAt: Date.now() });
+    planUse(p); const after = planWeekIndex();
+    if (after !== before) { const st = planParseDate(p.start); st.setDate(st.getDate() - (after - before) * 7); p.start = planDateStr(st); }
+    changed = true;
+    if (p.groupId) pushes.push(p);
+  });
+  planUse(prev);
+  pushes.forEach(p => {
+    const at = Date.now(), settings = { by: me, byName: p.byName || ((currentUser && currentUser.displayName) || ''), at };
+    PLAN_GROUP_FIELDS.forEach(f => { if (p[f] !== undefined) settings[f] = p[f]; });
+    p.gat = at;
+    firestore.collection('susuru_anki_groups').doc(p.groupId).update({ ['plans.' + p.gpid]: JSON.parse(JSON.stringify(settings)), updatedAt: at }).catch(e => console.warn('グループの週間プランを直せませんでした', e));
+  });
+  if (changed) { try { saveData(); } catch (e) {} try { renderPlanViews(); } catch (e) {} }
+}
 let _planSyncing = false;
 function renderPlanViews() {
   // ★【0.04.39】グループの週間プランの単語帳を、あとから取り込んだときにも使えるように
@@ -559,7 +609,7 @@ function planAutoOpen() {
 //   単語帳のフォルダー（グループで共有したカテゴリーなど）がこの端末に無いあいだは使えない（取り込むと使える）
 // ・「自分だけやめる」と、その人の端末では出なくなる（グループのプランが直されたら、また出る）
 // ================================================================
-const PLAN_GROUP_FIELDS = ['root', 'unit', 'start', 'wordsFrom', 'wordsDue', 'dueTime', 'dueShift', 'dueEvTitle', 'reviewDay', 'sunday', 'monthly', 'monthlyStars', 'repeat'];
+const PLAN_GROUP_FIELDS = ['root', 'unit', 'start', 'wordsFrom', 'wordsDue', 'dueTime', 'dueShift', 'dueEvTitle', 'fromEv', 'dueEv', 'reviewDay', 'sunday', 'monthly', 'monthlyStars', 'repeat'];
 function planGroupId(gid, pid) { return `g_${gid}_${pid}`; }
 function planMemberGroups() { return (typeof myGroups !== 'undefined' ? myGroups : []).filter(g => typeof groupIsMember === 'function' && groupIsMember(g)); }
 // グループの文書が届いたら（group.js）、この端末のプランに入れる
@@ -574,9 +624,10 @@ function planSyncGroupPlans() {
     if (!gp || gp.deleted) { if (local && !local.deleted) { P[id] = { id, deleted: true, planAt: now }; changed = true; } return; }
     if (local && local.optOut && (local.gat || 0) >= (gp.at || 0)) return; // 自分だけやめている
     const weeks = gp.root && categories.includes(gp.root) ? planUnitFolders(gp.root, gp.unit || 'leaves') : [];
-    if (local && !local.deleted && !local.optOut && local.gat === gp.at && (local.weeks || []).join('\u0001') === weeks.join('\u0001') && local.groupName === g.name) return;
+    if (local && !local.deleted && !local.optOut && (local.gat || 0) > (gp.at || 0)) return; // 自分が直して、まだグループに届いていない
+    if (local && !local.deleted && !local.optOut && local.gat === gp.at && (local.weeks || []).join('\u0001') === weeks.join('\u0001') && local.groupName === g.name && local.gpBy === (gp.by || '')) return;
     const keep = local && !local.deleted ? local : {};
-    const plan = { id, enabled: weeks.length > 0, weeks, groupId: g.id, gpid: pid, groupName: g.name, byName: gp.byName || '', gat: gp.at || 0,
+    const plan = { id, enabled: weeks.length > 0, weeks, groupId: g.id, gpid: pid, groupName: g.name, byName: gp.byName || '', gpBy: gp.by || '', gat: gp.at || 0,
       log: keep.log || {}, autoOpen: keep.autoOpen, createdAt: keep.createdAt || gp.at || now, planAt: now };
     PLAN_GROUP_FIELDS.forEach(f => { if (gp[f] !== undefined) plan[f] = gp[f]; });
     P[id] = plan; changed = true;
@@ -635,6 +686,7 @@ async function planSaveShared(plan, old, share, weekName) {
       studyPlan.plans[old.id] = Object.assign({}, old, { optOut: true, enabled: false, planAt: now });
     } else {
       const pid = old && old.groupId === share ? old.gpid : 'gp' + now.toString(36);
+      if (old && old.groupId === share && planIsFollower(old)) return alert('このグループのプランは、作成者の設定に従います。');
       if (!currentUser) return alert('グループのプランにするには、ログインしてください。');
       await firestore.collection('susuru_anki_groups').doc(share).update({ ['plans.' + pid]: JSON.parse(JSON.stringify(settings)), updatedAt: now });
       const g = (typeof groupById === 'function' && groupById(share)) || null;

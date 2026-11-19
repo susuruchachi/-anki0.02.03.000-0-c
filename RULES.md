@@ -701,6 +701,7 @@ A. (他動詞)(SVO1 to O2)O1をO2に適合させる　合わせる/(自動詞)(S
 - **📚 グループの週間プラン（0.04.39）**：グループの文書の plans = { pid: { root, unit, start, wordsFrom, wordsDue, dueTime, dueShift, dueEvTitle, reviewDay, sunday, monthly, monthlyStars, repeat, by, byName, at, deleted } }。週間プランの設定の「👪 共有先」でグループを選ぶ（グループの画面の「＋ グループの週間プランを作る」からも）。メンバーなら誰でも作る・直す・消す（Firestore のルールで plans を直せる。**ルールを公開し直す**）
 - メンバーの端末では studyPlan に「g_グループ_pid」のプランとして入れる（planSyncGroupPlans。グループの文書が届いたとき・週間プランを描くとき）。設定はグループのもの、達成の記録（log）は自分のもの（設定が直されても記録は残す）。単語帳のフォルダーが手元に無いあいだは使えず、設定の一覧に「取り込むと使えます」
 - 解除：「自分だけやめる」（optOut。その端末では出ない。グループのプランが直されたら、また出る。「また使う」で戻す）／「グループのプランを消す」（{ deleted: true }。みんなから消える）。共有先を「自分だけ」にすると、自分の端末だけふつうのプランにする（グループのプランは残る）
+- **作成者に従う（0.04.40）**：グループのプランは by（作った人）の設定に従う。ほかのメンバー（planIsFollower：gpBy が自分でない）は読むだけの画面（planFollowerHTML）で、autoOpen だけ自分で変えられる（planSaveFollower）。plans には fromEv・dueEv（予定とのつながり）も入れる。作成者の端末で予定が変わると（calAfterChange・calRefreshViews → planRelinkFromCalendar）、fromEv・dueEv から wordsFrom・wordsDue・dueTime・dueShift・dueEvTitle を計算し直す（calPlanCompute。予定がグループに共有されていなくてもよい。予定の id が同じなら曜日が変わっても追う：calSlotFind）。今週のフォルダーが変わらないよう start を直し、グループの文書の plans.<pid> に書く。自分で直してまだ届いていないあいだ（gat が gp.at より新しい）は、グループの文書で上書きしない
 
 ### 共同編集者の設定
 
