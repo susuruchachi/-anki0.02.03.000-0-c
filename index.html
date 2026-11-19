@@ -489,6 +489,8 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 
 /* ★【0.03.00】漢文（縦書き・返り点・送り仮名） */
 .kb { writing-mode: vertical-rl; display: inline-block; font-family: 'Noto Serif JP', 'Hiragino Mincho ProN', 'Yu Mincho', serif; line-height: 2.6; text-align: start; max-width: 100%; overflow-x: auto; overflow-y: hidden; vertical-align: middle; font-weight: 500; padding: 0.2em 0.3em; margin: 4px 0; }
+.kb-blocks { display: block; max-width: 100%; }
+.kb-blocks > .kb { display: block; margin: 4px 0 4px auto; width: fit-content; }
 .kb-g { display: inline-block; writing-mode: horizontal-tb; width: 1em; line-height: 1; vertical-align: middle; }
 .kb-c { display: block; position: relative; width: 1em; }
 .kb-ch { display: block; width: 1em; height: 1em; text-align: center; line-height: 1; }
@@ -1112,7 +1114,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
         <button class="btn btn-secondary" onclick="exportTextOpen()">📝 テキスト出力</button>
         <button class="btn btn-secondary" onclick="importTextOpen()">📝 テキスト入力</button>
       </div>
-      <div class="hint-small" style="margin-top:8px;">JSONは学習記録・画像も含む完全バックアップ、CSVはカードのみです。構造式・漢文はテキストなのでどちらにも含まれます。<br>CSVの列：問題・答え・フォルダー（「親>子」で入れ子）・メモ・選択肢（「a / b / c」）・形式（「例文」「テスト」）。同じフォルダーに同じ問題があれば、重複させずに更新するかどうかを確認します（空欄のメモは消しません）。</div>
+      <div class="hint-small" style="margin-top:8px;">JSONは学習記録・画像も含む完全バックアップ、CSVはカードのみです。読み上げの読み方（歴史的仮名づかい → 現代仮名づかい など）は、JSON・CSVのどちらにも入ります（CSVでは形式「読み方」の行）。構造式・漢文はテキストなのでどちらにも含まれます。<br>CSVの列：問題・答え・フォルダー（「親>子」で入れ子）・メモ・選択肢（「a / b / c」）・形式（「例文」「テスト」）。同じフォルダーに同じ問題があれば、重複させずに更新するかどうかを確認します（空欄のメモは消しません）。</div>
       <button class="btn btn-secondary" style="margin-top:10px;" onclick="repairInflatedStats()">🩹 異常な成績（正解数・誤答数が1000回以上）を修復</button>
     </div>
 

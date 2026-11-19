@@ -199,7 +199,7 @@ function renderKanbunHTML(units, opts = {}) {
   const A = 0.55; // 注記の文字サイズ（本文に対する比率）
   let totalLen = 0;
   // 句読点は直前の字と同じグループに入れ、行頭（列の先頭）に句読点が来ないようにする
-  const groups = [];
+  const groups = [], gH = [];
   units.forEach((u, idx) => {
     const furiLen = Array.from(u.furi || '').length * A;
     const furiStart = Math.max(0, 0.5 - furiLen / 2);
@@ -221,10 +221,21 @@ function renderKanbunHTML(units, opts = {}) {
     if (u.sai) inner += `<span class="kb-sai" style="top:0">${escapeHtml(toKatakana(u.sai))}</span>`;
     if (u.hy) inner += `<span class="kb-hy" style="top:${(h - 0.25).toFixed(2)}em"></span>`;
     const cell = `<span class="kb-c" style="height:${h.toFixed(2)}em">${inner}</span>`;
-    if (idx > 0 && KANBUN_VERTICAL_PUNCT[u.ch] && groups.length) groups[groups.length - 1].push(cell);
-    else groups.push([cell]);
+    if (idx > 0 && KANBUN_VERTICAL_PUNCT[u.ch] && groups.length) { groups[groups.length - 1].push(cell); gH[gH.length - 1] += h; }
+    else { groups.push([cell]); gH.push(h); }
   });
   const rows = Math.min(maxRows, Math.ceil(totalLen + 0.2));
+  // ★【0.04.37】幅に入りきらないとき（opts.maxCols）は、列を何段かに分けて、上の段から順に並べる（段組み）
+  if (opts.maxCols) {
+    const cols = []; let cur = [], hs = 0;
+    groups.forEach((g, i) => { if (cur.length && hs + gH[i] > rows) { cols.push(cur); cur = []; hs = 0; } cur.push(g); hs += gH[i]; });
+    if (cur.length) cols.push(cur);
+    if (cols.length > opts.maxCols) {
+      const blocks = [];
+      for (let i = 0; i < cols.length; i += opts.maxCols) blocks.push(cols.slice(i, i + opts.maxCols));
+      return `<span class="kb-blocks">${blocks.map(bl => `<span class="kb" style="height:${rows}em">${bl.flat().map(g => `<span class="kb-g">${g.join('')}</span>`).join('\u200B')}</span>`).join('')}</span>`;
+    }
+  }
   const html = groups.map(g => `<span class="kb-g">${g.join('')}</span>`).join('\u200B');
   return `<span class="kb" style="height:${rows}em">${html}</span>`;
 }
@@ -417,7 +428,8 @@ function renderRichText(text, opts = {}) {
       if (parts.length > 1) out += `<span class="chem-multi">${parts.map(p => p.smiles !== undefined ? `<span class="chem-struct" data-smiles="${escapeRichAttr(p.smiles)}"></span>` : `<span class="chem-op">${escapeHtml(p.op)}</span>`).join('')}</span>`;
       else out += `<span class="chem-struct" data-smiles="${escapeRichAttr(body.trim())}"></span>`;
     } else {
-      out += renderKanbunHTML(parseKanbun(body), { maxRows: opts.kanbunRows });
+      // ★【0.04.37】あとで幅に合わせて段組みにできるように、元の文を持たせておく（hydrateKanbunFit）
+      out += renderKanbunHTML(parseKanbun(body), { maxRows: opts.kanbunRows }).replace('<span class="kb"', `<span class="kb" data-kb="${escapeRichAttr(body)}" data-rows="${opts.kanbunRows || ''}"`);
     }
     last = m.index + m[0].length;
   }
@@ -429,9 +441,24 @@ function renderRichText(text, opts = {}) {
 const KATEX_DELIMITERS = [{ left: '$$', right: '$$', display: true }, { left: '$', right: '$', display: false }];
 
 // innerHTML を入れた後に呼ぶ: 構造式の描画と数式(KaTeX, \ce{} 化学式)の描画
+// ★【0.04.37】漢文が幅に入りきらない（横にはみ出して、続きが見えない）ときは、段組みにして描き直す
+function hydrateKanbunFit(root) {
+  root.querySelectorAll('.kb[data-kb]:not([data-fit])').forEach(kb => {
+    const avail = kb.parentElement ? kb.parentElement.clientWidth : 0;
+    if (!avail) return; // まだ見えていない（あとで見えたときに直す）
+    kb.setAttribute('data-fit', '1');
+    if (kb.scrollWidth <= kb.clientWidth + 2) return;
+    const colPx = parseFloat(getComputedStyle(kb).fontSize) * 2.6; // 1列の幅（行の高さ 2.6em）
+    const maxCols = Math.max(1, Math.floor((avail - 10) / colPx));
+    const tmp = document.createElement('span');
+    tmp.innerHTML = renderKanbunHTML(parseKanbun(kb.getAttribute('data-kb')), { maxRows: Number(kb.getAttribute('data-rows')) || undefined, maxCols });
+    kb.replaceWith(...tmp.childNodes);
+  });
+}
 function hydrateRich(root, opts = {}) {
   if (!root) return;
   hydrateChem(root, opts.chemScale);
+  try { hydrateKanbunFit(root); } catch (e) {}
   if (typeof renderMathInElement === 'function') {
     try { renderMathInElement(root, { delimiters: KATEX_DELIMITERS, throwOnError: false }); } catch (e) {}
   }
