@@ -166,7 +166,10 @@ function renderFriendRequests() {
   // ★【0.04.26】フレンド申請の欄にはフレンド申請・紹介だけ、グループの欄にはグループへの招待だけ。設定のボタン・下のメニューには両方の合計
   const nf = _friendReqIn.length + _friendIntros.length, ng = typeof groupInvites !== 'undefined' ? groupInvites.length : 0, n = nf;
   document.querySelectorAll('.friend-req-badge').forEach(b => {
-    const k = b.classList.contains('group-inv-badge') ? ng : b.classList.contains('friend-only-badge') ? nf : nf + ng;
+    if (b.classList.contains('app-upd-badge') || b.classList.contains('drill-active-dot')) return; // アプリの更新の印は app-bridge.js、暗記の途中の印は drill.js が出す
+    // ★【0.04.38】下のメニューの「設定」には、新しい Android アプリ（APK）があるときも印を出す
+    const apk = b.classList.contains('bnav-badge') && typeof appApkBadgeCount === 'function' ? appApkBadgeCount() : 0;
+    const k = b.classList.contains('group-inv-badge') ? ng : b.classList.contains('friend-only-badge') ? nf : nf + ng + apk;
     b.textContent = k; b.style.display = k ? 'inline-flex' : 'none';
   });
   const box = document.getElementById('friendRequestsBox');

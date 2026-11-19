@@ -62,9 +62,12 @@ window.susuruAppBack = function () {
 function appVersionCode(v) { const p = String(v || '').split('.').map(Number); return (p[0] || 0) * 1000000 + (p[1] || 0) * 1000 + (p[2] || 0); }
 function appApkUpdateAvailable() {
   if (!isAndroidApp() || typeof ANDROID_APK_VERSION === 'undefined') return false;
-  try { return Number(window.SusuruApp.versionCode()) < appVersionCode(ANDROID_APK_VERSION); } catch (e) { return false; }
+  try { return Number(window.SusuruApp.versionCode()) < appVersionCode(appApkLatest()); } catch (e) { return false; }
 }
-function appApkUrl() { return new URL('apk/susuruanki.apk?v=' + ANDROID_APK_VERSION, location.href).href; }
+// ★【0.04.38】公開されている最新の APK の版（開いたあとに出た新しい版も、version-info.js を読み直して知る）
+let _apkLatest = null;
+function appApkLatest() { return _apkLatest && appVersionCode(_apkLatest) > appVersionCode(ANDROID_APK_VERSION) ? _apkLatest : ANDROID_APK_VERSION; }
+function appApkUrl() { return new URL('apk/susuruanki.apk?v=' + appApkLatest(), location.href).href; }
 // ★【0.04.24】新しいアプリ（0.04.24 から）は、自分で自分を入れ直す（PackageInstaller）。一度この仕組みで入れると、次からは確認なしで、
 //  アプリを閉じたとき（裏に回して1分・プレイ中でない）に入れ替わる。古いアプリは今まで通り（インストールの画面へ）
 function appApkNew() { return isAndroidApp() && !!window.SusuruApp.apkPrepare; }
@@ -73,7 +76,7 @@ function appInstallApk() {
   try {
     if (appApkNew()) {
       if (window.SusuruApp.apkReady()) window.SusuruApp.apkInstallNow();
-      else { _apkInstallAfter = true; if (typeof showAppToast === 'function') showAppToast('📲 新しいアプリをダウンロードしています…'); window.SusuruApp.apkPrepare(appApkUrl(), appVersionCode(ANDROID_APK_VERSION)); }
+      else { _apkInstallAfter = true; if (typeof showAppToast === 'function') showAppToast('📲 新しいアプリをダウンロードしています…'); window.SusuruApp.apkPrepare(appApkUrl(), appVersionCode(appApkLatest())); }
       return;
     }
     window.SusuruApp.installApk(appApkUrl());
@@ -86,20 +89,20 @@ window.__susuruApkReady = function (ok, silent) {
   const k = 'susuru_anki_apk_notice', today = new Date().toDateString();
   if (silent) {
     // 確認なしで入れられる：閉じたときに入れ替わることだけ知らせる（版ごとに1回）
-    try { if (localStorage.getItem(k + '_auto') === ANDROID_APK_VERSION) return; localStorage.setItem(k + '_auto', ANDROID_APK_VERSION); } catch (e) {}
-    if (typeof showAppToast === 'function') showAppToast(`📲 新しいアプリ（${ANDROID_APK_VERSION}）を用意しました。アプリを閉じると、自動で入れ替わります`);
+    try { if (localStorage.getItem(k + '_auto') === appApkLatest()) return; localStorage.setItem(k + '_auto', appApkLatest()); } catch (e) {}
+    if (typeof showAppToast === 'function') showAppToast(`📲 新しいアプリ（${appApkLatest()}）を用意しました。アプリを閉じると、自動で入れ替わります`);
     return;
   }
   try { if (!_apkForce && localStorage.getItem(k) === today) return; localStorage.setItem(k, today); } catch (e) {}
-  if (confirm(`📲 新しい Android アプリ（${ANDROID_APK_VERSION}）があります（学習データはそのまま）。\n今回だけ確認が出ます。次からは、アプリを閉じたときに自動で更新されます。\n更新しますか？`)) window.SusuruApp.apkInstallNow();
+  if (confirm(`📲 新しい Android アプリ（${appApkLatest()}）があります（学習データはそのまま）。\n今回だけ確認が出ます。次からは、アプリを閉じたときに自動で更新されます。\n更新しますか？`)) window.SusuruApp.apkInstallNow();
 };
 let _apkForce = false;
 function appCheckApkUpdate(force) {
   if (!appApkUpdateAvailable()) return;
-  if (appApkNew()) { _apkForce = !!force; try { window.SusuruApp.apkPrepare(appApkUrl(), appVersionCode(ANDROID_APK_VERSION)); } catch (e) {} return; }
+  if (appApkNew()) { _apkForce = !!force; try { window.SusuruApp.apkPrepare(appApkUrl(), appVersionCode(appApkLatest())); } catch (e) {} return; }
   const k = 'susuru_anki_apk_notice', today = new Date().toDateString();
   try { if (!force && localStorage.getItem(k) === today) return; localStorage.setItem(k, today); } catch (e) {}
-  if (confirm(`📲 新しい Android アプリ（${ANDROID_APK_VERSION}）があります。\n今のアプリに上書きで入れます（学習データはそのまま）。更新しますか？`)) appInstallApk();
+  if (confirm(`📲 新しい Android アプリ（${appApkLatest()}）があります。\n今のアプリに上書きで入れます（学習データはそのまま）。更新しますか？`)) appInstallApk();
 }
 window.addEventListener('load', () => setTimeout(() => appCheckApkUpdate(false), 4000));
 // プレイ中か（裏に回ったときに入れ替えてよいか）をアプリに伝えておく
@@ -228,3 +231,41 @@ function widgetBoardMine() {
 }
 window.addEventListener('load', () => setTimeout(() => appWidgetSync(true), 3000));
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') appWidgetSync(true); });
+
+// ================================================================
+// ★【0.04.38】設定の「📲 アプリ・通知」：アプリの中では「🔄 新しいバージョンを確認」（新しい APK があれば、その場で更新）
+//  新しい APK があるときは、設定（下のメニュー）と「📲 アプリ・通知」に印を出す
+// ================================================================
+function appVersionText(code) { const c = Number(code) || 0; return `${Math.floor(c / 1000000)}.${String(Math.floor(c / 1000) % 1000).padStart(2, '0')}.${String(c % 1000).padStart(2, '0')}`; }
+async function appApkFetchLatest() {
+  try {
+    const txt = await (await fetch('./version-info.js?t=' + Date.now(), { cache: 'no-store' })).text();
+    const v = (txt.match(/ANDROID_APK_VERSION\s*=\s*["']([^"']+)["']/) || [])[1];
+    if (v) _apkLatest = v;
+  } catch (e) {}
+  appApkRender();
+}
+function appApkBadgeCount() { return isAndroidApp() && appApkUpdateAvailable() ? 1 : 0; }
+function appApkRender() {
+  const btn = document.getElementById('apkDlBtn'), hint = document.getElementById('apkDlHint');
+  if (btn && isAndroidApp()) {
+    const avail = appApkUpdateAvailable(); let cur = ''; try { cur = appVersionText(window.SusuruApp.versionCode()); } catch (e) {}
+    btn.removeAttribute('download'); btn.setAttribute('href', '#');
+    btn.innerHTML = avail ? `📲 新しいアプリ（${escapeHtml(appApkLatest())}）に更新する <span class="friend-req-badge app-upd-badge" style="display:inline-flex;">1</span>` : `🔄 アプリの新しいバージョンを確認${cur ? `（今：${escapeHtml(cur)}）` : ''}`;
+    btn.classList.toggle('btn-accent', avail);
+    if (hint) hint.textContent = avail ? '押すと、新しいアプリをダウンロードして入れ替えます（学習データはそのまま）。ふだんは自動で更新されますが、うまくいかないときはここから更新できます。' : '新しいアプリがあれば、ふだんは自動で更新されます。うまくいかないときは、ここで確認・更新できます。';
+  }
+  document.querySelectorAll('.app-upd-badge').forEach(b => { if (b.closest('#apkDlBtn')) return; b.textContent = '1'; b.style.display = appApkBadgeCount() ? 'inline-flex' : 'none'; });
+  if (typeof renderFriendRequests === 'function') { try { renderFriendRequests(); } catch (e) {} }
+}
+async function appApkCheckNow(ev) {
+  if (ev) ev.preventDefault();
+  if (!isAndroidApp()) return;
+  const btn = document.getElementById('apkDlBtn'); if (btn) btn.textContent = '⏳ 確認しています…';
+  await appApkFetchLatest();
+  if (appApkUpdateAvailable()) { _apkForce = true; appInstallApk(); return; }
+  let cur = ''; try { cur = appVersionText(window.SusuruApp.versionCode()); } catch (e) {}
+  alert(`✅ 最新のアプリです${cur ? `（${cur}）` : ''}。`);
+}
+window.addEventListener('load', () => setTimeout(appApkFetchLatest, 3000));
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && isAndroidApp()) appApkFetchLatest(); });
