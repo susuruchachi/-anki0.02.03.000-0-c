@@ -548,6 +548,12 @@ A. (他動詞)(SVO1 to O2)O1をO2に適合させる　合わせる/(自動詞)(S
 - まとまりの中が全部「覚えた」になるまで周回（2周目からは順番を変える）→ 次のまとまり。途中経過はこの端末に覚えておき「続きから」
 - 成績は cardProg（{ カードID: { k, d, p, at } }。端末間で同期）。いつもの成績（レベル・正解数）・暗記テストの記録は変えない。学習した日（連続記録・今日の数）には数える。はじめの画面で「覚えた／覚えている途中／まだ」、範囲ごとにリセットできる
 
+## ⚓ 航海日誌と同期（0.04.36）
+- 航海日誌（https://github.com/susuruchachi/koukai-nisshi-calendar 。React の PWA。予定は localStorage）と、自分のカレンダーの予定（calEvents）を同期する。カレンダーの「🔗 連携」→「⚓ 航海日誌と同期」をオン（この端末に覚える）。航海日誌は「☁️ 同期」でログインしてオン
+- 置き場所：Firestore の susuru_anki_cal/{uid} = { events: { id: 予定 }, updatedAt }（本人だけ読み書き。docs/firestore.rules）。予定の形は航海日誌の形（title, date, allDay, startTime, endTime, location, notes, recurrence{freq daily|weekly|monthly|yearly, interval, daysOfWeek, endType never|until|count, endDate, endCount}, excludedDates）＋ type（テスト・授業など）・end（何日か続く予定の最後の日）・at（変えた時刻）。消した予定は { deleted: true, at }
+- 新しく変えた方（at が大きい方）を使う。こちらで変えたら（calAfterChange）向こうに書き、向こうが変わったら（onSnapshot）こちらに入れる。グループの予定・URL で購読した予定は出さない
+- 毎週・隔週（終わりの日あり）はこちらの repeat/days/until に、それ以外（毎日・毎月・毎年・3週ごと以上・何回まで）は rec のまま持って表示する（calRecOccurs）。こちらの画面では、その繰り返しのまま保存できる（変えるときは毎週・隔週から選び直す）。.ics の書き出しも rec の形で
+
 ## 📅 週間プラン
 
 単語帳を「1週間に1つのフォルダー」ずつ進めるためのプランです。「🧠 暗記」タブの「📅 週間プラン」→「⚙️ 週間プランの設定」→「＋ 新しいプランを登録」で作ります。

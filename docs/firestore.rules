@@ -223,6 +223,11 @@ service cloud.firestore {
       allow update: if isAuthenticated() && resource.data.uid == uid() && request.resource.data.uid == uid();
     }
 
+    // ⚓ 航海日誌（koukai-nisshi-calendar）と同期するカレンダー（★0.04.36）。本人だけ
+    match /susuru_anki_cal/{userId} {
+      allow read, write: if isAuthenticated() && uid() == userId;
+    }
+
     // ここに書いていないコレクションは、読み書きできない
   }
 }

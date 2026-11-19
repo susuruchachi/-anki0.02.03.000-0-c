@@ -71,11 +71,13 @@ auth.onAuthStateChanged(user => {
     if (typeof startFriendRequestWatch === 'function') startFriendRequestWatch(); // ★【0.03.25】フレンド申請
     if (typeof startGroupWatch === 'function') startGroupWatch(); // ★【0.04.20】グループ
     if (typeof calStartSubWatch === 'function') calStartSubWatch(); // ★【0.04.22】URL で購読するカレンダー
+    if (typeof calStartLinkWatch === 'function') calStartLinkWatch(); // ★【0.04.36】航海日誌と同期
   } else {
     if (typeof stopCloudListener === 'function') stopCloudListener();
     if (typeof startFriendRequestWatch === 'function') startFriendRequestWatch(); // ログアウトしたら見張りをやめる
     if (typeof startGroupWatch === 'function') startGroupWatch();
     if (typeof calStartSubWatch === 'function') calStartSubWatch();
+    if (typeof calStartLinkWatch === 'function') calStartLinkWatch();
     ls.innerHTML = `<span style="color:var(--warn);">未ログイン</span>`;
     setTimeout(renderLoginMethods, 0);
     const btnLogin = document.getElementById('btnFbLogin');
