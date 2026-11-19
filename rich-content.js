@@ -292,6 +292,7 @@ function drawSmilesInto(svg, smiles, scale = 1.4) {
       try {
         drawer.draw(tree, svg, 'anki', null, false);
         removeAttachmentLabels(svg);
+        chemFixFlatLines(svg);
         chemRestoreLabels(svg, prep.map);
         fitChemSvg(svg, scale);
         resolve(true);
@@ -341,6 +342,19 @@ function removeAttachmentLabels(svg) {
   });
 }
 
+// ★【0.04.35】真横・真縦の結合の線は、グラデーションの色だと描かれない（SVG の決まり：幅か高さが0の図形にはグラデーションが付かない）。
+//  原子が2つだけの官能基（*O → −OH、*N → −NH2 など）で線が消えていたので、1色（文字の色）にする
+function chemFixFlatLines(svg) {
+  // 文字の周りを隠すマスクも、ふつうは図形の大きさを基準に範囲が決まり、真横の線だけだと高さ0で全部消える → 範囲を全体に
+  svg.querySelectorAll('mask').forEach(m => { m.setAttribute('maskUnits', 'userSpaceOnUse'); m.setAttribute('x', '-100000'); m.setAttribute('y', '-100000'); m.setAttribute('width', '200000'); m.setAttribute('height', '200000'); });
+  svg.querySelectorAll('line').forEach(l => {
+    const st = l.getAttribute('stroke') || '';
+    if (!/url\(/.test(st)) return;
+    const x1 = +l.getAttribute('x1'), x2 = +l.getAttribute('x2'), y1 = +l.getAttribute('y1'), y2 = +l.getAttribute('y2');
+    if (Math.abs(y1 - y2) > 0.01 && Math.abs(x1 - x2) > 0.01) return;
+    l.setAttribute('stroke', 'currentColor');
+  });
+}
 // 置きかえた元素の文字を、元の記号（□・R など）に戻す
 function chemRestoreLabels(svg, map) {
   if (!map || !Object.keys(map).length) return;
