@@ -36,11 +36,29 @@ function calAllEvents() {
   Object.entries(calSubEvents).forEach(([sid, list]) => { if (calSubs.some(s => s.sid === sid)) (list || []).forEach(e => out.push(Object.assign({}, e, { gid: '', sub: sid }))); });
   return out;
 }
+// ★【0.04.39】何日か続く予定（end が最後の日）の日数（1日だけなら 0）
+function calSpan(ev) { return ev.end && ev.end > ev.date ? Math.round((planParseDate(ev.end) - planParseDate(ev.date)) / DAY_MS) : 0; }
+// ★【0.04.39】何日か続く予定を繰り返すとき（航海日誌で作った「毎年 12/28〜1/3」など）：繰り返しの日が、その回のはじめの日。
+//  そこから同じ日数だけ続く。「この日だけ消す」（skip）は、その回のはじめの日で覚える（航海日誌の excludedDates と同じ）
+function calIsSpanRepeat(ev) { return calSpan(ev) > 0 && calIsRepeat(ev); }
+// その日が入っている回の、はじめの日（入っていなければ ''）。繰り返さない予定は ev.date
+function calInstanceStart(ev, ds) {
+  if (!calIsSpanRepeat(ev)) return calOccursOn(ev, ds) ? (calSpan(ev) ? ev.date : ds) : '';
+  for (let k = 0, n = calSpan(ev); k <= n; k++) { const s0 = calAddDays(ds, -k); if (calStartsOn(ev, s0)) return s0; }
+  return '';
+}
+// その回の最後の日
+function calInstanceEnd(ev, start) { return calSpan(ev) ? calAddDays(start, calSpan(ev)) : start; }
 // その日にある予定か
 function calOccursOn(ev, ds) {
+  if (calIsSpanRepeat(ev)) return !!calInstanceStart(ev, ds);
+  return calStartsOn(ev, ds, true);
+}
+// その日に（繰り返しの）回がはじまるか。range：繰り返さない何日か続く予定を、その間の毎日とみる
+function calStartsOn(ev, ds, range) {
   if ((ev.skip || []).includes(ds)) return false;
   if (ev.rec && ev.rec.freq && ev.rec.freq !== 'none') return calRecOccurs(ev, ds); // ★【0.04.36】航海日誌の繰り返し（毎日・毎月・毎年・何回）
-  if (ev.end && ev.end > ev.date) return ds >= ev.date && ds <= ev.end;
+  if (range && ev.end && ev.end > ev.date) return ds >= ev.date && ds <= ev.end;
   if (ev.repeat === 'weekly' || ev.repeat === 'biweekly') {
     if (ds < ev.date || (ev.until && ds > ev.until)) return false;
     const days = ev.days && ev.days.length ? ev.days : [calDow(ev.date)];
@@ -106,10 +124,10 @@ function calUpcoming(days = 30) {
     const ds = calAddDays(today, i);
     all.forEach(e => {
       if (!calOccursOn(e, ds)) return;
-      const multi = e.end && e.end > e.date;
+      const multi = calSpan(e) > 0, s0 = multi ? calInstanceStart(e, ds) : ds;
       const key = multi || calIsRepeat(e) ? e.gid + e.id : e.gid + e.id + ds; // 毎週のテストは次の1回だけ
       if (seen.has(key)) return; seen.add(key);
-      out.push({ ev: e, date: multi ? e.date : ds, inside: multi && ds > e.date });
+      out.push({ ev: e, date: s0, end: multi ? calInstanceEnd(e, s0) : '', inside: multi && ds > s0 });
     });
   }
   return out;
@@ -145,13 +163,14 @@ function renderCalendar() {
     </div>
     <div class="card cal-day">
       <div class="setting-box-title">⏳ これからのテスト・期限</div>
-      ${up.length ? up.map(o => { const n = calDaysLeft(o.date); return `<div class="cal-up" onclick="calSelect('${o.inside ? calToday() : o.date}', true)"><span class="cal-dot" style="background:${calType(o.ev).color}"></span><span class="cal-up-d">${calMD(o.date)}</span><span class="cal-up-t">${calType(o.ev).icon} ${escapeHtml(o.ev.title)}${o.ev.end && o.ev.end > o.ev.date ? `（〜${calMD(o.ev.end)}）` : ''}</span><b class="cal-left${n <= 3 ? ' soon' : ''}">${o.inside ? '期間中' : calLeftText(n)}</b></div>`; }).join('') : '<div class="hint-small">45日以内にテスト・期限はありません。</div>'}
+      ${up.length ? up.map(o => { const n = calDaysLeft(o.date); return `<div class="cal-up" onclick="calSelect('${o.inside ? calToday() : o.date}', true)"><span class="cal-dot" style="background:${calType(o.ev).color}"></span><span class="cal-up-d">${calMD(o.date)}</span><span class="cal-up-t">${calType(o.ev).icon} ${escapeHtml(o.ev.title)}${o.end ? `（〜${calMD(o.end)}）` : ''}</span><b class="cal-left${n <= 3 ? ' soon' : ''}">${o.inside ? '期間中' : calLeftText(n)}</b></div>`; }).join('') : '<div class="hint-small">45日以内にテスト・期限はありません。</div>'}
     </div>
     <div class="hint-small" style="margin:4px 2px 10px;">📚 授業・📝 テストを「毎週」で登録すると、週間プランの設定で「この授業から次のテストまで」のように選べます。</div>`;
 }
 function calItemHTML(e, ds) {
   const t = calType(e), g = e.gid ? (typeof groupNameOf === 'function' ? groupNameOf(e.gid) : 'グループ') : '';
-  const sub = [t.label, calRepeatText(e), e.end && e.end > e.date ? `${calMD(e.date)}〜${calMD(e.end)}` : '', e.place ? '📍' + e.place : '', g ? '👪 ' + g : '', e.sub ? '🔗 ' + ((calSubs.find(x => x.sid === e.sub) || {}).name || '購読') : '', e.gid && e.byName ? `${e.byName} さん` : ''].filter(Boolean).join('・');
+  const s0 = calSpan(e) ? (calInstanceStart(e, ds) || e.date) : '';
+  const sub = [t.label, calRepeatText(e), s0 ? `${calMD(s0)}〜${calMD(calInstanceEnd(e, s0))}` : '', e.place ? '📍' + e.place : '', g ? '👪 ' + g : '', e.sub ? '🔗 ' + ((calSubs.find(x => x.sid === e.sub) || {}).name || '購読') : '', e.gid && e.byName ? `${e.byName} さん` : ''].filter(Boolean).join('・');
   return `<div class="cal-item" style="border-left-color:${t.color}" onclick="calEditEvent(${jsArg(e.id)}, ${jsArg(e.gid)}, '${ds}')">
     <div style="min-width:0; flex:1;"><b>${t.icon} ${escapeHtml(e.title)}</b><div class="hint-small">${calTimeText(e)}・${escapeHtml(sub)}</div>${e.note ? `<div class="hint-small cal-note">${linkifyHTML ? linkifyHTML(escapeHtml(e.note)) : escapeHtml(e.note)}</div>` : ''}</div>
     <button class="chip" onclick="event.stopPropagation(); calGoogleAdd(${jsArg(e.id)}, ${jsArg(e.gid)})" title="Google カレンダーに追加">G＋</button></div>`;
@@ -206,7 +225,7 @@ function calEditor(e, occ) {
     <input type="text" id="calEdTitle" class="form-control" placeholder="名前（例：英単語テスト・数学の授業・共通テスト出願）" value="${escAttr(e.title || '')}" style="margin-top:8px;">
     <div class="form-row" style="margin-top:8px; align-items:flex-end;">
       <div style="flex:1;"><label class="section-label cal-lbl" id="calEdDateLbl">日付</label><input type="date" id="calEdDate" class="form-control" value="${escAttr(e.date)}"></div>
-      <div style="flex:1;" class="cal-r-end"><label class="section-label cal-lbl">最後の日</label><input type="date" id="calEdEnd" class="form-control" value="${escAttr(e.end || '')}"></div>
+      <div style="flex:1;" class="cal-r-end"><label class="section-label cal-lbl" id="calEdEndDateLbl">最後の日</label><input type="date" id="calEdEnd" class="form-control" value="${escAttr(e.end || '')}" onchange="calEdUpdate()"></div>
     </div>
     <!-- ★【0.04.25】どの種類でも、何時から何時までを入れられる（入れなければ終日） -->
     <div class="form-row cal-r-times" style="margin-top:8px; align-items:flex-end;">
@@ -228,7 +247,7 @@ function calEditor(e, occ) {
     <div class="plan-btns" style="margin-top:12px; flex-wrap:wrap;">
       <button class="btn btn-primary" onclick="calSaveEvent()">💾 ${e.id ? '保存' : '追加'}</button>
       <button class="btn btn-secondary" onclick="document.getElementById('calOverlay').style.display='none'">やめる</button>
-      ${e.id && occ && calIsRepeat(e) ? `<button class="btn btn-secondary" onclick="calSkipOne(${jsArg(e.id)}, ${jsArg(e.gid || '')}, '${occ}')">この日だけ消す</button>` : ''}
+      ${e.id && occ && calIsRepeat(e) ? `<button class="btn btn-secondary" onclick="calSkipOne(${jsArg(e.id)}, ${jsArg(e.gid || '')}, '${occ}')">${calIsSpanRepeat(e) ? 'この回だけ消す' : 'この日だけ消す'}</button>` : ''}
       ${e.id ? `<button class="btn btn-danger" onclick="calDeleteEvent(${jsArg(e.id)}, ${jsArg(e.gid || '')})">🗑️ 削除</button>` : ''}
     </div></div>`;
   ov.style.display = 'flex';
@@ -251,20 +270,23 @@ function calEdSetType(k) {
 function calEdUpdate() {
   const k = document.getElementById('calEdType').value, show = (sel, on) => document.querySelectorAll(sel).forEach(x => { x.style.display = on ? '' : 'none'; });
   const rep = document.getElementById('calEdRepeat').value;
-  show('.cal-r-end', k === 'exam');
-  show('.cal-r-rep', k !== 'exam');
-  show('.cal-r-days', (rep === 'weekly' || rep === 'biweekly') && k !== 'exam');
+  // ★【0.04.39】どの種類でも「最後の日」（何日か続く予定）を入れられ、試験期間も繰り返せる（毎年の合宿など）
+  show('.cal-r-end', true);
+  show('.cal-r-rep', true);
+  show('.cal-r-days', rep === 'weekly' || rep === 'biweekly');
+  document.getElementById('calEdEndDateLbl').textContent = k === 'exam' ? '最後の日' : '最後の日（何日か続くとき）';
   document.getElementById('calEdStartLbl').textContent = k === 'exam' ? '毎日の開始' : k === 'deadline' ? '開始（締め切りの時刻など）' : '開始';
   document.getElementById('calEdEndLbl').textContent = k === 'exam' ? '毎日の終了' : '終了';
-  document.getElementById('calEdDateLbl').textContent = k === 'exam' ? '最初の日' : rep ? '最初の日（この日から）' : '日付';
+  const multi = document.getElementById('calEdEnd').value > document.getElementById('calEdDate').value;
+  document.getElementById('calEdDateLbl').textContent = k === 'exam' || multi ? (rep ? '最初の回のはじめの日' : '最初の日') : rep ? '最初の日（この日から）' : '日付';
 }
 function calReadEditor() {
   const v = id => (document.getElementById(id) || {}).value || '';
   const type = v('calEdType') || 'event';
   const e = { type, title: v('calEdTitle').trim(), date: v('calEdDate'), place: v('calEdPlace').trim(), note: v('calEdNote').trim() };
-  if (type === 'exam' && v('calEdEnd') > e.date) e.end = v('calEdEnd');
+  if (v('calEdEnd') > e.date) e.end = v('calEdEnd'); // ★【0.04.39】どの種類でも
   if (v('calEdStart')) { e.start = v('calEdStart'); if (v('calEdEndTime')) e.endTime = v('calEdEndTime'); }
-  const rep = type === 'exam' ? '' : v('calEdRepeat');
+  const rep = v('calEdRepeat');
   if (rep === 'rec') e.keepRec = true;
   else if (rep) {
     e.repeat = rep;
@@ -283,6 +305,15 @@ async function calSaveEvent() {
   if (old && old.skip) e.skip = old.skip;
   if (e.keepRec && old && old.rec) e.rec = old.rec;
   delete e.keepRec;
+  // ★【0.04.39】何日か続く予定を繰り返すとき：1回の長さが、次の回までより短いこと（重ならないように）
+  if (calIsSpanRepeat(e)) {
+    let gap = 7;
+    if (e.rec) { const iv = Math.max(1, parseInt(e.rec.interval, 10) || 1); gap = ({ daily: iv, weekly: 7 * iv, monthly: 28 * iv, yearly: 365 * iv })[e.rec.freq] || 1; }
+    else gap = e.repeat === 'biweekly' ? 14 : 7;
+    const ds = !e.rec ? (e.days || []).slice().sort((a, b) => a - b) : (e.rec.freq === 'weekly' ? (e.rec.daysOfWeek || []).map(Number).sort((a, b) => a - b) : []);
+    if (ds.length > 1) ds.forEach((d, i) => { gap = Math.min(gap, i + 1 < ds.length ? ds[i + 1] - d : ds[0] + 7 - d); });
+    if (calSpan(e) >= gap) return alert(`${calSpan(e) + 1}日続く予定は、この繰り返しだと次の回と重なります。最後の日か繰り返しを変えてください。`);
+  }
   e.at = Date.now();
   if (currentUser) { e.by = currentUser.uid; e.byName = currentUser.displayName || ''; }
   try {
@@ -316,6 +347,7 @@ async function calDeleteEvent(id, gid) {
 }
 async function calSkipOne(id, gid, ds) {
   const e = calFindEvent(id, gid); if (!e) return;
+  if (calIsSpanRepeat(e)) ds = calInstanceStart(e, ds) || ds; // ★【0.04.39】何日か続く予定の繰り返しは、その回ごと消す
   e.skip = [...new Set([...(e.skip || []), ds])]; e.at = Date.now();
   try { await calPut(id, gid, e); } catch (err) { return alert('⚠️ ' + (err.code || err.message)); }
   document.getElementById('calOverlay').style.display = 'none';
@@ -329,9 +361,9 @@ function calWidgetData() {
     const ds = calAddDays(today, i);
     calOn(ds, all).forEach(e => {
       if (e.type === 'class' && i > 7) return;
-      const multi = e.end && e.end > e.date;
-      if (multi && ds > e.date && i > 0) return;
-      out.push({ d: multi ? e.date : ds, e2: multi ? e.end : '', s: e.start || '', t2: e.endTime || '', n: String(e.title).slice(0, 40), i: calType(e).icon, k: e.type || 'event' });
+      const multi = calSpan(e) > 0, s0 = multi ? calInstanceStart(e, ds) : ds;
+      if (multi && ds > s0 && i > 0) return;
+      out.push({ d: s0, e2: multi ? calInstanceEnd(e, s0) : '', s: e.start || '', t2: e.endTime || '', n: String(e.title).slice(0, 40), i: calType(e).icon, k: e.type || 'event' });
     });
   }
   return out.slice(0, 80);
@@ -347,7 +379,7 @@ function calGroupEventsText(g) {
   const evs = Object.entries(g.events || {}).filter(([, e]) => e && !e.deleted).map(([id, e]) => Object.assign({}, e, { id, gid: g.id }));
   if (!evs.length) return '';
   const today = calToday(), rows = [];
-  for (let i = 0; i <= 60 && rows.length < 6; i++) { const ds = calAddDays(today, i); evs.forEach(e => { if (rows.length < 6 && calOccursOn(e, ds) && !(e.end && ds > e.date && i > 0)) rows.push(`<div class="hint-small">${calMD(ds)} ${calType(e).icon} ${escapeHtml(e.title)}${e.start ? ' ' + e.start : ''}</div>`); }); }
+  for (let i = 0; i <= 60 && rows.length < 6; i++) { const ds = calAddDays(today, i); evs.forEach(e => { if (rows.length < 6 && calOccursOn(e, ds) && !(calSpan(e) && ds > calInstanceStart(e, ds) && i > 0)) rows.push(`<div class="hint-small">${calMD(ds)} ${calType(e).icon} ${escapeHtml(e.title)}${e.start ? ' ' + e.start : ''}</div>`); }); }
   return rows.join('') || '<div class="hint-small">60日以内の予定はありません。</div>';
 }
 
@@ -512,15 +544,22 @@ function calParseIcs(text) {
         if (r.UNTIL) { const u = calIcsParseDT(r.UNTIL); if (u) e.until = u.date; }
         else if (r.COUNT) e.until = calAddDays(s.date, Math.ceil(Number(r.COUNT) / e.days.length) * 7 * (e.repeat === 'biweekly' ? 2 : 1));
         last = e.until || '9999-12-31';
-        delete e.end;
+        // ★【0.04.39】何日か続く予定の毎週・隔週（終日で、次の回と重ならない長さ）は、何日か続くまま繰り返す
+        if (!(e.end && r.FREQ === 'WEEKLY' && iv <= 2 && calSpan(e) < 7 * iv && e.days.length === 1)) delete e.end;
+        else if (e.until) last = calAddDays(e.until, calSpan(e));
         if (r.FREQ === 'WEEKLY' && iv > 2) { e.note = `（${iv}週ごと：毎週として取り込みました）`; e.repeat = 'weekly'; }
-      } else if (r.FREQ === 'MONTHLY' || r.FREQ === 'YEARLY') e.note = `（${r.FREQ === 'MONTHLY' ? '毎月' : '毎年'}の予定：最初の1回だけ取り込みました）`;
+      } else if (r.FREQ === 'MONTHLY' || r.FREQ === 'YEARLY') {
+        // ★【0.04.39】毎月・毎年の予定は、航海日誌の繰り返しの形（rec）で取り込む（何日か続く予定も、そのまま毎回続く）
+        e.rec = { freq: r.FREQ.toLowerCase(), interval: iv, daysOfWeek: [], endType: r.UNTIL ? 'until' : r.COUNT ? 'count' : 'never',
+          endDate: r.UNTIL ? ((calIcsParseDT(r.UNTIL) || {}).date || null) : null, endCount: r.COUNT ? Number(r.COUNT) : null };
+        last = e.rec.endDate ? calAddDays(e.rec.endDate, calSpan(e)) : '9999-12-31';
+      }
     }
     if (v.exd.length) e.skip = v.exd.map(x => (calIcsParseDT(x) || {}).date).filter(Boolean);
     if (v.LOCATION) e.place = calIcsUnesc(v.LOCATION).trim();
     if (v.DESCRIPTION) e.note = ((e.note ? e.note + '\n' : '') + calIcsUnesc(v.DESCRIPTION)).trim().slice(0, 1000);
     const t = (v['X-SUSURU-TYPE'] || '').trim();
-    e.type = CAL_TYPES[t] ? t : calGuessType(title, !!e.end, !!e.repeat, !!e.start);
+    e.type = CAL_TYPES[t] ? t : calGuessType(title, !!e.end, !!(e.repeat || e.rec), !!e.start);
     // 毎日の試験期間（時刻あり）は、何日か続く予定に戻す
     if (e.type === 'exam' && e.repeat === 'weekly' && (e.days || []).length === 7 && e.until && e.until < '9999') { e.end = e.until; delete e.repeat; delete e.days; delete e.until; }
     const uid = v.UID || (title + s.date + (s.time || ''));
@@ -534,7 +573,7 @@ function calParseIcs(text) {
 // 曜日は出てきた曜日すべて。どれも2週おきなら隔週。あいだで抜けている日は「この日だけ消す」にする
 function calMergeRepeats(res) {
   const groups = {};
-  res.forEach(x => { const e = x.ev; if (e.repeat || e.end) return; const k = [e.title, e.start || '', e.endTime || ''].join('\u0001'); (groups[k] = groups[k] || []).push(x); });
+  res.forEach(x => { const e = x.ev; if (e.repeat || e.end || e.rec) return; const k = [e.title, e.start || '', e.endTime || ''].join('\u0001'); (groups[k] = groups[k] || []).push(x); });
   const today = calToday(), drop = new Set(), add = [];
   Object.values(groups).forEach(xs => {
     const dates = [...new Set(xs.map(x => x.ev.date))].sort();
