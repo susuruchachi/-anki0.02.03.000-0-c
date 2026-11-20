@@ -217,6 +217,7 @@ function calMove(n) {
   renderCalendar();
 }
 function calOnGroupsChanged() {
+  if (typeof appAlarmSync === 'function') appAlarmSync();
   const pg = document.getElementById('pgCalendar');
   if (pg && pg.classList.contains('active')) renderCalendar();
   renderCalHome();
@@ -267,6 +268,9 @@ function calEditor(e, occ) {
       <button class="chip" style="margin-bottom:6px;" onclick="document.getElementById('calEdStart').value=''; document.getElementById('calEdEndTime').value='';">終日</button>
     </div>
     <div class="hint-small">時刻を入れなければ終日の予定になります。</div>
+    ${typeof appAlarmOk === 'function' && appAlarmOk() ? (() => { const cur = e.id ? calAlarmOf(e.id, e.gid) : null; return `<label class="section-label cal-lbl" style="margin-top:8px;">⏰ アラーム（この端末で、アラームの音で鳴らす）</label>
+      <select id="calEdAlarm" class="form-control"><option value="">鳴らさない</option>${CAL_ALARM_OPTS.map(([v, l]) => `<option value="${v}" ${cur === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      <div class="hint-small">終日の予定は、その日の朝7時を基準に鳴ります（「1日前」なら前の日の朝7時）。</div>`; })() : ''}
     <div class="cal-r-rep" style="margin-top:8px;"><label class="section-label cal-lbl">🔁 繰り返し</label>
       <select id="calEdRepeat" class="form-control" onchange="calEdUpdate()"><option value="" ${!rep ? 'selected' : ''}>しない</option><option value="weekly" ${rep === 'weekly' ? 'selected' : ''}>毎週</option><option value="biweekly" ${rep === 'biweekly' ? 'selected' : ''}>隔週</option>${hasRec ? `<option value="rec" selected>${escapeHtml(calRepeatText(e))}（航海日誌で決めた繰り返しのまま）</option>` : ''}</select>
       <div class="cal-r-days" style="margin-top:6px;"><div class="cal-days">${CAL_DOW.map((w, i) => `<label class="cal-daychk"><input type="checkbox" class="calEdDay" value="${i}" ${days.includes(i) ? 'checked' : ''}>${w}</label>`).join('')}</div>
@@ -354,6 +358,8 @@ async function calSaveEvent() {
   try {
     await calPut(id, gid, e);
     if (old && oldGid !== gid) await calRemove(id, oldGid); // 共有先を変えたら、前の場所から消す
+    const al = document.getElementById('calEdAlarm'); // ★【0.04.44】アラーム（この端末だけ）
+    if (al && typeof calAlarmSet === 'function') { if (old && oldGid !== gid) calAlarmSet(id, oldGid, null); calAlarmSet(id, gid, al.value); }
   } catch (err) { return alert('⚠️ 保存できませんでした: ' + (err.code || err.message)); }
   document.getElementById('calOverlay').style.display = 'none';
   _calSel = e.date >= calToday() || !_calSel ? (_calSel && calOccursOn(Object.assign({ id }, e), _calSel) ? _calSel : e.date) : _calSel;
@@ -409,6 +415,7 @@ function calStarWidgetData() {
 }
 function calAfterChange() {
   if (typeof appWidgetSync === 'function') appWidgetSync();
+  if (typeof appAlarmSync === 'function') appAlarmSync(); // ★【0.04.44】予定のアラーム
   if (typeof planRelinkFromCalendar === 'function') { try { planRelinkFromCalendar(); } catch (e) { console.warn(e); } } // ★【0.04.40】予定が動いたら週間プランも
   if (calLinkOn()) calLinkPush(); // ★【0.04.36】航海日誌と同期
   renderCalendar(); renderCalHome();
@@ -735,6 +742,7 @@ function calStartSubWatch() {
 }
 function calRefreshViews() {
   if (typeof appWidgetSync === 'function') appWidgetSync();
+  if (typeof appAlarmSync === 'function') appAlarmSync();
   if (typeof planRelinkFromCalendar === 'function') { try { planRelinkFromCalendar(); } catch (e) { console.warn(e); } }
   const pg = document.getElementById('pgCalendar');
   if (pg && pg.classList.contains('active')) renderCalendar();
