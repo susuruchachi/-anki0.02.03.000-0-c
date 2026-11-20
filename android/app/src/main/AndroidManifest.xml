@@ -52,6 +52,13 @@
             </intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_calendar_info" />
         </receiver>
+        <!-- ★【0.04.43】★ 大事な予定のウィジェット（★を付けた予定と、あと何日） -->
+        <receiver android:name=".StarWidget" android:exported="false" android:label="@string/starWidgetName">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_star_info" />
+        </receiver>
         <!-- ★【0.04.27】プッシュ通知（Firebase Cloud Messaging）を受け取る -->
         <service android:name=".PushService" android:exported="false">
             <intent-filter>

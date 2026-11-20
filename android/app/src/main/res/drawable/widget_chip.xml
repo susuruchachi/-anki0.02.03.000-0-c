@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ★【0.04.43】大事な予定のウィジェット：もうすぐ（7日以内・今日・明日・期間中）の「あと何日」の下地 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#FFD166" />
+    <corners android:radius="8dp" />
+</shape>

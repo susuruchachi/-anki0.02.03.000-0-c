@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ★【0.04.43】★ 大事な予定のウィジェット：★を付けた予定（繰り返しならいちばん近い回）と、あと何日。行は6つまで（使わない行は隠す） -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/s_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="12dp"
+    android:background="@drawable/widget_bg">
+
+    <TextView android:id="@+id/s_title" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:text="★ 大事な予定" android:textSize="14sp" android:textStyle="bold" android:textColor="#FFD166" android:layout_marginBottom="4dp" />
+
+    <TextView android:id="@+id/s_empty" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:text="カレンダーの予定で「★ 重要な予定」をオンにすると、ここに、あと何日かが出ます" android:textSize="12sp" android:textColor="#9AA6BC" />
+
+    <LinearLayout android:id="@+id/s_row0" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:gravity="center_vertical" android:paddingTop="3dp" android:paddingBottom="3dp" android:visibility="gone">
+        <TextView android:id="@+id/s_date0" android:layout_width="58dp" android:layout_height="wrap_content"
+            android:text="" android:textSize="11sp" android:textColor="#9AA6BC" android:maxLines="1" />
+        <TextView android:id="@+id/s_name0" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+            android:text="" android:textSize="13sp" android:textColor="#E8EDF5" android:maxLines="1" android:ellipsize="end" />
+        <TextView android:id="@+id/s_left0" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginStart="6dp" android:paddingStart="6dp" android:paddingEnd="6dp" android:paddingTop="1dp" android:paddingBottom="1dp"
+            android:text="" android:textSize="12sp" android:textStyle="bold" android:textColor="#FFD166" android:maxLines="1" />
+    </LinearLayout>
+    <LinearLayout android:id="@+id/s_row1" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:gravity="center_vertical" android:paddingTop="3dp" android:paddingBottom="3dp" android:visibility="gone">
+        <TextView android:id="@+id/s_date1" android:layout_width="58dp" android:layout_height="wrap_content"
+            android:text="" android:textSize="11sp" android:textColor="#9AA6BC" android:maxLines="1" />
+        <TextView android:id="@+id/s_name1" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+            android:text="" android:textSize="13sp" android:textColor="#E8EDF5" android:maxLines="1" android:ellipsize="end" />
+        <TextView android:id="@+id/s_left1" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginStart="6dp" android:paddingStart="6dp" android:paddingEnd="6dp" android:paddingTop="1dp" android:paddingBottom="1dp"
+            android:text="" android:textSize="12sp" android:textStyle="bold" android:textColor="#FFD166" android:maxLines="1" />
+    </LinearLayout>
+    <LinearLayout android:id="@+id/s_row2" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:gravity="center_vertical" android:paddingTop="3dp" android:paddingBottom="3dp" android:visibility="gone">
+        <TextView android:id="@+id/s_date2" android:layout_width="58dp" android:layout_height="wrap_content"
+            android:text="" android:textSize="11sp" android:textColor="#9AA6BC" android:maxLines="1" />
+        <TextView android:id="@+id/s_name2" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+            android:text="" android:textSize="13sp" android:textColor="#E8EDF5" android:maxLines="1" android:ellipsize="end" />
+        <TextView android:id="@+id/s_left2" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginStart="6dp" android:paddingStart="6dp" android:paddingEnd="6dp" android:paddingTop="1dp" android:paddingBottom="1dp"
+            android:text="" android:textSize="12sp" android:textStyle="bold" android:textColor="#FFD166" android:maxLines="1" />
+    </LinearLayout>
+    <LinearLayout android:id="@+id/s_row3" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:gravity="center_vertical" android:paddingTop="3dp" android:paddingBottom="3dp" android:visibility="gone">
+        <TextView android:id="@+id/s_date3" android:layout_width="58dp" android:layout_height="wrap_content"
+            android:text="" android:textSize="11sp" android:textColor="#9AA6BC" android:maxLines="1" />
+        <TextView android:id="@+id/s_name3" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+            android:text="" android:textSize="13sp" android:textColor="#E8EDF5" android:maxLines="1" android:ellipsize="end" />
+        <TextView android:id="@+id/s_left3" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginStart="6dp" android:paddingStart="6dp" android:paddingEnd="6dp" android:paddingTop="1dp" android:paddingBottom="1dp"
+            android:text="" android:textSize="12sp" android:textStyle="bold" android:textColor="#FFD166" android:maxLines="1" />
+    </LinearLayout>
+    <LinearLayout android:id="@+id/s_row4" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:gravity="center_vertical" android:paddingTop="3dp" android:paddingBottom="3dp" android:visibility="gone">
+        <TextView android:id="@+id/s_date4" android:layout_width="58dp" android:layout_height="wrap_content"
+            android:text="" android:textSize="11sp" android:textColor="#9AA6BC" android:maxLines="1" />
+        <TextView android:id="@+id/s_name4" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+            android:text="" android:textSize="13sp" android:textColor="#E8EDF5" android:maxLines="1" android:ellipsize="end" />
+        <TextView android:id="@+id/s_left4" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginStart="6dp" android:paddingStart="6dp" android:paddingEnd="6dp" android:paddingTop="1dp" android:paddingBottom="1dp"
+            android:text="" android:textSize="12sp" android:textStyle="bold" android:textColor="#FFD166" android:maxLines="1" />
+    </LinearLayout>
+    <LinearLayout android:id="@+id/s_row5" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:gravity="center_vertical" android:paddingTop="3dp" android:paddingBottom="3dp" android:visibility="gone">
+        <TextView android:id="@+id/s_date5" android:layout_width="58dp" android:layout_height="wrap_content"
+            android:text="" android:textSize="11sp" android:textColor="#9AA6BC" android:maxLines="1" />
+        <TextView android:id="@+id/s_name5" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+            android:text="" android:textSize="13sp" android:textColor="#E8EDF5" android:maxLines="1" android:ellipsize="end" />
+        <TextView android:id="@+id/s_left5" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginStart="6dp" android:paddingStart="6dp" android:paddingEnd="6dp" android:paddingTop="1dp" android:paddingBottom="1dp"
+            android:text="" android:textSize="12sp" android:textStyle="bold" android:textColor="#FFD166" android:maxLines="1" />
+    </LinearLayout>
+</LinearLayout>
