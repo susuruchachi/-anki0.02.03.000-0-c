@@ -42,7 +42,8 @@ jobs:
           echo "V=$V" >> "$GITHUB_ENV"
           xcodebuild -project SusuruAnki.xcodeproj -target SusuruAnki -configuration Release -sdk iphoneos \
             SYMROOT="$PWD/build" MARKETING_VERSION="$V" CURRENT_PROJECT_VERSION="$CODE" \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build | tail -60
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build > build.log 2>&1 || { grep -E 'error:|warning: .*(deprecated|unavailable)' build.log | head -40; tail -40 build.log; exit 1; }
+          grep -E ' error:' build.log | head -20 || true
           test -d build/Release-iphoneos/SusuruAnki.app
           mkdir -p Payload && cp -R build/Release-iphoneos/SusuruAnki.app Payload/
           # ★【0.04.47】App Group の権限だけを書き込む（ウィジェットが先、アプリが後）

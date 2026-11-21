@@ -56,7 +56,6 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKNavig
             web.evaluateJavaScript("try{ if (typeof openPage === 'function') openPage('\(safe)'); }catch(e){}", completionHandler: nil)
         }
     }
-    }
 
     override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }
 
