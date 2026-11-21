@@ -1,6 +1,12 @@
 // ----------------- Firebase Auth -----------------
 function firebaseLogin() { 
   if (typeof appGoogleLogin === 'function' && appGoogleLogin()) return; // ★【0.04.03】Android アプリの中では、アプリ側でログイン
+  // ★【0.04.45】iOS アプリの中では Google のログインができない（Google がアプリの中の画面でのログインを許さない）ので、メールアドレスで
+  if (typeof isIOSApp === 'function' && isIOSApp()) {
+    alert('iPad のアプリの中では、Google でログインできません。\n下の「📧 メールアドレスでログイン」から入ってください。\n\nまだメールアドレスを追加していなければ、先に Safari のすするanki（いつものウェブ版）で、Google でログインしたまま設定の「📧 メールアドレスとパスワードを追加」から追加してください。同じアカウントに入れます。');
+    document.querySelectorAll('details').forEach(x => { if (/メールアドレスでログイン/.test(x.textContent || '')) { x.open = true; x.scrollIntoView({ block: 'center' }); } });
+    return;
+  }
   const provider = new firebase.auth.GoogleAuthProvider();
   provider.setCustomParameters({ 'prompt': 'select_account' });
   

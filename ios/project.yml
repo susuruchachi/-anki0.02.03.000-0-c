@@ -1,0 +1,44 @@
+# ★【0.04.45】すするanki の iOS・iPadOS アプリ（自分の端末に SideStore で入れる用）
+# GitHub Actions（ios-ipa.yml）で XcodeGen を使ってプロジェクトを作り、署名なしの .ipa を作る（署名は SideStore が自分の Apple ID でする）
+name: SusuruAnki
+options:
+  bundleIdPrefix: io.github.susuruchachi
+  deploymentTarget:
+    iOS: "26.0"
+targets:
+  SusuruAnki:
+    type: application
+    platform: iOS
+    sources: [Sources]
+    info:
+      path: Sources/Info.plist
+      properties:
+        CFBundleDisplayName: すするanki
+        CFBundleName: すするanki
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen:
+          UIColorName: ""
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UIRequiresFullScreen: false
+        UIStatusBarStyle: UIStatusBarStyleLightContent
+        UIViewControllerBasedStatusBarAppearance: false
+        NSAlarmKitUsageDescription: 連続記録が途切れそうなときや、予定の前にアラームを鳴らします
+        NSCameraUsageDescription: 問題の写真を読み取るときに使います
+        NSPhotoLibraryUsageDescription: 問題の画像を選ぶときに使います
+        NSMicrophoneUsageDescription: 声で答えるときに使います
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.susuruchachi.susuruanki
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_VERSION: "5.0"
+        MARKETING_VERSION: "0.0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGNING_ALLOWED: "NO"
+        CODE_SIGNING_REQUIRED: "NO"
+        CODE_SIGN_IDENTITY: ""

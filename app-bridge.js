@@ -6,6 +6,9 @@
 //  ・戻るボタン：メニュー・ダイアログを閉じる → 前の画面 → （何も無ければアプリを裏に回す）
 // ================================================================
 function isAndroidApp() { return typeof window.SusuruApp !== 'undefined' && !!window.SusuruApp; }
+// ★【0.04.45】iOS・iPadOS アプリ（ios/。SideStore で入れる自分用）の中か
+function isIOSApp() { return typeof window.SusuruIOS !== 'undefined' && !!window.SusuruIOS; }
+function iosAppVersion() { const m = navigator.userAgent.match(/SusuruAnkiIOS\/([\d.]+)/); return m ? m[1] : ''; }
 
 // ログイン（auth.js の firebaseLogin から呼ぶ）。アプリの中なら true を返し、結果は __susuruNativeLogin で受け取る
 function appGoogleLogin() {
@@ -165,6 +168,7 @@ window.addEventListener('load', () => setTimeout(() => {
 // ================================================================
 let _widgetTimer = null;
 function appWidgetSync(now) {
+  if (isIOSApp() && typeof appAlarmSync === 'function') appAlarmSync(); // ★【0.04.45】iOS：解いたら今日のアラームを消す
   if (!isAndroidApp() || !window.SusuruApp.setWidgetData) return;
   clearTimeout(_widgetTimer);
   _widgetTimer = setTimeout(() => {
@@ -279,7 +283,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 // ================================================================
 const ALARM_KEY = 'susuru_anki_alarm', CAL_ALARM_KEY = 'susuru_anki_cal_alarms';
 const CAL_ALARM_OPTS = [[0, '時刻ちょうど'], [5, '5分前'], [10, '10分前'], [15, '15分前'], [30, '30分前'], [60, '1時間前'], [120, '2時間前'], [1440, '1日前']];
-function appAlarmOk() { return isAndroidApp() && !!window.SusuruApp.setAlarms; }
+function appAlarmOk() { return (isAndroidApp() && !!window.SusuruApp.setAlarms) || isIOSApp(); }
 function alarmPrefs() {
   let p = {}; try { p = JSON.parse(localStorage.getItem(ALARM_KEY) || '{}') || {}; } catch (e) {}
   return { on: !!p.on, time: /^\d{1,2}:\d{2}$/.test(p.time || '') ? p.time : '20:00', snooze: [5, 10, 15, 20, 30].includes(Number(p.snooze)) ? Number(p.snooze) : 10 };
@@ -318,14 +322,36 @@ function appAlarmSync(now) {
   _alarmTimer = setTimeout(() => {
     try {
       const p = alarmPrefs(), [h, m] = p.time.split(':').map(Number);
+      if (isIOSApp()) { const items = iosAlarmItems(p); window.SusuruIOS.setAlarms(JSON.stringify({ items, sig: JSON.stringify(items) })); return; }
       window.SusuruApp.setAlarms(JSON.stringify({ streak: { on: p.on, h, m, snooze: p.snooze }, events: calAlarmList() }));
     } catch (e) {}
   }, now ? 0 : 1500);
 }
 window.addEventListener('load', () => setTimeout(() => appAlarmSync(true), 4000));
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') appAlarmSync(true); });
-function alarmStatus() { try { return JSON.parse(window.SusuruApp.alarmStatus() || '{}'); } catch (e) { return {}; } }
+function alarmStatus() { try { return JSON.parse((isIOSApp() ? window.SusuruIOS.alarmStatus() : window.SusuruApp.alarmStatus()) || '{}'); } catch (e) { return {}; } }
+// ★【0.04.45】iOS：その時刻にアプリを動かせないので、鳴らす時刻を全部ここで決めて渡す（60回まで）
+//  🔥 連続記録：今日まだなら、決めた時刻から 23:55 までスヌーズの間隔ごと。明日・明後日の分も（アプリを開かない日も鳴るように）。今日解いたら今日の分は無くなる
+//  📅 予定：calAlarmList と同じ
+function iosAlarmItems(p) {
+  const ev = calAlarmList().map(e => ({ at: e.at, title: e.title.slice(0, 60), k: e.k, open: '開く' })).slice(0, 30);
+  const out = [], now = Date.now();
+  if (p.on && typeof getStreakInfo === 'function') {
+    const s = getStreakInfo(), [h, m] = p.time.split(':').map(Number);
+    for (let d = 0; d < 3; d++) {
+      if (d === 0 && s.doneToday) continue;
+      const streak = d === 0 ? s.cur : d === 1 && s.doneToday ? s.cur : 0;
+      const title = streak > 0 ? `🔥 ${streak}日連続が消えそう！1問解こう` : '📚 今日の1問がまだです';
+      const base = new Date(); base.setDate(base.getDate() + d); base.setHours(h, m, 0, 0);
+      const end = new Date(base); end.setHours(23, 55, 0, 0);
+      for (let t = base.getTime(), n = 0; t <= end.getTime() && n < 30; t += p.snooze * 60000, n++) if (t > now + 10000) out.push({ at: t, title, k: 'streak', open: '今やる' });
+    }
+  }
+  return ev.concat(out.slice(0, 60 - ev.length)).sort((a, b) => a.at - b.at);
+}
+window.onSusuruIOSStatus = function () { const b = document.getElementById('chkAlarmStreak'); if (b && typeof renderNotifySettings === 'function') renderNotifySettings(); };
 function alarmSettingsHTML() {
+  if (isIOSApp()) return iosAlarmSettingsHTML();
   if (!isAndroidApp()) return '';
   if (!appAlarmOk()) return `<div class="setting-box-title" style="margin-top:16px;">⏰ アラーム</div><div class="hint-small">連続記録が途切れそうなときや、予定の前にアラームの音で鳴らせます。アプリを新しくすると使えます。</div>${typeof appInstallApk === 'function' ? '<button class="btn btn-secondary" style="margin-top:6px;" onclick="appInstallApk()">📲 アプリを更新する</button>' : ''}`;
   const p = alarmPrefs(), st = alarmStatus(), warn = [];
@@ -351,6 +377,22 @@ function alarmSettingsHTML() {
     ${warn.length ? `<div style="margin-top:8px;">${warn.join('')}</div>` : ''}
     <button class="btn btn-secondary" style="margin-top:8px;" onclick="alarmTest()">🔔 アラームを試す</button>`;
 }
+function iosAlarmSettingsHTML() {
+  const p = alarmPrefs(), st = alarmStatus(), evN = Object.keys(calAlarms()).length;
+  const auth = st.auth === 'authorized' ? '' : st.auth === 'denied'
+    ? `<div class="hint-small" style="color:var(--danger);">🚫 アラームが許可されていないので鳴りません</div><button class="btn btn-secondary" style="margin-top:4px;" onclick="window.SusuruIOS.openSettings()">⚙️ 設定を開いて許可する</button>`
+    : `<div class="hint-small" style="color:var(--warning, #e0a020);">⚠️ まだアラームの許可をしていません</div><button class="btn btn-secondary" style="margin-top:4px;" onclick="window.SusuruIOS.requestAlarmAuth()">⏰ アラームを許可する</button>`;
+  return `<div class="setting-box-title" style="margin-top:16px;">⏰ アラーム（この端末）</div>
+    <label class="toggle-pill" style="margin-top:6px; display:flex; align-items:center; gap:8px;"><input type="checkbox" id="chkAlarmStreak" ${p.on ? 'checked' : ''} onchange="onAlarmPrefChange()">🔥 連続記録アラーム（今日まだ解いていなければ、アラームで鳴らす）</label>
+    <div class="form-row" style="margin-top:6px; align-items:center;"><span class="hint-small" style="white-space:nowrap;">⏰ 時刻</span>
+      <input type="time" id="txtAlarmTime" class="form-control" value="${p.time}" onchange="onAlarmPrefChange()" style="max-width:160px;"></div>
+    <div class="form-row" style="margin-top:6px; align-items:center;"><span class="hint-small" style="white-space:nowrap;">💤 スヌーズ</span>
+      <select id="selAlarmSnooze" class="form-control" onchange="onAlarmPrefChange()" style="max-width:160px;">${[5, 10, 15, 20, 30].map(v => `<option value="${v}" ${p.snooze === v ? 'selected' : ''}>${v}分ごと</option>`).join('')}</select></div>
+    <div class="hint-small">今日1問も解いていないと、この時刻から 23:55 まで、スヌーズの間隔で何度も鳴ります（「止める」を押しても、次の回でまた鳴ります）。解いたら今日の分は止まります。<br>iPad では、アプリを開いたときに3日先までのアラームを用意します（3日以上開かないと、その先は鳴りません）。ほかの端末で解いた日は、このアプリを開くまで鳴ることがあります。${st.count ? `<br>用意してあるアラーム：${st.count}回` : ''}</div>
+    <div class="hint-small" style="margin-top:6px;">📅 予定のアラームは、カレンダーの予定の「⏰ アラーム」で選べます${evN ? `（${evN}件の予定に入っています）` : ''}。</div>
+    ${auth ? `<div style="margin-top:8px;">${auth}</div>` : ''}
+    <button class="btn btn-secondary" style="margin-top:8px;" onclick="window.SusuruIOS.testAlarm('⏰ アラームのテスト')">🔔 アラームを試す（5秒後に鳴ります）</button>`;
+}
 function onAlarmPrefChange() {
   const p = alarmPrefs();
   const c = document.getElementById('chkAlarmStreak'), t = document.getElementById('txtAlarmTime'), s = document.getElementById('selAlarmSnooze');
@@ -358,7 +400,8 @@ function onAlarmPrefChange() {
   if (t && /^\d{1,2}:\d{2}$/.test(t.value)) p.time = t.value;
   if (s) p.snooze = Number(s.value) || 10;
   try { localStorage.setItem(ALARM_KEY, JSON.stringify(p)); } catch (e) {}
-  if (p.on && alarmStatus().notif === false && typeof enableNotifications === 'function') enableNotifications();
+  if (isIOSApp()) { if (p.on && alarmStatus().auth !== 'authorized') window.SusuruIOS.requestAlarmAuth(); }
+  else if (p.on && alarmStatus().notif === false && typeof enableNotifications === 'function') enableNotifications();
   appAlarmSync(true);
   setTimeout(() => { if (typeof renderNotifySettings === 'function') renderNotifySettings(); }, 300);
 }
