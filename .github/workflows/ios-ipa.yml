@@ -4,6 +4,10 @@
 name: ios-ipa
 
 on:
+  # 手動で動かすには、このファイルがデフォルトブランチ（main）にも要る。作業ブランチでは ios/ を変えて push したときに動く
+  push:
+    branches: [claude/v0.03.00-chem-kanbun-ui]
+    paths: ['ios/**', '.github/workflows/ios-ipa.yml']
   workflow_dispatch:
     inputs:
       publish:
@@ -48,7 +52,7 @@ jobs:
           name: susuruanki-ios-ipa
           path: ios/susuruanki-ios.ipa
       - name: Publish the .ipa to the branch
-        if: ${{ inputs.publish }}
+        if: ${{ github.event_name == 'push' || inputs.publish }}
         run: |
           cp ios/susuruanki-ios.ipa apk/susuruanki-ios.ipa
           sed -i '' "s/^const IOS_APP_VERSION = \"[^\"]*\"/const IOS_APP_VERSION = \"$V\"/" version-info.js
