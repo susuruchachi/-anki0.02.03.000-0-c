@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- ★【0.04.47】アプリとウィジェットでデータを分け合う App Group。署名なしで作るので、ldid でこの権限だけを書き込んでおく
+     （入れるとき、iloader・SideStore がこれを見て、自分の Apple ID の App Group を作る） -->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.io.github.susuruchachi.susuruanki</string>
+	</array>
+</dict>
+</plist>

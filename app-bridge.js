@@ -169,7 +169,9 @@ window.addEventListener('load', () => setTimeout(() => {
 let _widgetTimer = null;
 function appWidgetSync(now) {
   if (isIOSApp() && typeof appAlarmSync === 'function') appAlarmSync(); // ★【0.04.45】iOS：解いたら今日のアラームを消す
-  if (!isAndroidApp() || !window.SusuruApp.setWidgetData) return;
+  // ★【0.04.47】iOS アプリのウィジェットにも同じデータを渡す
+  const sendW = isAndroidApp() && window.SusuruApp.setWidgetData ? j => window.SusuruApp.setWidgetData(j) : isIOSApp() && window.SusuruIOS.setWidgetData ? j => window.SusuruIOS.setWidgetData(j) : null;
+  if (!sendW) return;
   clearTimeout(_widgetTimer);
   _widgetTimer = setTimeout(() => {
     try {
@@ -190,7 +192,7 @@ function appWidgetSync(now) {
       try { if (typeof calWidgetData === 'function') data.cal = calWidgetData(); } catch (e) {} // ★【0.04.25】カレンダーのウィジェット
       try { if (typeof calStarWidgetData === 'function') data.stars = calStarWidgetData(); } catch (e) {} // ★【0.04.43】大事な予定のウィジェット
       if (_widgetFriends) data.board.rank = widgetRank(_widgetFriends.list), data.board.rankAt = _widgetFriends.at;
-      window.SusuruApp.setWidgetData(JSON.stringify(data));
+      sendW(JSON.stringify(data));
       // フレンドの成績は10分に1回だけ読み直す（読み終わったら、もう一度ウィジェットに送る）
       if (!_widgetFriendsBusy && typeof currentUser !== 'undefined' && currentUser && (!_widgetFriends || Date.now() - _widgetFriends.at > 600000)) {
         _widgetFriendsBusy = true;
@@ -391,6 +393,7 @@ function iosAlarmSettingsHTML() {
     <div class="hint-small">今日1問も解いていないと、この時刻から 23:55 まで、スヌーズの間隔で何度も鳴ります（「止める」を押しても、次の回でまた鳴ります）。解いたら今日の分は止まります。<br>iPad では、アプリを開いたときに3日先までのアラームを用意します（3日以上開かないと、その先は鳴りません）。ほかの端末で解いた日は、このアプリを開くまで鳴ることがあります。${st.count ? `<br>用意してあるアラーム：${st.count}回` : ''}</div>
     <div class="hint-small" style="margin-top:6px;">📅 予定のアラームは、カレンダーの予定の「⏰ アラーム」で選べます${evN ? `（${evN}件の予定に入っています）` : ''}。</div>
     ${auth ? `<div style="margin-top:8px;">${auth}</div>` : ''}
+    ${st.widget === false ? '<div class="hint-small" style="margin-top:8px; color:var(--warning, #e0a020);">⚠️ ウィジェットにデータを渡せていません（App Group が使えない状態です）。アプリを入れ直すと直ることがあります。</div>' : st.widget ? '<div class="hint-small" style="margin-top:8px;">🧩 ウィジェット：ホーム画面を長押し →「編集」→「ウィジェットを追加」→「すするanki」（連続記録・カレンダー・大事な予定・ランキング）</div>' : ''}
     <button class="btn btn-secondary" style="margin-top:8px;" onclick="window.SusuruIOS.testAlarm('⏰ アラームのテスト')">🔔 アラームを試す（5秒後に鳴ります）</button>`;
 }
 function onAlarmPrefChange() {

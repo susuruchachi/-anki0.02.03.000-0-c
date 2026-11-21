@@ -2,6 +2,7 @@
 
 import UIKit
 import WebKit
+import WidgetKit
 
 final class WebViewController: UIViewController, WKScriptMessageHandler, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate {
     static let host = "susuruchachi.github.io"
@@ -39,6 +40,22 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKNavig
         web.load(URLRequest(url: Self.startURL))
 
         NotificationCenter.default.addObserver(self, selector: #selector(becameActive), name: UIApplication.didBecomeActiveNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(openFromWidget(_:)), name: .susuruOpenURL, object: nil)
+    }
+
+    // ★【0.04.47】ウィジェットを押したとき（susuruanki://open?page=…）：そのページを開く
+    @objc private func openFromWidget(_ n: Notification) {
+        guard let u = n.object as? URL, let c = URLComponents(url: u, resolvingAgainstBaseURL: false) else { return }
+        let page = c.queryItems?.first(where: { $0.name == "page" })?.value ?? ""
+        let safe = page.range(of: "^pg[A-Za-z]+$", options: .regularExpression) != nil ? page : ""
+        if safe.isEmpty { return }
+        if web.isLoading || web.url == nil {
+            // まだ読み込み中（ウィジェットから開いたばかり）：そのページを開く URL で読み込み直す
+            web.load(URLRequest(url: URL(string: "https://\(Self.host)\(Self.path)?source=ios&page=\(safe)")!))
+        } else {
+            web.evaluateJavaScript("try{ if (typeof openPage === 'function') openPage('\(safe)'); }catch(e){}", completionHandler: nil)
+        }
+    }
     }
 
     override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }
@@ -54,6 +71,7 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKNavig
       window.__susuruIOSStatus = function(s){ st = s || {}; try { if (typeof window.onSusuruIOSStatus === 'function') window.onSusuruIOSStatus(st); } catch (e) {} };
       window.SusuruIOS = {
         setAlarms: function(j){ post('setAlarms', j); },
+        setWidgetData: function(j){ post('setWidgetData', j); },
         alarmStatus: function(){ return JSON.stringify(st); },
         requestAlarmAuth: function(){ post('requestAuth'); },
         testAlarm: function(t){ post('testAlarm', t || ''); },
@@ -71,6 +89,9 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKNavig
         Task { @MainActor in
             switch cmd {
             case "setAlarms": await AlarmScheduler.shared.apply(json: data)
+            case "setWidgetData": // ★【0.04.47】ウィジェットに渡す
+                if SharedStore.write(data) { WidgetCenter.shared.reloadAllTimelines() }
+                return
             case "requestAuth": _ = await AlarmScheduler.shared.requestAuth()
             case "testAlarm": await AlarmScheduler.shared.test(title: data)
             case "openSettings": if let u = URL(string: UIApplication.openSettingsURLString) { await UIApplication.shared.open(u) }
@@ -81,7 +102,8 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKNavig
     }
 
     @MainActor private func sendStatus() async {
-        let s = await AlarmScheduler.shared.status()
+        var s = await AlarmScheduler.shared.status()
+        s["widget"] = SharedStore.fileURL != nil
         guard let d = try? JSONSerialization.data(withJSONObject: s), let j = String(data: d, encoding: .utf8) else { return }
         _ = try? await web.evaluateJavaScript("window.__susuruIOSStatus && window.__susuruIOSStatus(\(j))")
     }
@@ -176,3 +198,5 @@ final class WeakHandler: NSObject, WKScriptMessageHandler {
     init(_ t: WKScriptMessageHandler) { target = t }
     func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) { target?.userContentController(ucc, didReceive: message) }
 }
+
+extension Notification.Name { static let susuruOpenURL = Notification.Name("susuruOpenURL") }

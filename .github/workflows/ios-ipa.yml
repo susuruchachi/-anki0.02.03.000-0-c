@@ -45,6 +45,13 @@ jobs:
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build | tail -60
           test -d build/Release-iphoneos/SusuruAnki.app
           mkdir -p Payload && cp -R build/Release-iphoneos/SusuruAnki.app Payload/
+          # ★【0.04.47】App Group の権限だけを書き込む（ウィジェットが先、アプリが後）
+          brew install ldid
+          APPEX=$(ls -d Payload/SusuruAnki.app/PlugIns/*.appex | head -1)
+          ls -la Payload/SusuruAnki.app/PlugIns/ || true
+          ldid -Sapp.entitlements "$APPEX/$(basename "$APPEX" .appex)"
+          ldid -Sapp.entitlements Payload/SusuruAnki.app/SusuruAnki
+          ldid -e Payload/SusuruAnki.app/SusuruAnki
           zip -qry susuruanki-ios.ipa Payload
           ls -la susuruanki-ios.ipa
       - uses: actions/upload-artifact@v4

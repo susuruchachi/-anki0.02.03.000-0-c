@@ -15,6 +15,7 @@ struct SusuruAnkiApp: App {
                 .ignoresSafeArea()
                 .background(Color(red: 8 / 255, green: 12 / 255, blue: 20 / 255))
                 .preferredColorScheme(.dark)
+                .onOpenURL { NotificationCenter.default.post(name: .susuruOpenURL, object: $0) } // ★【0.04.47】ウィジェットから
         }
     }
 }

@@ -9,7 +9,10 @@ targets:
   SusuruAnki:
     type: application
     platform: iOS
-    sources: [Sources]
+    sources: [Sources, Shared]
+    dependencies:
+      - target: SusuruWidgets
+        embed: true
     info:
       path: Sources/Info.plist
       properties:
@@ -31,6 +34,9 @@ targets:
         NSPhotoLibraryUsageDescription: 問題の画像を選ぶときに使います
         NSMicrophoneUsageDescription: 声で答えるときに使います
         ITSAppUsesNonExemptEncryption: false
+        CFBundleURLTypes:
+          - CFBundleURLName: io.github.susuruchachi.susuruanki
+            CFBundleURLSchemes: [susuruanki]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.susuruchachi.susuruanki
@@ -39,6 +45,30 @@ targets:
         MARKETING_VERSION: "0.0.1"
         CURRENT_PROJECT_VERSION: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGNING_ALLOWED: "NO"
+        CODE_SIGNING_REQUIRED: "NO"
+        CODE_SIGN_IDENTITY: ""
+  # ★【0.04.47】ホーム画面のウィジェット（連続記録・カレンダー・大事な予定・ランキング）
+  SusuruWidgets:
+    type: app-extension
+    platform: iOS
+    sources: [Widgets, Shared]
+    info:
+      path: Widgets/Info.plist
+      properties:
+        CFBundleDisplayName: すするanki
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.susuruchachi.susuruanki.widgets
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_VERSION: "5.0"
+        MARKETING_VERSION: "0.0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        SKIP_INSTALL: "YES"
         CODE_SIGNING_ALLOWED: "NO"
         CODE_SIGNING_REQUIRED: "NO"
         CODE_SIGN_IDENTITY: ""
