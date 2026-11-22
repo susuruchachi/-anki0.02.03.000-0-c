@@ -189,6 +189,10 @@ function appWidgetSync(now) {
         if (n > 1) data.foot = `すするanki ・ 残りの課題 ${n}つ`;
       }
       data.board = widgetBoardMine();
+      // ★【0.04.49】連続記録のウィジェットの「直近7日の🔥」：この2週間に解いた日
+      try { const from = streakShift(getTodayStr(), -14); data.studied = Object.keys(studyDays || {}).filter(k => k >= from && studyDayCount(studyDays[k]) > 0).sort(); } catch (e) {}
+      // ★【0.04.49】iOS アプリ：航海日誌のウィジェット（カレンダー・できた事日記）の分も
+      if (isIOSApp()) { try { data.koukai = koukaiWidgetData(); } catch (e) {} }
       try { if (typeof calWidgetData === 'function') data.cal = calWidgetData(); } catch (e) {} // ★【0.04.25】カレンダーのウィジェット
       try { if (typeof calStarWidgetData === 'function') data.stars = calStarWidgetData(); } catch (e) {} // ★【0.04.43】大事な予定のウィジェット
       if (_widgetFriends) data.board.rank = widgetRank(_widgetFriends.list), data.board.rankAt = _widgetFriends.at;
@@ -412,4 +416,40 @@ function alarmTest() {
   if (!appAlarmOk()) return;
   if (alarmStatus().notif === false) return alert('通知がオフなので鳴らせません。先に通知を許可してください。');
   try { window.SusuruApp.testAlarm('⏰ アラームのテスト', 'こんなふうに鳴ります。「止める」で止まります。'); } catch (e) {}
+}
+
+// ================================================================
+// ★【0.04.49】iOS アプリに入れた、航海日誌のウィジェット（カレンダー・できた事日記）に渡すもの
+//  形は航海日誌の Android のウィジェット（koukaiBuildWidgetData）と同じ：
+//   days：先月の1日から62日先までの、日ごとの予定 [{ s: 開始, e: 終了, n: 名前, i: 印 }]（すするanki のカレンダー。航海日誌と同期していれば、その予定も入っている）
+//   diary：今日から90日前までの、できた事日記 { 日付: { items, anki } }（susuru_anki_cal/{uid} の diary。航海日誌が書く）
+// ================================================================
+let _koukaiDiary = null, _koukaiDiaryAt = 0, _koukaiDiaryBusy = false;
+function koukaiSetDiary(d) { _koukaiDiary = d || {}; _koukaiDiaryAt = Date.now(); }
+function koukaiWidgetData() {
+  const today = calToday(), now = new Date();
+  const start = planDateStr(new Date(now.getFullYear(), now.getMonth() - 1, 1)), end = calAddDays(today, 62);
+  const all = calAllEvents(), days = {};
+  for (let ds = start, g = 0; ds <= end && g < 140; ds = calAddDays(ds, 1), g++) {
+    const list = calOn(ds, all).map(e => {
+      let lab = '';
+      if (calSpan(e) > 0) { try { const s0 = calInstanceStart(e, ds), e2 = s0 ? calInstanceEnd(e, s0) : ''; if (e2) { const d = planParseDate(e2); lab = `（〜${d.getMonth() + 1}/${d.getDate()}）`; } } catch (er) {} }
+      return { s: e.start || '', e: e.endTime || '', n: String(e.title || '').slice(0, 40) + lab, i: calType(e).icon };
+    });
+    if (list.length) days[ds] = list.sort((a, b) => (a.s || '').localeCompare(b.s || ''));
+  }
+  // 日記：航海日誌と同期していれば、その見張りが受け取ったもの。していなければ10分に1回読む
+  if (!_koukaiDiaryBusy && typeof currentUser !== 'undefined' && currentUser && (!_koukaiDiary || Date.now() - _koukaiDiaryAt > 600000) && !(typeof calLinkOn === 'function' && calLinkOn() && _koukaiDiary)) {
+    _koukaiDiaryBusy = true;
+    firestore.collection('susuru_anki_cal').doc(currentUser.uid).get()
+      .then(sn => { koukaiSetDiary((sn.exists && sn.data().diary) || {}); appWidgetSync(true); })
+      .catch(() => {}).finally(() => { _koukaiDiaryBusy = false; });
+  }
+  const from = calAddDays(today, -90), diary = {};
+  Object.entries(_koukaiDiary || {}).forEach(([k, e]) => {
+    if (k < from || k > end || !e) return;
+    const items = (e.items || []).map(x => String(x || '')).slice(0, 3);
+    if (items.some(x => x.trim()) || (e.anki !== null && e.anki !== undefined)) diary[k] = { items, anki: e.anki === undefined ? null : e.anki };
+  });
+  return { today, days, diary, at: Date.now() };
 }

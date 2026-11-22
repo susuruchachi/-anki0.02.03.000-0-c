@@ -893,6 +893,7 @@ function calStartLinkWatch() {
   if (typeof currentUser === 'undefined' || !currentUser || !calLinkOn()) return;
   _calLinkUnsub = firestore.collection(CAL_LINK_COL).doc(currentUser.uid).onSnapshot(snap => {
     _calLinkRemote = (snap.exists && snap.data().events) || {};
+    if (typeof koukaiSetDiary === 'function') { koukaiSetDiary((snap.exists && snap.data().diary) || {}); if (typeof isIOSApp === 'function' && isIOSApp() && typeof appWidgetSync === 'function') appWidgetSync(); } // ★【0.04.49】iOS のできた事日記のウィジェット
     _calLinkReady = true;
     // 向こうの方が新しい予定を、こちらに入れる
     let changed = false;

@@ -46,6 +46,8 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKNavig
     // ★【0.04.47】ウィジェットを押したとき（susuruanki://open?page=…）：そのページを開く
     @objc private func openFromWidget(_ n: Notification) {
         guard let u = n.object as? URL, let c = URLComponents(url: u, resolvingAgainstBaseURL: false) else { return }
+        // ★【0.04.49】航海日誌のウィジェット：Safari で航海日誌を開く
+        if u.scheme == "https" { UIApplication.shared.open(u); return }
         let page = c.queryItems?.first(where: { $0.name == "page" })?.value ?? ""
         let safe = page.range(of: "^pg[A-Za-z]+$", options: .regularExpression) != nil ? page : ""
         if safe.isEmpty { return }

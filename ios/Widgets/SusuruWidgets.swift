@@ -80,6 +80,7 @@ enum W {
     static func int(_ d: [String: Any], _ k: String) -> Int { (d[k] as? NSNumber)?.intValue ?? 0 }
     static func dbl(_ d: [String: Any], _ k: String) -> Double { (d[k] as? NSNumber)?.doubleValue ?? 0 }
     static func url(_ page: String) -> URL { URL(string: "susuruanki://open?page=\(page)")! }
+    static func dowOf(_ ds: String) -> String { guard let d = parse(ds) else { return "" }; return dow[Calendar.current.component(.weekday, from: d) - 1] }
 
     // 連続記録の状態：(火の絵, 数, 数の色, 一言, 背景)
     static func streakState(_ d: [String: Any], _ now: Date) -> (String, Int, Color, String, Color) {
@@ -104,6 +105,29 @@ struct NotLinked: View {
 }
 
 // ---------------- 🔥 連続記録 ----------------
+// ★【0.04.49】直近7日の🔥（アプリの連続記録の欄と同じ）
+struct WeekDots: View {
+    let studied: Set<String>
+    let now: Date
+    var size: CGFloat = 22
+    var body: some View {
+        HStack(spacing: size * 0.28) {
+            ForEach(0..<7, id: \.self) { j in
+                let ds = W.day(j - 6, now), on = studied.contains(ds), isToday = j == 6
+                VStack(spacing: 2) {
+                    ZStack {
+                        Circle().fill(on ? W.gold.opacity(0.28) : Color.white.opacity(0.07))
+                        if on { Text("🔥").font(.system(size: size * 0.55)) }
+                    }
+                    .frame(width: size, height: size)
+                    .overlay(Circle().stroke(isToday ? W.gold : .clear, lineWidth: 1.5))
+                    Text(W.dowOf(ds)).font(.system(size: max(8, size * 0.4))).foregroundStyle(isToday ? W.gold : W.sub)
+                }
+            }
+        }
+    }
+}
+
 struct StreakView: View {
     let e: SusuruEntry
     @Environment(\.widgetFamily) var family
@@ -116,16 +140,43 @@ struct StreakView: View {
             let t = W.str(p, "text"); if t.isEmpty { return "✅ 今週のプランは終わっています" }
             let dl = W.dbl(p, "deadline"); return t + (dl > 0 ? "（\(W.left(dl, e.date))）" : "")
         }()
-        VStack(alignment: .leading, spacing: 4) {
+        let studied = Set((e.data["studied"] as? [String]) ?? [])
+        let today = W.day(0, e.date)
+        let todayN = W.str(e.data, "todayDate") == today ? W.int(e.data, "today") : 0
+        let best = W.int(e.data, "best")
+        let small = family == .systemSmall, large = family == .systemLarge
+        VStack(alignment: .leading, spacing: large ? 10 : 4) {
             if e.data.isEmpty { NotLinked(linked: e.linked) } else {
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(fire).font(.system(size: family == .systemSmall ? 30 : 34))
-                    Text("\(num)").font(.system(size: family == .systemSmall ? 40 : 46, weight: .heavy, design: .rounded)).foregroundStyle(color)
+                    Text(fire).font(.system(size: small ? 30 : large ? 44 : 32))
+                    Text("\(num)").font(.system(size: small ? 40 : large ? 64 : 42, weight: .heavy, design: .rounded)).foregroundStyle(color)
                     Text("日").font(.headline).foregroundStyle(W.sub)
+                    if !small {
+                        Spacer(minLength: 4)
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("今日 \(todayN)問").font(.system(size: 13, weight: .bold)).foregroundStyle(todayN > 0 ? W.gold : W.sub)
+                            if best > 0 { Text("最長 \(best)日").font(.system(size: 11)).foregroundStyle(W.sub) }
+                        }
+                    }
                 }
-                Text(status).font(.system(size: family == .systemSmall ? 12 : 14, weight: .semibold)).foregroundStyle(W.text).lineLimit(3)
-                if family != .systemSmall, !planText.isEmpty {
-                    Text(planText).font(.system(size: 13)).foregroundStyle(W.blue).lineLimit(2)
+                Text(status).font(.system(size: small ? 12 : large ? 16 : 13, weight: .semibold)).foregroundStyle(W.text).lineLimit(small ? 3 : 2)
+                if !small { WeekDots(studied: studied, now: e.date, size: large ? 30 : 20) }
+                if large {
+                    if !planText.isEmpty {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("📚 週間プラン").font(.system(size: 12, weight: .bold)).foregroundStyle(W.sub)
+                            Text(planText).font(.system(size: 15)).foregroundStyle(W.blue).lineLimit(3)
+                        }
+                    }
+                    let b = (e.data["board"] as? [String: Any]) ?? [:]
+                    if W.int(b, "week") > 0 || !W.str(b, "drill").isEmpty {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("📅 今週 \(W.int(b, "week"))問").font(.system(size: 13)).foregroundStyle(W.text)
+                            if !W.str(b, "drill").isEmpty { Text(W.str(b, "drill")).font(.system(size: 13)).foregroundStyle(W.sub).lineLimit(1) }
+                        }
+                    }
+                } else if !small, !planText.isEmpty {
+                    Text(planText).font(.system(size: 12)).foregroundStyle(W.blue).lineLimit(1)
                 }
                 Spacer(minLength: 0)
                 Text(W.str(e.data, "foot").isEmpty ? "すするanki" : W.str(e.data, "foot")).font(.system(size: 10)).foregroundStyle(W.dim).lineLimit(1)
@@ -303,7 +354,7 @@ struct StreakWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "SusuruStreak", provider: SusuruProvider()) { StreakView(e: $0) }
             .configurationDisplayName("すするanki 連続記録").description("連続記録と、週間プランの次の課題")
-            .supportedFamilies([.systemSmall, .systemMedium])
+            .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
     }
 }
 struct CalendarWidget: Widget {
@@ -335,5 +386,7 @@ struct SusuruWidgets: WidgetBundle {
         CalendarWidget()
         StarWidget()
         BoardWidget()
+        KoukaiCalendarWidget()
+        KoukaiDiaryWidget()
     }
 }
