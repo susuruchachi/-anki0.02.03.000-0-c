@@ -1,7 +1,7 @@
 // ★★★ すするanki0.02.51-g - ソーシャル機能（ランキング・フレンド・チャット・成績比較・オンライン対戦） ★★★
 
 // ★ グローバル変数の安全な初期化
-window.shareStats = localStorage.getItem('shareStats') === 'true';
+window.shareStats = localStorage.getItem('shareStats') !== 'false';
 
 // ★ 本日のデイリーランキング表示
 let rankingMode = 'quiz'; // ★【0.03.39】'quiz'（通常のクイズ）／'drill'（暗記テスト）
@@ -356,7 +356,7 @@ async function sendChatMessage() {
 // ★ 成績保存
 // ★【0.03.39】mode：'drill' なら暗記テストの成績として別に記録する（通常のクイズとは混ぜない）
 async function recordCategoryScore(catName, isCorrect, mode) {
-  const isShared = typeof window.shareStats !== 'undefined' ? window.shareStats : (localStorage.getItem('shareStats') === 'true');
+  const isShared = typeof window.shareStats !== 'undefined' ? window.shareStats : (localStorage.getItem('shareStats') !== 'false');
   if(!currentUser || !isShared) return;
 
   const d = getTodayStr();

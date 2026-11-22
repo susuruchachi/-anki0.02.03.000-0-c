@@ -13,7 +13,7 @@ const RACE_PTS = { words: 30, onTime: 10, chants: 20, examples: 20, sunday: 15, 
 
 function raceWeekKey(now = new Date()) { return planDateStr(planMonday(now)); }
 function raceDocId(uid, root) { return 'race_' + uid + '_' + String(root).replace(/[\/\s.#$\[\]]+/g, '_').slice(0, 80); }
-function raceShareOn() { return typeof window.shareStats !== 'undefined' ? !!window.shareStats : localStorage.getItem('shareStats') === 'true'; }
+function raceShareOn() { return typeof window.shareStats !== 'undefined' ? !!window.shareStats : localStorage.getItem('shareStats') !== 'false'; }
 
 // 暗記テストの今週の正解・不正解（drillRecord から）。card.drillStats に週ごとの数を持つ（カードの成績と一緒に同期）
 function raceCountDrill(st, ok) {

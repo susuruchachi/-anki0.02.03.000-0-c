@@ -277,7 +277,7 @@ function loadData() {
     setTimeout(() => alert('⚠️ この端末の保存データを読み込めませんでした。\n読めなかったデータは別の場所に退避してあります。ログインしているならクラウドから復元されます。'), 0);
   }
   migrateSyncMeta();
-  try { shareStats = localStorage.getItem('shareStats') === 'true'; } catch(e){}
+  try { shareStats = localStorage.getItem('shareStats') !== 'false'; } catch(e){}
   // ★【0.02.58-g】カテゴリー選択と最終ページを復元
   try {
     const savedScope = localStorage.getItem(STORAGE_KEY + '_scopePath');
