@@ -1,4 +1,5 @@
 # ★【0.04.45】すするanki の iOS・iPadOS アプリ（自分の端末に SideStore で入れる用）
+# ★【0.04.50】ランチャー「すする＆航海」にした：すするanki と航海日誌を1つのアプリで（バンドル ID は前と同じ。上から入れればデータはそのまま）
 # GitHub Actions（ios-ipa.yml）で XcodeGen を使ってプロジェクトを作り、署名なしの .ipa を作る（署名は SideStore が自分の Apple ID でする）
 name: SusuruAnki
 options:
@@ -16,8 +17,8 @@ targets:
     info:
       path: Sources/Info.plist
       properties:
-        CFBundleDisplayName: すするanki
-        CFBundleName: すするanki
+        CFBundleDisplayName: すする＆航海
+        CFBundleName: すする＆航海
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen:
@@ -29,7 +30,7 @@ targets:
         UIRequiresFullScreen: false
         UIStatusBarStyle: UIStatusBarStyleLightContent
         UIViewControllerBasedStatusBarAppearance: false
-        NSAlarmKitUsageDescription: 連続記録が途切れそうなときや、予定の前にアラームを鳴らします
+        NSAlarmKitUsageDescription: すするanki の連続記録が途切れそうなときや、予定の前にアラームを鳴らします
         NSCameraUsageDescription: 問題の写真を読み取るときに使います
         NSPhotoLibraryUsageDescription: 問題の画像を選ぶときに使います
         NSMicrophoneUsageDescription: 声で答えるときに使います
@@ -37,6 +38,17 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: io.github.susuruchachi.susuruanki
             CFBundleURLSchemes: [susuruanki]
+        # ★【0.04.50】ホーム画面のアイコンの長押し
+        UIApplicationShortcutItems:
+          - UIApplicationShortcutItemType: anki
+            UIApplicationShortcutItemTitle: すするanki
+            UIApplicationShortcutItemIconSymbolName: book.fill
+          - UIApplicationShortcutItemType: koukai
+            UIApplicationShortcutItemTitle: 航海日誌
+            UIApplicationShortcutItemIconSymbolName: calendar
+          - UIApplicationShortcutItemType: launcher
+            UIApplicationShortcutItemTitle: ランチャー
+            UIApplicationShortcutItemIconSymbolName: square.grid.2x2
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.susuruchachi.susuruanki
@@ -56,7 +68,7 @@ targets:
     info:
       path: Widgets/Info.plist
       properties:
-        CFBundleDisplayName: すするanki
+        CFBundleDisplayName: すする＆航海
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:

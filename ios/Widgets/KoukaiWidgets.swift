@@ -1,6 +1,7 @@
 // ★【0.04.49】航海日誌のウィジェット（iOS では航海日誌のアプリを分けないので、すするanki のアプリに入れる）
-// 中身は航海日誌の Android のウィジェット（CalendarWidget・DiaryWidget）と同じ。データは app-bridge.js の koukaiWidgetData（widget.json の koukai）
-// 押すと Safari で航海日誌を開く（その日・できた事の欄）
+// 中身は航海日誌の Android のウィジェット（CalendarWidget・DiaryWidget）と同じ。
+// ★【0.04.50】データは航海日誌のページ（ランチャーの中の航海日誌）が作る koukai.json。まだ無ければ、すするanki の koukaiWidgetData（widget.json の koukai）
+// 押すとランチャーの中の航海日誌を開く（その日・できた事の欄）
 
 import SwiftUI
 import WidgetKit
@@ -15,7 +16,6 @@ enum K {
     static let cell = Color(red: 0xC9 / 255, green: 0xA1 / 255, blue: 0x5C / 255)
     static let ink = Color(red: 0x13 / 255, green: 0x1E / 255, blue: 0x29 / 255)
     static let sun = Color(red: 0xC0 / 255, green: 0x60 / 255, blue: 0x5A / 255)
-    static let site = "https://koukai-nisshi-calendar.vercel.app/"
 
     static func data(_ e: SusuruEntry) -> [String: Any] { (e.data["koukai"] as? [String: Any]) ?? [:] }
     static func events(_ k: [String: Any], _ ds: String) -> [[String: Any]] { ((k["days"] as? [String: Any])?[ds] as? [[String: Any]]) ?? [] }
@@ -30,7 +30,7 @@ enum K {
         while n < 400, doneCount(diary(k, W.day(off, now))) > 0 { n += 1; off -= 1 }
         return n
     }
-    static func url(_ q: String) -> URL { URL(string: site + "?" + q)! }
+    static func url(_ q: String) -> URL { URL(string: "susuruanki://open?app=koukai&" + q)! }
 }
 
 // ---------------- ⚓ 航海日誌のカレンダー ----------------
@@ -61,7 +61,7 @@ struct KoukaiCalendarView: View {
                 if !todays.isEmpty { Text("今日 \(todays.count)件").font(.system(size: 10)).foregroundStyle(K.sub) }
             }
             if k.isEmpty {
-                Text(e.data.isEmpty ? "すするanki を一度開くと、ここに出ます" : "すするanki を開くと、予定が届きます").font(.caption).foregroundStyle(K.sub)
+                Text("アプリで航海日誌を一度開くと、ここに出ます").font(.caption).foregroundStyle(K.sub)
             } else {
                 HStack(spacing: 0) {
                     ForEach(0..<7, id: \.self) { i in
@@ -132,7 +132,7 @@ struct KoukaiDiaryView: View {
                 if st > 0 { Text("\(st)日連続").font(.system(size: 10, weight: .bold)).foregroundStyle(K.brass) }
             }
             if k.isEmpty {
-                Text("すするanki を一度開くと、ここに出ます").font(.caption).foregroundStyle(K.sub)
+                Text("アプリで航海日誌を一度開くと、ここに出ます").font(.caption).foregroundStyle(K.sub)
             } else if done == 0 {
                 Text("まだ書いていません").font(.system(size: 11)).foregroundStyle(K.sub)
                 Text("どんなに小さなことでも大丈夫。\nタップして、できた事を3つ書こう ✏️").font(.system(size: small ? 11 : 13)).foregroundStyle(K.text).lineLimit(small ? 4 : 3)

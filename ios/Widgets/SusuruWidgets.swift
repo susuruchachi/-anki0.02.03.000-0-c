@@ -23,10 +23,17 @@ struct SusuruProvider: TimelineProvider {
         for _ in 0..<32 { t = t.addingTimeInterval(15 * 60); dates.append(t) }
         if let mid = cal.nextDate(after: now, matching: DateComponents(hour: 0, minute: 0, second: 30), matchingPolicy: .nextTime) { dates.append(mid) }
         dates.sort()
-        let d = SharedStore.read()
-        completion(Timeline(entries: dates.map { SusuruEntry(date: $0, data: d ?? [:], linked: SharedStore.fileURL != nil) }, policy: .atEnd))
+        let d = Self.load()
+        completion(Timeline(entries: dates.map { SusuruEntry(date: $0, data: d, linked: SharedStore.fileURL != nil) }, policy: .atEnd))
     }
-    private func entry(_ date: Date) -> SusuruEntry { SusuruEntry(date: date, data: SharedStore.read() ?? [:], linked: SharedStore.fileURL != nil) }
+    private func entry(_ date: Date) -> SusuruEntry { SusuruEntry(date: date, data: Self.load(), linked: SharedStore.fileURL != nil) }
+    // ★【0.04.50】航海日誌の分（koukai）は、航海日誌のページが作ったもの（koukai.json）があればそれにする
+    static func load() -> [String: Any] {
+        var d = SharedStore.read() ?? [:]
+        let k = SharedStore.koukaiData(anki: d)
+        if !k.isEmpty { d["koukai"] = k }
+        return d
+    }
 }
 
 // ---------------- 共通 ----------------
