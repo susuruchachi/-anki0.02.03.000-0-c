@@ -48,6 +48,19 @@ final class LauncherModel: ObservableObject {
             let done = Self.doneCount((k["diary"] as? [String: Any])?[today])
             l[.koukai] = (n > 0 ? "今日の予定 \(n)件" : "今日の予定はありません") + "・できた事 \(done)/3" + (done >= 3 ? " 🎉" : "")
         }
+        // ★【0.04.51】すする帳簿
+        if let kk = SharedStore.readKashikari() {
+            if (kk["signedIn"] as? Bool) == true {
+                let yen = { (k: String) -> String in
+                    let f = NumberFormatter(); f.numberStyle = .decimal; f.locale = Locale(identifier: "ja_JP")
+                    return "¥" + (f.string(from: (kk[k] as? NSNumber) ?? 0) ?? "0")
+                }
+                let claims = (kk["claims"] as? NSNumber)?.intValue ?? 0
+                l[.kashikari] = "返ってくる \(yen("inSum"))・返す \(yen("outSum"))" + (claims > 0 ? "\n🔔「返したよ」が \(claims)件 届いています" : "")
+            } else {
+                l[.kashikari] = "ログインすると、ここに貸し借りが出ます"
+            }
+        }
         lines = l
         Task { await refreshAuth() }
     }
@@ -85,11 +98,11 @@ struct LauncherHome: View {
                         Button { open(a) } label: { tile(a) }.buttonStyle(.plain)
                     }
 
-                    Text("アプリを開いているときは、画面のはしの ▦ ボタンでここに戻れます。長押しで、もう1つのアプリにすぐ切りかえ。ドラッグで好きな場所に動かせます。ホーム画面のアイコンの長押しからも開けます。")
+                    Text("アプリを開いているときは、画面のはしの ▦ ボタンでここに戻れます。長押しで、ほかのアプリにすぐ切りかえ。ドラッグで好きな場所に動かせます。ホーム画面のアイコンの長押しからも開けます。")
                         .font(.footnote).foregroundStyle(sub)
 
                     settings
-                    Text("すする＆航海 \(version)").font(.caption2).foregroundStyle(sub.opacity(0.7)).frame(maxWidth: .infinity)
+                    Text("すするアプリ \(version)").font(.caption2).foregroundStyle(sub.opacity(0.7)).frame(maxWidth: .infinity)
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 32)

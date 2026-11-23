@@ -1,5 +1,5 @@
 # ★【0.04.45】すするanki の iOS・iPadOS アプリ（自分の端末に SideStore で入れる用）
-# ★【0.04.50】ランチャー「すする＆航海」にした：すするanki と航海日誌を1つのアプリで（バンドル ID は前と同じ。上から入れればデータはそのまま）
+# ★【0.04.50】ランチャーにした：すするanki と航海日誌（★【0.04.51】とすする帳簿）を1つのアプリ「すするアプリ」で（バンドル ID は前と同じ。上から入れればデータはそのまま）
 # GitHub Actions（ios-ipa.yml）で XcodeGen を使ってプロジェクトを作り、署名なしの .ipa を作る（署名は SideStore が自分の Apple ID でする）
 name: SusuruAnki
 options:
@@ -17,8 +17,8 @@ targets:
     info:
       path: Sources/Info.plist
       properties:
-        CFBundleDisplayName: すする＆航海
-        CFBundleName: すする＆航海
+        CFBundleDisplayName: すするアプリ
+        CFBundleName: すするアプリ
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen:
@@ -46,6 +46,9 @@ targets:
           - UIApplicationShortcutItemType: koukai
             UIApplicationShortcutItemTitle: 航海日誌
             UIApplicationShortcutItemIconSymbolName: calendar
+          - UIApplicationShortcutItemType: kashikari
+            UIApplicationShortcutItemTitle: すする帳簿
+            UIApplicationShortcutItemIconSymbolName: yensign.circle.fill
           - UIApplicationShortcutItemType: launcher
             UIApplicationShortcutItemTitle: ランチャー
             UIApplicationShortcutItemIconSymbolName: square.grid.2x2
@@ -68,7 +71,7 @@ targets:
     info:
       path: Widgets/Info.plist
       properties:
-        CFBundleDisplayName: すする＆航海
+        CFBundleDisplayName: すするアプリ
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:

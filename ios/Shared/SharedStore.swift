@@ -1,4 +1,4 @@
-// ★【0.04.47】アプリとウィジェットで分け合うデータ（App Group の中の widget.json。★【0.04.50】航海日誌の koukai.json も）
+// ★【0.04.47】アプリとウィジェットで分け合うデータ（App Group の中の widget.json。★【0.04.50】航海日誌の koukai.json・★【0.04.51】すする帳簿の kashikari.json も）
 // データの形は Android のウィジェットと同じ（app-bridge.js の appWidgetSync が作る）。
 // 自分で入れたアプリ（iloader・SideStore）は App Group の名前が書きかえられることがあるので、
 // 入れたときの証明書（embedded.mobileprovision）に書いてある App Group を先に探す
@@ -55,6 +55,11 @@ enum SharedStore {
     @discardableResult
     static func writeKoukai(_ json: String) -> Bool { write(json, to: "koukai.json") }
     static func readKoukai() -> [String: Any]? { read("koukai.json") }
+
+    // ★【0.04.51】すする帳簿のページ（app-bridge.js の kkBuildWidgetData）が作るもの：{ signedIn, inSum, outSum, lines, claims, kb, today, at }
+    @discardableResult
+    static func writeKashikari(_ json: String) -> Bool { write(json, to: "kashikari.json") }
+    static func readKashikari() -> [String: Any]? { read("kashikari.json") }
 
     // 航海日誌のウィジェット・通知に使うもの：航海日誌のページが作ったもの（航海日誌の予定・すするanki の見るだけの予定・日記）。
     // まだ無ければ、すするanki のページが作った分（widget.json の koukai：すするanki のカレンダー＝航海日誌と同期していればその予定も）

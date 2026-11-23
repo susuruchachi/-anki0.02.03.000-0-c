@@ -1,7 +1,7 @@
-// ★【0.04.50】ランチャー：すするanki と航海日誌を、1つのアプリの中で別々のアプリとして使う
+// ★【0.04.50】ランチャー：すするanki と航海日誌（★【0.04.51】とすする帳簿）を、1つのアプリの中で別々のアプリとして使う
 //  ・はじめはランチャーの画面（LauncherHome）。押したアプリを全画面で出す（設定で「前に開いていたアプリをすぐ出す」にもできる）
-//  ・アプリを出しているときは、画面のはしに小さな ▦ ボタン（SwitcherButton）：押すとランチャー、長押しでもう1つのアプリへ、ドラッグで動かせる
-//  ・2つのアプリはどちらも開いたまま裏に置いておく（切りかえてもそのまま。開いたときに、もう1つも裏で読み込む＝ウィジェット・通知のデータが新しくなる）
+//  ・アプリを出しているときは、画面のはしに小さな ▦ ボタン（SwitcherButton）：押すとランチャー、長押しでほかのアプリへ、ドラッグで動かせる
+//  ・アプリはどれも開いたまま裏に置いておく（切りかえてもそのまま。開いたときに、ほかのものも裏で読み込む＝ウィジェット・通知のデータが新しくなる）
 
 import SwiftUI
 import UIKit
@@ -38,7 +38,7 @@ final class LauncherController: UIViewController {
         show(Router.pending == nil && model.autoOpenLast ? last : nil, animated: false)
         Router.handler = { [weak self] in self?.handle($0) }
 
-        // もう1つ（まだ開いていないもの）も、少ししてから裏で読み込んでおく
+        // ほか（まだ開いていないもの）も、少ししてから裏で読み込んでおく
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
             for a in MiniApp.allCases { _ = self?.web(a) }
         }

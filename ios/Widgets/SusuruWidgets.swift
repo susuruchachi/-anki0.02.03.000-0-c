@@ -32,6 +32,7 @@ struct SusuruProvider: TimelineProvider {
         var d = SharedStore.read() ?? [:]
         let k = SharedStore.koukaiData(anki: d)
         if !k.isEmpty { d["koukai"] = k }
+        if let kk = SharedStore.readKashikari() { d["kashikari"] = kk } // ★【0.04.51】すする帳簿
         return d
     }
 }
@@ -395,5 +396,6 @@ struct SusuruWidgets: WidgetBundle {
         BoardWidget()
         KoukaiCalendarWidget()
         KoukaiDiaryWidget()
+        KashikariWidget()
     }
 }
