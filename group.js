@@ -28,6 +28,7 @@ function startGroupWatch() {
     myGroups = snap.docs.map(d => Object.assign({ id: d.id }, d.data())).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
     try { localStorage.setItem(GROUP_CACHE_KEY, JSON.stringify(myGroups)); } catch (e) {}
     groupApplyEditRights();
+    if (typeof planSyncGroupPlans === 'function') { try { planSyncGroupPlans(); } catch (e) { console.warn(e); } } // ★【0.04.39】グループの週間プラン
     renderGroupCard();
     groupRefreshOpenSheet();
     if (typeof calOnGroupsChanged === 'function') calOnGroupsChanged();
@@ -132,6 +133,8 @@ function groupOpen(id) {
     <div class="hint-small" style="margin-bottom:4px;">メンバーは誰でも編集できます。🔗 のリンクをメンバー以外が開くと、見るだけ（内容の変更は届きます）。</div>
     ${cats}
     <button class="btn btn-secondary" style="margin-top:6px;" onclick="groupShareCatPick(${jsArg(id)})">＋ 自分のフォルダーを共有</button>
+    <div class="section-label" style="margin-top:12px;">📚 グループの週間プラン</div>${groupPlansHTML(g)}
+    <button class="btn btn-secondary" style="margin-top:6px;" onclick="groupClose(); openPage('pgDrill'); setTimeout(() => { const d = document.querySelector('#drillPlanWrap details'); if (d) d.open = true; planEdit('new', ${jsArg(id)}); const el = document.getElementById('planSettings'); if (el) el.scrollIntoView({ block: 'start' }); }, 300)">＋ グループの週間プランを作る</button>
     <div class="section-label" style="margin-top:12px;">📅 グループの予定</div>${evs || '<div class="hint-small">まだありません。</div>'}
     <button class="btn btn-secondary" style="margin-top:6px;" onclick="groupClose(); openCalendar(); calNewEvent(null, ${jsArg(id)})">＋ グループの予定を追加</button>
     <div style="display:flex; gap:8px; margin-top:14px;">
@@ -244,4 +247,16 @@ async function groupUnshareCat(gid, docId) {
     await firestore.collection(GROUP_COL).doc(gid).update({ cats: (g.cats || []).filter(x => x.id !== docId), updatedAt: Date.now() });
     await firestore.collection('susuru_anki_shared').doc(docId).update({ groupId: '', groupName: '' }).catch(() => {});
   } catch (e) { alert('⚠️ ' + (e.code || e.message)); }
+}
+
+// ★【0.04.39】グループの週間プランの一覧（グループの画面）
+function groupPlansHTML(g) {
+  const list = Object.entries(g.plans || {}).filter(([, p]) => p && !p.deleted);
+  if (!list.length) return '<div class="hint-small">まだありません。</div>';
+  const P = typeof studyPlan !== 'undefined' ? (normalizeStudyPlans(studyPlan).plans || {}) : {};
+  return list.map(([pid, p]) => {
+    const mine = P[typeof planGroupId === 'function' ? planGroupId(g.id, pid) : ''];
+    const st = !p.root || !categories.includes(p.root) ? '📥 単語帳のフォルダーを取り込むと使えます' : mine && mine.optOut ? '🙈 自分はやめています' : '✅ 使っています';
+    return `<div class="group-cat"><div style="min-width:0;"><b>📚 ${escapeHtml(p.root || '')}</b><div class="hint-small">${escapeHtml(p.byName || '')}${p.byName ? ' さんが作成・' : ''}単語は${PLAN_DAYS[p.wordsFrom ?? 2]}曜から（${escapeHtml(typeof planDueText === 'function' ? planDueText(p) : '')}）・${st}</div></div></div>`;
+  }).join('');
 }

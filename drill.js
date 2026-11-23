@@ -19,9 +19,14 @@ const dKey = s => s.it ? s.it.id : 'c:' + s.ck.key;
 
 // ---------------- カードからグループを作る ----------------
 function drillIsWordCard(q) {
-  return !q.kind && !(Array.isArray(q.choices) && q.choices.length) && String(q.question || '').trim() && String(q.answer || '').trim()
-    && !(typeof hasRichBlock === 'function' && hasRichBlock(q.answer));
+  return !q.kind && !(Array.isArray(q.choices) && q.choices.length) && !!String(q.question || '').trim() && drillTextOf(q.answer).trim() !== '';
 }
+// ★【0.04.38】問題・答えに漢文の図・構造式があるカードも出す。答えは図の外の文字で書いて判定し、読み上げも図の外の文字だけ
+//  （図だけの答えは文字で書けないので、今まで通り出さない）。図は問題の中・答えの下に描く
+function drillHasRich(t) { return typeof hasRichBlock === 'function' && hasRichBlock(t); }
+function drillTextOf(t) { return drillHasRich(t) ? richStripBlocks(t) : String(t == null ? '' : t); }
+function drillWordHTML(it) { const q = it && it.card ? it.card.question : ''; return drillHasRich(q) ? richTextHTML(q) : dE(it ? it.w : ''); }
+function drillFigHTML(card) { return card && drillHasRich(card.answer) ? richBlocksHTML(card.answer) : ''; }
 // 熟語・チャンク（communicate with A など）か。★【0.03.47】元の試作と同じく、暗記テストにも出す（週間プランのチャンツにも入る）
 function drillIsPhraseCard(q) {
   const w = String(q.question || '').trim();
@@ -56,7 +61,7 @@ function drillBuild(cat) {
     if (!g) return;
     groupOf[c] = g;
     // ★【0.04.00】「名　進歩　自　進歩する」のような品詞1文字の答えは、はじめから (名詞)進歩/(自動詞)… の形にしておく（AI への指示・表示も同じ形に）
-    words.forEach(q => g.items.push({ id: q.id, w: q.question, m: (typeof posAbbrevAnswer === 'function' && posAbbrevAnswer(q.answer)) || q.answer, card: q, o: o++ }));
+    words.forEach(q => { const a = drillTextOf(q.answer), w = drillTextOf(q.question) || (typeof richTextToSpeech === 'function' ? richTextToSpeech(q.question) : q.question); g.items.push({ id: q.id, w, m: (typeof posAbbrevAnswer === 'function' && posAbbrevAnswer(a)) || a, card: q, o: o++ }); });
     checks.forEach(q => g.checks.push(q));
   });
   DI = {}; DCK = {};
@@ -256,7 +261,7 @@ function drillHome() {
       <button class="btn btn-start" style="margin-top:10px;" onclick="drillStart()" ${words + checks ? '' : 'disabled'}>🚀 ${d ? '最初から始める' : '開始'}</button>
       ${drillAiOk() ? '' : '<div class="drill-warn">⚠️ AI が使えないため、単語帳の訳と同じ言葉だけを正解にします（設定 → 🤖 AI でキーを入れると、言い換えの判定・4択・解説・質問が使えます）</div>'}
       ${others.length ? `<div class="hint-small" style="margin-top:10px;">ほかのフォルダーの途中経過：</div><div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:4px;">${others.map(k => `<button class="chip" onclick="drillSetCategory(${jsArg(k)})">📁 ${dE(k || 'すべて')}（${all[k].r}周目・残り${left(all[k])}）</button>`).join('')}</div>` : ''}
-      <div class="drill-sub"><button class="chip" onclick="vtOpen()">📄 テキストから問題を作る</button></div>
+      <div class="drill-sub"><button class="chip" onclick="openCardMode()">🃏 カードモード（めくって覚える）</button> <button class="chip" onclick="vtOpen()">📄 テキストから問題を作る</button></div>
       <details class="drill-howto"><summary>ℹ️ 暗記テストの進み方</summary>
         <div class="hint-small">・グループ（フォルダー）ごとに、単語の<b>全部の意味</b>を答えます（言い換えても意味が変わらない訳は、どれか1つで OK。「完了、存続」「完了存続」のようにまとめて答えても OK）<br>・動詞は、自動詞か他動詞かも聞きます<br>・間違えたら、その場でもう一度出ます。グループの最後に、そのグループで間違えた単語と Check!（Review Test）<br>・1周目で間違えた問題を2周目で…と、全部〇になるまで続けます。2周目はグループの切れ目に導入の文<br>・正解・不正解の回数は、暗記テストだけで数えます（いつものレベル・成績とは別）</div>
       </details>
@@ -610,7 +615,7 @@ function drillDraw() {
   if (dView !== null && !DH[dView]) dView = null;
   if (DS.hdr) { dst.h = `<div class="card drill-group"><b>📁 ${dE(DS.hdr.name)}</b><div class="hint-small">${DS.hdr.items.length}語${DS.hdr.chk.length ? ` ・ Check! ${DS.hdr.chk.length}問` : ''}</div>${DS.hdr.intro && DS.r === 1 ? `<div class="drill-intro hint-small">📖 ${drillIntroHTML(DS.hdr.intro)}</div>` : ''}</div>`; DS.hdr = null; }
   const c = dcur; let b = '';
-  const W = it => `${showsCardNo(it.card) ? `<div class="card-no drill-no">No.${dE(cardNoText(it.card.no))}</div>` : ''}<div class="drill-word">${dE(it.w)} <button class="chip" style="vertical-align:middle;" onclick="drillSpeakQ()" title="読み上げる">🔊</button></div>`;
+  const W = it => `${showsCardNo(it.card) ? `<div class="card-no drill-no">No.${dE(cardNoText(it.card.no))}</div>` : ''}<div class="drill-word">${drillWordHTML(it)} <button class="chip" style="vertical-align:middle;" onclick="drillSpeakQ()" title="読み上げる">🔊</button></div>`;
   if (dView !== null) b = drillHistHTML();
   else if (c.t === 'gread') {
     const q = dst.giq, intro = `<div class="drill-intro">${drillIntroHTML(c.g.intro)}</div>`;
@@ -635,6 +640,7 @@ function drillDraw() {
   else if (dst.ph === 2) b = `<div class="card">${W(c.it)}<p>【${dE(dst.z.k)}】この単語の${dE(dst.z.k)}として正しいものを選んでください。</p>${dst.op.map((o, i) => `<button class="btn btn-secondary drill-opt" onclick="drillCh(${i})">${'①②③④'[i]} ${dE(o)}</button>`).join('')}</div>`;
   const A = document.getElementById('drillApp');
   A.innerHTML = `<div class="drill-top"><span class="hint-small">${drillLeftText()}</span><span style="display:flex; gap:6px;">${dView === null && drillHistLimit() >= 0 ? '<button class="chip" onclick="drillHistBack()" title="前の問題の解説に戻る">◀ 前の解説</button>' : ''}<button class="chip" onclick="drillToggleTts()" title="読み上げのオン・オフ">${drillTtsOn() ? '🔊' : '🔇'}</button><button class="chip" onclick="drillPause()">⏸ 一時離脱</button><button class="chip" onclick="drillQuit()">🏁 やめる</button></span></div>${dst.h || ''}${b}`;
+  if (typeof hydrateRich === 'function') { try { hydrateRich(A); } catch (e) {} } // ★【0.04.38】構造式・長い漢文の段組み
   const i = document.getElementById('drillInput') || document.getElementById('drillQaInput');
   if (i && i.id === 'drillInput' && dst.draft) { i.value = dst.draft; dst.draft = ''; }
   if (i) i.focus();
@@ -689,7 +695,8 @@ async function drillJudgeCore(it, sn, st, v) {
     const ex = !!(st.extra && st.extra.length), many = Object.values(st.at).some(n => n >= 3);
     const none = !hs.length && !(r.extra && r.extra.length);
     if (r.form || r.wrong || many || none || (st.mn === 'bad' && !ex)) {
-      return { status: 'wrong', tip: r.form ? '品詞（語尾）の形が合っていません。' : r.wrong ? (drillAiOk() ? '意味が違います。' : '単語帳の訳と違います（AI が使えないため、言い換えは判定できません）。') : none ? '他の意味を答えられませんでした。' : many ? '単語帳の訳を思い出せませんでした。' : '自動詞・他動詞の言及が違います。' };
+      // ★【0.04.31】form：意味は合っていて、品詞（語尾）の形だけがちがう（カードモードでは「もう一度」にする）
+      return { status: 'wrong', form: !!r.form && !r.wrong && !many && !none, tip: r.form ? '品詞（語尾）の形が合っていません。' : r.wrong ? (drillAiOk() ? '意味が違います。' : '単語帳の訳と違います（AI が使えないため、言い換えは判定できません）。') : none ? '他の意味を答えられませんでした。' : many ? '単語帳の訳を思い出せませんでした。' : '自動詞・他動詞の言及が違います。' };
     }
     if (st.cv.length < sn.length) {
       return { status: 'more', hs, msg: hs.some(h => !h.exact) ? '意味は合っています。単語帳に載っている訳で答えてください。' : ex && !hs.length ? '辞書的には正しい意味ですが、単語帳には載っていません。単語帳に載っている意味を答えてください。' : '' };
@@ -912,7 +919,7 @@ async function drillFin(ok, ans, tip) {
   if (c.it && dst.alt && dst.alt.length && drillAiOk()) { drillBusy(); try { dst.ex = await drillExpl(c.it); } catch (e) { dst.ex = []; } dlock = false; }
   let official;
   if (ans) official = dE(ans);
-  else { const seg = parseStructuredAnswer(c.it.m); official = seg ? formatStructuredAnswerHTML(seg) : dE(c.it.m); }
+  else { const seg = parseStructuredAnswer(c.it.m); official = (seg ? formatStructuredAnswerHTML(seg) : dE(c.it.m)) + drillFigHTML(c.it.card); }
   const ns = [];
   if (tip !== undefined) { if (tip) ns.push(tip); }
   else { if (dst.tip) ns.push(dst.tip); if (c.it && c.it.card.note) ns.push(c.it.card.note); }
@@ -921,7 +928,7 @@ async function drillFin(ok, ans, tip) {
   ((c.it && DS.ct[c.it.id]) || []).forEach(t => ns.push(t));
   dst.ph = 9;
   if (drillTtsOn()) drillSpeakA();
-  const core = `${c.it ? `<div class="drill-word">${dE(c.it.w)}</div>` : `<p class="drill-q">${dE(c.ck.q)}</p>`}
+  const core = `${c.it ? `<div class="drill-word">${drillWordHTML(c.it)}</div>` : `<p class="drill-q">${dE(c.ck.q)}</p>`}
     <p>【判定】 <b class="${ok ? 'drill-ok' : 'drill-ng'}">${ok ? '〇' : '×'}</b>${!ok ? '<span class="hint-small">（あとでもう一度出ます）</span>' : ''}${drillStatsText(c)}</p>
     ${dst.given && dst.given.length ? `<div class="drill-given">【あなたの答え】 ${dst.given.map(dE).join(' ／ ')}</div>` : ''}
     <div>【公式の答え】 <button class="chip" onclick="drillSpeakA()" title="答えを読み上げる">🔊</button> ${official}</div>

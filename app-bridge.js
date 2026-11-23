@@ -6,6 +6,9 @@
 //  ・戻るボタン：メニュー・ダイアログを閉じる → 前の画面 → （何も無ければアプリを裏に回す）
 // ================================================================
 function isAndroidApp() { return typeof window.SusuruApp !== 'undefined' && !!window.SusuruApp; }
+// ★【0.04.45】iOS・iPadOS アプリ（ios/。SideStore で入れる自分用）の中か
+function isIOSApp() { return typeof window.SusuruIOS !== 'undefined' && !!window.SusuruIOS; }
+function iosAppVersion() { const m = navigator.userAgent.match(/SusuruAnkiIOS\/([\d.]+)/); return m ? m[1] : ''; }
 
 // ログイン（auth.js の firebaseLogin から呼ぶ）。アプリの中なら true を返し、結果は __susuruNativeLogin で受け取る
 function appGoogleLogin() {
@@ -62,9 +65,12 @@ window.susuruAppBack = function () {
 function appVersionCode(v) { const p = String(v || '').split('.').map(Number); return (p[0] || 0) * 1000000 + (p[1] || 0) * 1000 + (p[2] || 0); }
 function appApkUpdateAvailable() {
   if (!isAndroidApp() || typeof ANDROID_APK_VERSION === 'undefined') return false;
-  try { return Number(window.SusuruApp.versionCode()) < appVersionCode(ANDROID_APK_VERSION); } catch (e) { return false; }
+  try { return Number(window.SusuruApp.versionCode()) < appVersionCode(appApkLatest()); } catch (e) { return false; }
 }
-function appApkUrl() { return new URL('apk/susuruanki.apk?v=' + ANDROID_APK_VERSION, location.href).href; }
+// ★【0.04.38】公開されている最新の APK の版（開いたあとに出た新しい版も、version-info.js を読み直して知る）
+let _apkLatest = null;
+function appApkLatest() { return _apkLatest && appVersionCode(_apkLatest) > appVersionCode(ANDROID_APK_VERSION) ? _apkLatest : ANDROID_APK_VERSION; }
+function appApkUrl() { return new URL('apk/susuruanki.apk?v=' + appApkLatest(), location.href).href; }
 // ★【0.04.24】新しいアプリ（0.04.24 から）は、自分で自分を入れ直す（PackageInstaller）。一度この仕組みで入れると、次からは確認なしで、
 //  アプリを閉じたとき（裏に回して1分・プレイ中でない）に入れ替わる。古いアプリは今まで通り（インストールの画面へ）
 function appApkNew() { return isAndroidApp() && !!window.SusuruApp.apkPrepare; }
@@ -73,7 +79,7 @@ function appInstallApk() {
   try {
     if (appApkNew()) {
       if (window.SusuruApp.apkReady()) window.SusuruApp.apkInstallNow();
-      else { _apkInstallAfter = true; if (typeof showAppToast === 'function') showAppToast('📲 新しいアプリをダウンロードしています…'); window.SusuruApp.apkPrepare(appApkUrl(), appVersionCode(ANDROID_APK_VERSION)); }
+      else { _apkInstallAfter = true; if (typeof showAppToast === 'function') showAppToast('📲 新しいアプリをダウンロードしています…'); window.SusuruApp.apkPrepare(appApkUrl(), appVersionCode(appApkLatest())); }
       return;
     }
     window.SusuruApp.installApk(appApkUrl());
@@ -86,20 +92,20 @@ window.__susuruApkReady = function (ok, silent) {
   const k = 'susuru_anki_apk_notice', today = new Date().toDateString();
   if (silent) {
     // 確認なしで入れられる：閉じたときに入れ替わることだけ知らせる（版ごとに1回）
-    try { if (localStorage.getItem(k + '_auto') === ANDROID_APK_VERSION) return; localStorage.setItem(k + '_auto', ANDROID_APK_VERSION); } catch (e) {}
-    if (typeof showAppToast === 'function') showAppToast(`📲 新しいアプリ（${ANDROID_APK_VERSION}）を用意しました。アプリを閉じると、自動で入れ替わります`);
+    try { if (localStorage.getItem(k + '_auto') === appApkLatest()) return; localStorage.setItem(k + '_auto', appApkLatest()); } catch (e) {}
+    if (typeof showAppToast === 'function') showAppToast(`📲 新しいアプリ（${appApkLatest()}）を用意しました。アプリを閉じると、自動で入れ替わります`);
     return;
   }
   try { if (!_apkForce && localStorage.getItem(k) === today) return; localStorage.setItem(k, today); } catch (e) {}
-  if (confirm(`📲 新しい Android アプリ（${ANDROID_APK_VERSION}）があります（学習データはそのまま）。\n今回だけ確認が出ます。次からは、アプリを閉じたときに自動で更新されます。\n更新しますか？`)) window.SusuruApp.apkInstallNow();
+  if (confirm(`📲 新しい Android アプリ（${appApkLatest()}）があります（学習データはそのまま）。\n今回だけ確認が出ます。次からは、アプリを閉じたときに自動で更新されます。\n更新しますか？`)) window.SusuruApp.apkInstallNow();
 };
 let _apkForce = false;
 function appCheckApkUpdate(force) {
   if (!appApkUpdateAvailable()) return;
-  if (appApkNew()) { _apkForce = !!force; try { window.SusuruApp.apkPrepare(appApkUrl(), appVersionCode(ANDROID_APK_VERSION)); } catch (e) {} return; }
+  if (appApkNew()) { _apkForce = !!force; try { window.SusuruApp.apkPrepare(appApkUrl(), appVersionCode(appApkLatest())); } catch (e) {} return; }
   const k = 'susuru_anki_apk_notice', today = new Date().toDateString();
   try { if (!force && localStorage.getItem(k) === today) return; localStorage.setItem(k, today); } catch (e) {}
-  if (confirm(`📲 新しい Android アプリ（${ANDROID_APK_VERSION}）があります。\n今のアプリに上書きで入れます（学習データはそのまま）。更新しますか？`)) appInstallApk();
+  if (confirm(`📲 新しい Android アプリ（${appApkLatest()}）があります。\n今のアプリに上書きで入れます（学習データはそのまま）。更新しますか？`)) appInstallApk();
 }
 window.addEventListener('load', () => setTimeout(() => appCheckApkUpdate(false), 4000));
 // プレイ中か（裏に回ったときに入れ替えてよいか）をアプリに伝えておく
@@ -162,7 +168,10 @@ window.addEventListener('load', () => setTimeout(() => {
 // ================================================================
 let _widgetTimer = null;
 function appWidgetSync(now) {
-  if (!isAndroidApp() || !window.SusuruApp.setWidgetData) return;
+  if (isIOSApp() && typeof appAlarmSync === 'function') appAlarmSync(); // ★【0.04.45】iOS：解いたら今日のアラームを消す
+  // ★【0.04.47】iOS アプリのウィジェットにも同じデータを渡す
+  const sendW = isAndroidApp() && window.SusuruApp.setWidgetData ? j => window.SusuruApp.setWidgetData(j) : isIOSApp() && window.SusuruIOS.setWidgetData ? j => window.SusuruIOS.setWidgetData(j) : null;
+  if (!sendW) return;
   clearTimeout(_widgetTimer);
   _widgetTimer = setTimeout(() => {
     try {
@@ -180,9 +189,14 @@ function appWidgetSync(now) {
         if (n > 1) data.foot = `すするanki ・ 残りの課題 ${n}つ`;
       }
       data.board = widgetBoardMine();
+      // ★【0.04.49】連続記録のウィジェットの「直近7日の🔥」：この2週間に解いた日
+      try { const from = streakShift(getTodayStr(), -14); data.studied = Object.keys(studyDays || {}).filter(k => k >= from && studyDayCount(studyDays[k]) > 0).sort(); } catch (e) {}
+      // ★【0.04.49】iOS アプリ：航海日誌のウィジェット（カレンダー・できた事日記）の分も
+      if (isIOSApp()) { try { data.koukai = koukaiWidgetData(); } catch (e) {} }
       try { if (typeof calWidgetData === 'function') data.cal = calWidgetData(); } catch (e) {} // ★【0.04.25】カレンダーのウィジェット
+      try { if (typeof calStarWidgetData === 'function') data.stars = calStarWidgetData(); } catch (e) {} // ★【0.04.43】大事な予定のウィジェット
       if (_widgetFriends) data.board.rank = widgetRank(_widgetFriends.list), data.board.rankAt = _widgetFriends.at;
-      window.SusuruApp.setWidgetData(JSON.stringify(data));
+      sendW(JSON.stringify(data));
       // フレンドの成績は10分に1回だけ読み直す（読み終わったら、もう一度ウィジェットに送る）
       if (!_widgetFriendsBusy && typeof currentUser !== 'undefined' && currentUser && (!_widgetFriends || Date.now() - _widgetFriends.at > 600000)) {
         _widgetFriendsBusy = true;
@@ -228,3 +242,214 @@ function widgetBoardMine() {
 }
 window.addEventListener('load', () => setTimeout(() => appWidgetSync(true), 3000));
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') appWidgetSync(true); });
+
+// ================================================================
+// ★【0.04.38】設定の「📲 アプリ・通知」：アプリの中では「🔄 新しいバージョンを確認」（新しい APK があれば、その場で更新）
+//  新しい APK があるときは、設定（下のメニュー）と「📲 アプリ・通知」に印を出す
+// ================================================================
+function appVersionText(code) { const c = Number(code) || 0; return `${Math.floor(c / 1000000)}.${String(Math.floor(c / 1000) % 1000).padStart(2, '0')}.${String(c % 1000).padStart(2, '0')}`; }
+async function appApkFetchLatest() {
+  try {
+    const txt = await (await fetch('./version-info.js?t=' + Date.now(), { cache: 'no-store' })).text();
+    const v = (txt.match(/ANDROID_APK_VERSION\s*=\s*["']([^"']+)["']/) || [])[1];
+    if (v) _apkLatest = v;
+  } catch (e) {}
+  appApkRender();
+}
+function appApkBadgeCount() { return isAndroidApp() && appApkUpdateAvailable() ? 1 : 0; }
+function appApkRender() {
+  const btn = document.getElementById('apkDlBtn'), hint = document.getElementById('apkDlHint');
+  if (btn && isAndroidApp()) {
+    const avail = appApkUpdateAvailable(); let cur = ''; try { cur = appVersionText(window.SusuruApp.versionCode()); } catch (e) {}
+    btn.removeAttribute('download'); btn.setAttribute('href', '#');
+    btn.innerHTML = avail ? `📲 新しいアプリ（${escapeHtml(appApkLatest())}）に更新する <span class="friend-req-badge app-upd-badge" style="display:inline-flex;">1</span>` : `🔄 アプリの新しいバージョンを確認${cur ? `（今：${escapeHtml(cur)}）` : ''}`;
+    btn.classList.toggle('btn-accent', avail);
+    if (hint) hint.textContent = avail ? '押すと、新しいアプリをダウンロードして入れ替えます（学習データはそのまま）。ふだんは自動で更新されますが、うまくいかないときはここから更新できます。' : '新しいアプリがあれば、ふだんは自動で更新されます。うまくいかないときは、ここで確認・更新できます。';
+  }
+  document.querySelectorAll('.app-upd-badge').forEach(b => { if (b.closest('#apkDlBtn')) return; b.textContent = '1'; b.style.display = appApkBadgeCount() ? 'inline-flex' : 'none'; });
+  if (typeof renderFriendRequests === 'function') { try { renderFriendRequests(); } catch (e) {} }
+}
+async function appApkCheckNow(ev) {
+  if (ev) ev.preventDefault();
+  if (!isAndroidApp()) return;
+  const btn = document.getElementById('apkDlBtn'); if (btn) btn.textContent = '⏳ 確認しています…';
+  await appApkFetchLatest();
+  if (appApkUpdateAvailable()) { _apkForce = true; appInstallApk(); return; }
+  let cur = ''; try { cur = appVersionText(window.SusuruApp.versionCode()); } catch (e) {}
+  alert(`✅ 最新のアプリです${cur ? `（${cur}）` : ''}。`);
+}
+window.addEventListener('load', () => setTimeout(appApkFetchLatest, 3000));
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && isAndroidApp()) appApkFetchLatest(); });
+
+// ================================================================
+// ★【0.04.44】⏰ アラーム（Android アプリだけ）
+//  ・🔥 連続記録：決めた時刻（夜8時など）になっても今日まだ解いていなければ、アラームの音で鳴らす。解くまでスヌーズで何度も鳴る（日付が変わるまで）
+//  ・📅 予定：カレンダーの予定ごとに「⏰ アラーム」（何分前）を選ぶと、その時刻に鳴らす（この端末だけの設定）
+//  鳴らすのはアプリ（Alarms.java）。ここは設定と、これから14日の予定のアラームの時刻を渡すだけ。今日解いたかはウィジェットのデータで見ている
+// ================================================================
+const ALARM_KEY = 'susuru_anki_alarm', CAL_ALARM_KEY = 'susuru_anki_cal_alarms';
+const CAL_ALARM_OPTS = [[0, '時刻ちょうど'], [5, '5分前'], [10, '10分前'], [15, '15分前'], [30, '30分前'], [60, '1時間前'], [120, '2時間前'], [1440, '1日前']];
+function appAlarmOk() { return (isAndroidApp() && !!window.SusuruApp.setAlarms) || isIOSApp(); }
+function alarmPrefs() {
+  let p = {}; try { p = JSON.parse(localStorage.getItem(ALARM_KEY) || '{}') || {}; } catch (e) {}
+  return { on: !!p.on, time: /^\d{1,2}:\d{2}$/.test(p.time || '') ? p.time : '20:00', snooze: [5, 10, 15, 20, 30].includes(Number(p.snooze)) ? Number(p.snooze) : 10 };
+}
+function calAlarms() { try { return JSON.parse(localStorage.getItem(CAL_ALARM_KEY) || '{}') || {}; } catch (e) { return {}; } }
+function calAlarmOf(id, gid) { const v = calAlarms()[`${gid || ''}~${id}`]; return v === undefined || v === null || v === '' ? null : Number(v); }
+function calAlarmSet(id, gid, min) {
+  const m = calAlarms(), k = `${gid || ''}~${id}`;
+  if (min === null || min === undefined || min === '' || isNaN(Number(min))) delete m[k]; else m[k] = Number(min);
+  try { localStorage.setItem(CAL_ALARM_KEY, JSON.stringify(m)); } catch (e) {}
+}
+// これから14日の、アラームを入れた予定の鳴らす時刻
+function calAlarmList() {
+  const m = calAlarms(); if (!Object.keys(m).length || typeof calAllEvents !== 'function') return [];
+  const all = calAllEvents().filter(e => m[`${e.gid || ''}~${e.id}`] !== undefined), today = calToday(), now = Date.now(), out = [];
+  for (let i = 0; i <= 15 && out.length < 60; i++) {
+    const ds = calAddDays(today, i);
+    all.forEach(e => {
+      if (!calOccursOn(e, ds)) return;
+      if (calSpan(e) > 0 && calInstanceStart(e, ds) !== ds) return; // 何日か続く予定は、はじめの日だけ
+      const min = Number(m[`${e.gid || ''}~${e.id}`]) || 0;
+      const [h, mi] = (e.start || '07:00').split(':').map(Number), d = planParseDate(ds);
+      d.setHours(h, mi, 0, 0);
+      const at = d.getTime() - min * 60000;
+      if (at <= now) return;
+      const t = calType(e), when = e.start ? (min ? `${CAL_ALARM_OPTS.find(o => o[0] === min) ? CAL_ALARM_OPTS.find(o => o[0] === min)[1] : min + '分前'}` : 'もうすぐ') : (min >= 1440 ? '明日' : '今日');
+      out.push({ k: `${e.gid || ''}~${e.id}~${ds}`, at, title: `${t.icon} ${String(e.title).slice(0, 40)}（${when}）`, body: `${calMD(ds)} ${calTimeText(e)}${e.place ? '・' + e.place : ''}${e.note ? '\n' + String(e.note).slice(0, 80) : ''}`, url: './?page=pgCalendar' });
+    });
+  }
+  return out.sort((a, b) => a.at - b.at).slice(0, 60);
+}
+let _alarmTimer = null;
+function appAlarmSync(now) {
+  if (!appAlarmOk()) return;
+  clearTimeout(_alarmTimer);
+  _alarmTimer = setTimeout(() => {
+    try {
+      const p = alarmPrefs(), [h, m] = p.time.split(':').map(Number);
+      if (isIOSApp()) { const items = iosAlarmItems(p); window.SusuruIOS.setAlarms(JSON.stringify({ items, sig: JSON.stringify(items) })); return; }
+      window.SusuruApp.setAlarms(JSON.stringify({ streak: { on: p.on, h, m, snooze: p.snooze }, events: calAlarmList() }));
+    } catch (e) {}
+  }, now ? 0 : 1500);
+}
+window.addEventListener('load', () => setTimeout(() => appAlarmSync(true), 4000));
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') appAlarmSync(true); });
+function alarmStatus() { try { return JSON.parse((isIOSApp() ? window.SusuruIOS.alarmStatus() : window.SusuruApp.alarmStatus()) || '{}'); } catch (e) { return {}; } }
+// ★【0.04.45】iOS：その時刻にアプリを動かせないので、鳴らす時刻を全部ここで決めて渡す（60回まで）
+//  🔥 連続記録：今日まだなら、決めた時刻から 23:55 までスヌーズの間隔ごと。明日・明後日の分も（アプリを開かない日も鳴るように）。今日解いたら今日の分は無くなる
+//  📅 予定：calAlarmList と同じ
+function iosAlarmItems(p) {
+  const ev = calAlarmList().map(e => ({ at: e.at, title: e.title.slice(0, 60), k: e.k, open: '開く' })).slice(0, 30);
+  const out = [], now = Date.now();
+  if (p.on && typeof getStreakInfo === 'function') {
+    const s = getStreakInfo(), [h, m] = p.time.split(':').map(Number);
+    for (let d = 0; d < 3; d++) {
+      if (d === 0 && s.doneToday) continue;
+      const streak = d === 0 ? s.cur : d === 1 && s.doneToday ? s.cur : 0;
+      const title = streak > 0 ? `🔥 ${streak}日連続が消えそう！1問解こう` : '📚 今日の1問がまだです';
+      const base = new Date(); base.setDate(base.getDate() + d); base.setHours(h, m, 0, 0);
+      const end = new Date(base); end.setHours(23, 55, 0, 0);
+      for (let t = base.getTime(), n = 0; t <= end.getTime() && n < 30; t += p.snooze * 60000, n++) if (t > now + 10000) out.push({ at: t, title, k: 'streak', open: '今やる' });
+    }
+  }
+  return ev.concat(out.slice(0, 60 - ev.length)).sort((a, b) => a.at - b.at);
+}
+window.onSusuruIOSStatus = function () { const b = document.getElementById('chkAlarmStreak'); if (b && typeof renderNotifySettings === 'function') renderNotifySettings(); };
+function alarmSettingsHTML() {
+  if (isIOSApp()) return iosAlarmSettingsHTML();
+  if (!isAndroidApp()) return '';
+  if (!appAlarmOk()) return `<div class="setting-box-title" style="margin-top:16px;">⏰ アラーム</div><div class="hint-small">連続記録が途切れそうなときや、予定の前にアラームの音で鳴らせます。アプリを新しくすると使えます。</div>${typeof appInstallApk === 'function' ? '<button class="btn btn-secondary" style="margin-top:6px;" onclick="appInstallApk()">📲 アプリを更新する</button>' : ''}`;
+  const p = alarmPrefs(), st = alarmStatus(), warn = [];
+  if (st.notif === false) warn.push(`<div class="hint-small" style="color:var(--danger);">🚫 通知がオフなので鳴りません</div><button class="btn btn-secondary" style="margin-top:4px;" onclick="window.SusuruApp.openAlarmSettings('notif')">🔔 通知を許可する</button>`);
+  if (st.channel === false) warn.push(`<div class="hint-small" style="color:var(--danger);">🚫「すするanki のアラーム」の通知がオフになっています</div><button class="btn btn-secondary" style="margin-top:4px;" onclick="window.SusuruApp.openAlarmSettings('channel')">🔔 アラームの通知をオンにする</button>`);
+  if (st.exact === false) warn.push(`<div class="hint-small" style="color:var(--warning, #e0a020);">⚠️ 「アラームとリマインダー」が許可されていないので、少し遅れて鳴ることがあります</div><button class="btn btn-secondary" style="margin-top:4px;" onclick="window.SusuruApp.openAlarmSettings('exact')">⏰ 許可する</button>`);
+  if (st.fullScreen === false) warn.push(`<div class="hint-small" style="color:var(--warning, #e0a020);">⚠️ 「全画面通知」が許可されていないので、画面が消えているときに大きく出ません（音は鳴ります）</div><button class="btn btn-secondary" style="margin-top:4px;" onclick="window.SusuruApp.openAlarmSettings('fullscreen')">📱 許可する</button>`);
+  const next = st.next && p.on ? new Date(st.next) : null;
+  const nextTxt = next ? `次は ${next.getMonth() + 1}/${next.getDate()} ${String(next.getHours()).padStart(2, '0')}:${String(next.getMinutes()).padStart(2, '0')}${st.snoozeAt && st.snoozeAt === st.next ? '（スヌーズ中）' : ''}（今日すでに解いていれば鳴りません）` : '';
+  const evN = Object.keys(calAlarms()).length;
+  return `<div class="setting-box-title" style="margin-top:16px;">⏰ アラーム（この端末）</div>
+    <label class="toggle-pill" style="margin-top:6px; display:flex; align-items:center; gap:8px;"><input type="checkbox" id="chkAlarmStreak" ${p.on ? 'checked' : ''} onchange="onAlarmPrefChange()">🔥 連続記録アラーム（今日まだ解いていなければ、アラームの音で鳴らす）</label>
+    <div class="form-row" style="margin-top:6px; align-items:center;">
+      <span class="hint-small" style="white-space:nowrap;">⏰ 時刻</span>
+      <input type="time" id="txtAlarmTime" class="form-control" value="${p.time}" onchange="onAlarmPrefChange()" style="max-width:160px;">
+    </div>
+    <div class="form-row" style="margin-top:6px; align-items:center;">
+      <span class="hint-small" style="white-space:nowrap;">💤 スヌーズ</span>
+      <select id="selAlarmSnooze" class="form-control" onchange="onAlarmPrefChange()" style="max-width:160px;">${[5, 10, 15, 20, 30].map(v => `<option value="${v}" ${p.snooze === v ? 'selected' : ''}>${v}分ごと</option>`).join('')}</select>
+    </div>
+    <div class="hint-small">今日1問も解いていないと、この時刻から解くまで、スヌーズの間隔で何度も鳴ります（止めても、また鳴ります。日付が変わる5分前まで）。解いたら止まります。${nextTxt ? '<br>' + nextTxt : ''}</div>
+    <div class="hint-small" style="margin-top:6px;">📅 予定のアラームは、カレンダーの予定の「⏰ アラーム」で選べます${evN ? `（${evN}件の予定に入っています）` : ''}。</div>
+    ${warn.length ? `<div style="margin-top:8px;">${warn.join('')}</div>` : ''}
+    <button class="btn btn-secondary" style="margin-top:8px;" onclick="alarmTest()">🔔 アラームを試す</button>`;
+}
+function iosAlarmSettingsHTML() {
+  const p = alarmPrefs(), st = alarmStatus(), evN = Object.keys(calAlarms()).length;
+  const auth = st.auth === 'authorized' ? '' : st.auth === 'denied'
+    ? `<div class="hint-small" style="color:var(--danger);">🚫 アラームが許可されていないので鳴りません</div><button class="btn btn-secondary" style="margin-top:4px;" onclick="window.SusuruIOS.openSettings()">⚙️ 設定を開いて許可する</button>`
+    : `<div class="hint-small" style="color:var(--warning, #e0a020);">⚠️ まだアラームの許可をしていません</div><button class="btn btn-secondary" style="margin-top:4px;" onclick="window.SusuruIOS.requestAlarmAuth()">⏰ アラームを許可する</button>`;
+  return `<div class="setting-box-title" style="margin-top:16px;">⏰ アラーム（この端末）</div>
+    <label class="toggle-pill" style="margin-top:6px; display:flex; align-items:center; gap:8px;"><input type="checkbox" id="chkAlarmStreak" ${p.on ? 'checked' : ''} onchange="onAlarmPrefChange()">🔥 連続記録アラーム（今日まだ解いていなければ、アラームで鳴らす）</label>
+    <div class="form-row" style="margin-top:6px; align-items:center;"><span class="hint-small" style="white-space:nowrap;">⏰ 時刻</span>
+      <input type="time" id="txtAlarmTime" class="form-control" value="${p.time}" onchange="onAlarmPrefChange()" style="max-width:160px;"></div>
+    <div class="form-row" style="margin-top:6px; align-items:center;"><span class="hint-small" style="white-space:nowrap;">💤 スヌーズ</span>
+      <select id="selAlarmSnooze" class="form-control" onchange="onAlarmPrefChange()" style="max-width:160px;">${[5, 10, 15, 20, 30].map(v => `<option value="${v}" ${p.snooze === v ? 'selected' : ''}>${v}分ごと</option>`).join('')}</select></div>
+    <div class="hint-small">今日1問も解いていないと、この時刻から 23:55 まで、スヌーズの間隔で何度も鳴ります（「止める」を押しても、次の回でまた鳴ります）。解いたら今日の分は止まります。<br>iPad では、アプリを開いたときに3日先までのアラームを用意します（3日以上開かないと、その先は鳴りません）。ほかの端末で解いた日は、このアプリを開くまで鳴ることがあります。${st.count ? `<br>用意してあるアラーム：${st.count}回` : ''}</div>
+    <div class="hint-small" style="margin-top:6px;">📅 予定のアラームは、カレンダーの予定の「⏰ アラーム」で選べます${evN ? `（${evN}件の予定に入っています）` : ''}。</div>
+    ${auth ? `<div style="margin-top:8px;">${auth}</div>` : ''}
+    ${st.widget === false ? '<div class="hint-small" style="margin-top:8px; color:var(--warning, #e0a020);">⚠️ ウィジェットにデータを渡せていません（App Group が使えない状態です）。アプリを入れ直すと直ることがあります。</div>' : st.widget ? '<div class="hint-small" style="margin-top:8px;">🧩 ウィジェット：ホーム画面を長押し →「編集」→「ウィジェットを追加」→「すするanki」（連続記録・カレンダー・大事な予定・ランキング）</div>' : ''}
+    <button class="btn btn-secondary" style="margin-top:8px;" onclick="window.SusuruIOS.testAlarm('⏰ アラームのテスト')">🔔 アラームを試す（5秒後に鳴ります）</button>`;
+}
+function onAlarmPrefChange() {
+  const p = alarmPrefs();
+  const c = document.getElementById('chkAlarmStreak'), t = document.getElementById('txtAlarmTime'), s = document.getElementById('selAlarmSnooze');
+  if (c) p.on = c.checked;
+  if (t && /^\d{1,2}:\d{2}$/.test(t.value)) p.time = t.value;
+  if (s) p.snooze = Number(s.value) || 10;
+  try { localStorage.setItem(ALARM_KEY, JSON.stringify(p)); } catch (e) {}
+  if (isIOSApp()) { if (p.on && alarmStatus().auth !== 'authorized') window.SusuruIOS.requestAlarmAuth(); }
+  else if (p.on && alarmStatus().notif === false && typeof enableNotifications === 'function') enableNotifications();
+  appAlarmSync(true);
+  setTimeout(() => { if (typeof renderNotifySettings === 'function') renderNotifySettings(); }, 300);
+}
+function alarmTest() {
+  if (!appAlarmOk()) return;
+  if (alarmStatus().notif === false) return alert('通知がオフなので鳴らせません。先に通知を許可してください。');
+  try { window.SusuruApp.testAlarm('⏰ アラームのテスト', 'こんなふうに鳴ります。「止める」で止まります。'); } catch (e) {}
+}
+
+// ================================================================
+// ★【0.04.49】iOS アプリに入れた、航海日誌のウィジェット（カレンダー・できた事日記）に渡すもの
+//  形は航海日誌の Android のウィジェット（koukaiBuildWidgetData）と同じ：
+//   days：先月の1日から62日先までの、日ごとの予定 [{ s: 開始, e: 終了, n: 名前, i: 印 }]（すするanki のカレンダー。航海日誌と同期していれば、その予定も入っている）
+//   diary：今日から90日前までの、できた事日記 { 日付: { items, anki } }（susuru_anki_cal/{uid} の diary。航海日誌が書く）
+// ================================================================
+let _koukaiDiary = null, _koukaiDiaryAt = 0, _koukaiDiaryBusy = false;
+function koukaiSetDiary(d) { _koukaiDiary = d || {}; _koukaiDiaryAt = Date.now(); }
+function koukaiWidgetData() {
+  const today = calToday(), now = new Date();
+  const start = planDateStr(new Date(now.getFullYear(), now.getMonth() - 1, 1)), end = calAddDays(today, 62);
+  const all = calAllEvents(), days = {};
+  for (let ds = start, g = 0; ds <= end && g < 140; ds = calAddDays(ds, 1), g++) {
+    const list = calOn(ds, all).map(e => {
+      let lab = '';
+      if (calSpan(e) > 0) { try { const s0 = calInstanceStart(e, ds), e2 = s0 ? calInstanceEnd(e, s0) : ''; if (e2) { const d = planParseDate(e2); lab = `（〜${d.getMonth() + 1}/${d.getDate()}）`; } } catch (er) {} }
+      return { s: e.start || '', e: e.endTime || '', n: String(e.title || '').slice(0, 40) + lab, i: calType(e).icon };
+    });
+    if (list.length) days[ds] = list.sort((a, b) => (a.s || '').localeCompare(b.s || ''));
+  }
+  // 日記：航海日誌と同期していれば、その見張りが受け取ったもの。していなければ10分に1回読む
+  if (!_koukaiDiaryBusy && typeof currentUser !== 'undefined' && currentUser && (!_koukaiDiary || Date.now() - _koukaiDiaryAt > 600000) && !(typeof calLinkOn === 'function' && calLinkOn() && _koukaiDiary)) {
+    _koukaiDiaryBusy = true;
+    firestore.collection('susuru_anki_cal').doc(currentUser.uid).get()
+      .then(sn => { koukaiSetDiary((sn.exists && sn.data().diary) || {}); appWidgetSync(true); })
+      .catch(() => {}).finally(() => { _koukaiDiaryBusy = false; });
+  }
+  const from = calAddDays(today, -90), diary = {};
+  Object.entries(_koukaiDiary || {}).forEach(([k, e]) => {
+    if (k < from || k > end || !e) return;
+    const items = (e.items || []).map(x => String(x || '')).slice(0, 3);
+    if (items.some(x => x.trim()) || (e.anki !== null && e.anki !== undefined)) diary[k] = { items, anki: e.anki === undefined ? null : e.anki };
+  });
+  return { today, days, diary, at: Date.now() };
+}

@@ -411,6 +411,8 @@ function loadQuizPrefs() {
     if (!el.dataset.prefBound) { el.addEventListener('change', saveQuizPrefs); el.dataset.prefBound = '1'; }
   });
   const g = document.getElementById('numGradThreshold'); if (g && !g.value) g.value = getGradThreshold();
+  // ★【0.04.30】自己申告モードは「🃏 カードモード」になったので、選んでいたときは記述式に
+  const qm = document.getElementById('selQuizMode'); if (qm && !qm.value) qm.value = 'desc';
 }
 // 数値の設定を読む（空欄なら null）
 function getQuizPrefNumber(id) {

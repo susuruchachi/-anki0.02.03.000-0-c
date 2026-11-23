@@ -21,7 +21,7 @@ let quizPool=[], quizIndex=0, quizTimer=null, autoNextTimeout=null;
 let quizTimeLimit=0, quizTimeLeft=0, quizPhase='q', selectedChoiceIdx=null, currentQuestionGradThreshold=5, selectedScopePath=[];
 let syncTimeout = null;
 let lastQuizScopePath = []; // クイズ終了後もカテゴリー選択を保持
-let shareStats = false; // 成績共有フラグ
+let shareStats = true; // 成績共有フラグ（★【0.04.48】はじめからオン。自分でオフにした人だけオフ）
 
 // ★ ライブ同期用変数
 let subscribedDocs = []; // 購読している共有ドキュメントIDの配列

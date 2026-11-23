@@ -1,0 +1,71 @@
+# ★【0.04.45】iOS・iPadOS アプリ（.ipa）を作る（手動で実行：Actions → ios-ipa → Run workflow）
+# 署名なしで作る。入れるときに SideStore が自分の Apple ID で署名する（無料の Apple ID だと7日ごとに更新が要る）。
+# 作り直すのは ios/ を変えたときだけ（中身はウェブ版なので、ふだんの更新はウェブ版だけで届く）
+name: ios-ipa
+
+on:
+  # 手動で動かすには、このファイルがデフォルトブランチ（main）にも要る。作業ブランチでは ios/ を変えて push したときに動く
+  push:
+    branches: [claude/v0.03.00-chem-kanbun-ui, claude/charming-hamilton-p4pm3a]
+    paths: ['ios/**', '.github/workflows/ios-ipa.yml']
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: '作った .ipa を apk/susuruanki-ios.ipa に置いて、IOS_APP_VERSION を上げる'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode (26 or later)
+        run: |
+          ls -d /Applications/Xcode*.app || true
+          X=$(ls -d /Applications/Xcode_2[6-9]*.app 2>/dev/null | sort -V | tail -1)
+          [ -z "$X" ] && X=$(ls -d /Applications/Xcode.app)
+          echo "Using $X"; sudo xcode-select -s "$X"; xcodebuild -version
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          cd ios && xcodegen generate
+      - name: Build (unsigned)
+        working-directory: ios
+        run: |
+          V=$(sed -n 's/^const APP_VERSION = "\([^"]*\)".*/\1/p' ../version-info.js)
+          IFS=. read -r a b c <<< "$V"; CODE=$((10#$a * 1000000 + 10#$b * 1000 + 10#$c))
+          echo "V=$V" >> "$GITHUB_ENV"
+          xcodebuild -project SusuruAnki.xcodeproj -target SusuruAnki -configuration Release -sdk iphoneos \
+            SYMROOT="$PWD/build" MARKETING_VERSION="$V" CURRENT_PROJECT_VERSION="$CODE" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build > build.log 2>&1 || { grep -E 'error:|warning: .*(deprecated|unavailable)' build.log | head -40; tail -40 build.log; exit 1; }
+          grep -E ' error:' build.log | head -20 || true
+          test -d build/Release-iphoneos/SusuruAnki.app
+          mkdir -p Payload && cp -R build/Release-iphoneos/SusuruAnki.app Payload/
+          # ★【0.04.47】App Group の権限だけを書き込む（ウィジェットが先、アプリが後）
+          brew install ldid
+          APPEX=$(ls -d Payload/SusuruAnki.app/PlugIns/*.appex | head -1)
+          ls -la Payload/SusuruAnki.app/PlugIns/ || true
+          ldid -Sapp.entitlements "$APPEX/$(basename "$APPEX" .appex)"
+          ldid -Sapp.entitlements Payload/SusuruAnki.app/SusuruAnki
+          ldid -e Payload/SusuruAnki.app/SusuruAnki
+          zip -qry susuruanki-ios.ipa Payload
+          ls -la susuruanki-ios.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: susuruanki-ios-ipa
+          path: ios/susuruanki-ios.ipa
+      - name: Publish the .ipa to the branch
+        if: ${{ github.event_name == 'push' || inputs.publish }}
+        run: |
+          cp ios/susuruanki-ios.ipa apk/susuruanki-ios.ipa
+          sed -i '' "s/^const IOS_APP_VERSION = \"[^\"]*\"/const IOS_APP_VERSION = \"$V\"/" version-info.js
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apk/susuruanki-ios.ipa version-info.js
+          git commit -m "iOS アプリ $V を公開" || echo "変更なし"
+          git pull --rebase origin "${GITHUB_REF_NAME}" && git push

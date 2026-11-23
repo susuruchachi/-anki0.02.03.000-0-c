@@ -145,6 +145,7 @@ public class MainActivity extends Activity {
         });
         if (savedInstanceState != null) web.restoreState(savedInstanceState);
         else web.loadUrl(startUrl(getIntent()));
+        if (getIntent() != null && getIntent().getBooleanExtra("stopAlarm", false)) Alarms.stopRinging(this, null);
     }
 
     private boolean isOwnPage(Uri u) {
@@ -161,6 +162,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        if (intent.getBooleanExtra("stopAlarm", false)) Alarms.stopRinging(this, null); // ★【0.04.44】アラームの「今やる」
         Uri d = intent.getData();
         if (d != null && isOwnPage(d)) web.loadUrl(d.toString());
     }
@@ -352,6 +354,24 @@ public class MainActivity extends Activity {
         @JavascriptInterface public void setWidgetData(String json) {
             getSharedPreferences(StreakWidget.PREFS, MODE_PRIVATE).edit().putString("data", json == null ? "{}" : json).apply();
             StreakWidget.refreshAll(MainActivity.this);
+            Alarms.onWidgetData(MainActivity.this); // ★【0.04.44】今日解いたら、連続記録のアラームを止める
+        }
+        // ★【0.04.44】アラーム（連続記録・予定）の設定を受け取る
+        @JavascriptInterface public void setAlarms(String json) { Alarms.setConfig(MainActivity.this, json); }
+        @JavascriptInterface public String alarmStatus() { return Alarms.status(MainActivity.this); }
+        @JavascriptInterface public void testAlarm(String title, String body) { Alarms.ring(MainActivity.this, "test", title, body, "./", 5); }
+        // 'exact'：時刻ちょうどに鳴らす許可 / 'fullscreen'：全画面で出す許可 / 'channel'：アラームの通知の設定
+        @JavascriptInterface public void openAlarmSettings(String kind) {
+            runOnUiThread(() -> {
+                try {
+                    Intent i;
+                    if ("exact".equals(kind) && Build.VERSION.SDK_INT >= 31) i = new Intent(android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:" + getPackageName()));
+                    else if ("fullscreen".equals(kind) && Build.VERSION.SDK_INT >= 34) i = new Intent(android.provider.Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:" + getPackageName()));
+                    else if ("channel".equals(kind) && Build.VERSION.SDK_INT >= 26) { Alarms.ensureChannel(MainActivity.this); i = new Intent(android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, getPackageName()).putExtra(android.provider.Settings.EXTRA_CHANNEL_ID, Alarms.CHANNEL); }
+                    else i = new Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, getPackageName());
+                    startActivity(i);
+                } catch (Exception e) { toast("設定を開けませんでした"); }
+            });
         }
         // ★【0.04.22】カレンダーの購読（.ics の URL）を読む。ブラウザからは読めない（CORS の）サーバーでも、アプリなら読める
         //   https だけ・5MB まで。終わったら window.__susuruFetchDone(id, ok, 中身 or エラー)

@@ -98,6 +98,7 @@ public class StreakWidget extends AppWidgetProvider {
         updateAll(ctx);
         BoardWidget.updateAll(ctx);
         CalendarWidget.updateAll(ctx);
+        StarWidget.updateAll(ctx); // ★【0.04.43】
         scheduleNext(ctx);
     }
 

@@ -301,10 +301,19 @@ function renderNotifySettings() {
   else if (isIOSDevice()) installHTML = '<div class="hint-small">📲 アプリにするには：Safari の共有ボタン（□に↑）→「ホーム画面に追加」</div>';
   else installHTML = '<button class="btn btn-secondary" onclick="installApp()">📲 アプリとしてインストールする方法</button>';
   const apkHTML = ''; // ★【0.03.25】APK のボタンは、設定画面にいつも出す（index.html）
+  // ★【0.04.45】iPad・iPhone：自分用の iOS アプリ（SideStore で入れる）
+  const ipaV = typeof IOS_APP_VERSION !== 'undefined' ? IOS_APP_VERSION : '0.00.00', ipaOk = ipaV !== '0.00.00';
+  if (typeof isIOSApp === 'function' && isIOSApp()) {
+    const cur = iosAppVersion(), newer = ipaOk && cur && typeof appVersionCode === 'function' && appVersionCode(ipaV) > appVersionCode(cur);
+    installHTML += `<div class="hint-small" style="margin-top:6px;">🍎 iOS アプリ ${escapeHtml(cur || '')}${newer ? `　<b>新しいアプリ（${escapeHtml(ipaV)}）があります</b>：<a href="apk/susuruanki-ios.ipa?v=${escapeHtml(ipaV)}" download>.ipa をダウンロード</a> して SideStore で入れ直してください（データはそのまま）` : ''}</div>`;
+  } else if (isIOSDevice() && ipaOk && typeof ADMIN_UID !== 'undefined' && currentUser && currentUser.uid === ADMIN_UID) { // 管理者（自分）だけ
+    installHTML += `<details style="margin-top:8px;"><summary class="hint-small" style="cursor:pointer;">🍎 iOS アプリ（${escapeHtml(ipaV)}・SideStore で入れる自分用）</summary><div class="hint-small" style="margin-top:4px;">アラーム（連続記録・予定）が使えるアプリです。SideStore を入れた iPad で、<a href="apk/susuruanki-ios.ipa?v=${escapeHtml(ipaV)}" download>.ipa をダウンロード</a> →「ファイル」で開いて SideStore で入れます。アプリの中では、メールアドレスでログインします（Google のログインはできません）。データは同じアカウントで同期します。</div></details>`;
+  }
   let permHTML;
   if (perm === 'granted') permHTML = '<div class="hint-small" style="color:var(--success);">✅ 通知は許可されています</div>';
   else if (perm === 'denied' && nativePushApp()) permHTML = '<div class="hint-small" style="color:var(--danger);">🚫 通知がオフになっています。</div><button class="btn" style="margin-top:6px;" onclick="enableNotifications()">🔔 通知をオンにする（設定を開く）</button>';
   else if (perm === 'denied') permHTML = '<div class="hint-small" style="color:var(--danger);">🚫 通知がブロックされています。ブラウザ（端末）の設定で、このサイトの通知を許可してください。</div>';
+  else if (typeof isIOSApp === 'function' && isIOSApp()) permHTML = '<div class="hint-small">iPad のアプリでは、プッシュ通知（催促・フレンドのお知らせ）は届きません。ほしいときは、ホーム画面に追加したウェブ版も残しておくと、そちらに届きます。下の「⏰ アラーム」は使えます。</div>';
   else if (perm === 'unsupported' && nativePushApp()) permHTML = `<div class="hint-small">${window.SusuruApp.pushSupported ? '通知の準備がまだできていません（次のアプリの更新で使えるようになります）。' : 'このアプリは古いので、通知を使えません。設定の「アプリを更新」から、アプリを新しくしてください。'}</div>`;
   else if (perm === 'unsupported') permHTML = `<div class="hint-small">${isIOSDevice() && !standalone ? 'iPhone・iPad では、ホーム画面に追加したアプリから開くと通知をオンにできます（iOS 16.4 以降）。' : 'このブラウザは通知に対応していません。'}</div>`;
   else permHTML = '<button class="btn" onclick="enableNotifications()">🔔 通知をオンにする</button>';
@@ -333,6 +342,7 @@ function renderNotifySettings() {
     <label class="toggle-pill" style="margin-top:8px; display:flex; align-items:center; gap:8px;"><input type="checkbox" id="chkNotifyTaunt" ${p.taunt ? 'checked' : ''} onchange="onNotifyPrefChange()">🔥 フレンドの頑張りのお知らせ（フレンドのほうが進んでいたら、通知の時刻から4時間ごとに夜まであおります）</label>
     <div class="hint-small" style="margin-top:8px; line-height:1.6;">${[how, bg].filter(Boolean).join('<br>')}</div>
     ${perm === 'granted' ? '<button class="btn btn-secondary" style="margin-top:8px;" onclick="sendTestNotification()">🔔 テスト通知を送る</button>' : ''}
+    ${typeof alarmSettingsHTML === 'function' ? alarmSettingsHTML() : ''}
   `;
 }
 

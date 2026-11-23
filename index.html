@@ -482,11 +482,18 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 
 /* ★【0.03.00】構造式 */
 .chem-struct { display: inline-block; vertical-align: middle; max-width: 100%; margin: 4px 2px; }
+.chem-multi { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; vertical-align: middle; max-width: 100%; }
+.chem-op { font-size: 1.4rem; font-weight: 700; color: var(--text2); padding: 0 4px; }
 .chem-svg { max-width: 100%; height: auto; display: block; color: var(--text); }
 .chem-err { font-size: 0.75rem; color: var(--danger); }
 
 /* ★【0.03.00】漢文（縦書き・返り点・送り仮名） */
 .kb { writing-mode: vertical-rl; display: inline-block; font-family: 'Noto Serif JP', 'Hiragino Mincho ProN', 'Yu Mincho', serif; line-height: 2.6; text-align: start; max-width: 100%; overflow-x: auto; overflow-y: hidden; vertical-align: middle; font-weight: 500; padding: 0.2em 0.3em; margin: 4px 0; }
+.kb-blocks { display: block; max-width: 100%; }
+/* ★【0.04.38】暗記テスト・カードモードの漢文の図（問題の大きな字の中では少し小さく。答えの下の図） */
+.drill-word .kb, .fc-q .kb { font-size: 0.7em; font-weight: 500; }
+.rich-figs { margin-top: 6px; }
+.kb-blocks > .kb { display: block; margin: 4px 0 4px auto; width: fit-content; }
 .kb-g { display: inline-block; writing-mode: horizontal-tb; width: 1em; line-height: 1; vertical-align: middle; }
 .kb-c { display: block; position: relative; width: 1em; }
 .kb-ch { display: block; width: 1em; height: 1em; text-align: center; line-height: 1; }
@@ -495,6 +502,8 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 .kb-furi { left: 100%; margin-left: 0.1em; color: var(--text2); }
 .kb-okuri { left: 100%; margin-left: 0.1em; color: var(--primary); }
 .kb-kaeri { right: 100%; margin-right: 0.1em; color: var(--warn); }
+.kb-sai { position: absolute; right: 100%; margin-right: 0.1em; writing-mode: vertical-rl; font-size: 0.55em; line-height: 1; white-space: nowrap; font-weight: 700; font-family: 'Noto Sans JP', sans-serif; color: var(--text2); }
+.kb-hy { position: absolute; left: 50%; width: 0; height: 0.3em; border-left: 1.5px solid currentColor; transform: translateX(-50%); }
 #lblQuizQuestion .kb { font-size: 1.35em; }
 .q-card .kb { font-size: 1.15rem; }
 
@@ -511,6 +520,8 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 .kb-tile-ch { font-size: 1.3rem; font-weight: 700; }
 .kb-tile-okuri { position: absolute; right: 2px; bottom: 2px; font-size: 0.55rem; color: var(--primary); font-family: 'Noto Sans JP', sans-serif; font-weight: 700; }
 .kb-tile-kaeri { position: absolute; left: 3px; bottom: 2px; font-size: 0.6rem; color: var(--warn); font-weight: 700; }
+.kb-tile-ord { position: absolute; left: 2px; top: 1px; font-size: 0.6rem; font-weight: 800; color: #fff; background: var(--primary); border-radius: 6px; padding: 0 3px; font-family: 'Noto Sans JP', sans-serif; }
+.kb-tile.numbering { border-style: dashed; }
 .kb-tile-furi { position: absolute; right: 2px; top: 1px; font-size: 0.5rem; color: var(--text2); font-family: 'Noto Sans JP', sans-serif; }
 .kb-unit-panel { border: 1px solid var(--border); border-radius: 10px; padding: 10px; margin-top: 10px; background: var(--bg2); }
 .kb-sel-char { font-family: 'Noto Serif JP', serif; font-size: 1.6rem; font-weight: 700; color: var(--primary); }
@@ -543,6 +554,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 .cal-up-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cal-left { font-size: 0.78rem; color: var(--text2); flex-shrink: 0; }
 .cal-left.soon { color: #ff5d6c; }
+.cal-star { color: #f5b301; } /* ★【0.04.43】大事な予定 */
 .cal-home { background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 8px 12px; margin-bottom: 10px; cursor: pointer; }
 .cal-home-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 0.9rem; }
 .cal-home-today { margin: 4px 0 2px; }
@@ -555,6 +567,40 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 .group-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px; margin-bottom: 6px; background: var(--bg3); border-radius: 8px; cursor: pointer; }
 .group-invite { border: 1px solid var(--warn); cursor: default; }
 .group-mem, .group-cat { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
+/* ★【0.04.30】🃏 カードモード */
+.fc-stat { margin-top: 10px; }
+.fc-bar { height: 6px; background: var(--bg3); border-radius: 4px; overflow: hidden; margin: 6px 0 4px; }
+.fc-bar span { display: block; height: 100%; background: var(--success, #2ec4b6); transition: width .3s; }
+.fc-head { display: flex; align-items: center; gap: 8px; }
+.fc-head-t { flex: 1; min-width: 0; text-align: center; }
+.fc-stage { margin: 12px 0; display: flex; justify-content: center; }
+.fc-card { position: relative; width: 100%; max-width: 480px; min-height: 300px; background: var(--bg2); border: 2px solid var(--border); border-radius: 18px; padding: 18px 16px 34px; box-shadow: 0 6px 18px rgba(0,0,0,.25); touch-action: pan-y; user-select: none; -webkit-user-select: none; cursor: pointer; display: flex; flex-direction: column; }
+.fc-card.fc-test { cursor: default; user-select: text; -webkit-user-select: text; min-height: 240px; }
+.fc-top { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; color: var(--text3); }
+.fc-no { font-family: 'JetBrains Mono', monospace; }
+.fc-dots { letter-spacing: 2px; color: var(--success, #2ec4b6); }
+.fc-badge { color: var(--warn); font-weight: 700; }
+.fc-q { font-size: 1.7rem; font-weight: 800; text-align: center; margin: 22px 0 12px; word-break: break-word; }
+.fc-choices { font-size: 0.85rem; color: var(--text2); margin-bottom: 8px; }
+.fc-a { display: none; border-top: 1px dashed var(--border); padding-top: 12px; font-size: 1.02rem; }
+.fc-card.flipped .fc-a, .fc-a.fc-a-show { display: block; }
+.fc-seg { margin: 4px 0; line-height: 1.5; }
+.fc-pos { display: inline-block; font-size: 0.7rem; padding: 1px 6px; margin-right: 6px; border-radius: 8px; background: var(--bg3); color: var(--text2); vertical-align: middle; }
+.fc-note { margin-top: 8px; font-size: 0.8rem; color: var(--text2); }
+.fc-hint { position: absolute; bottom: 8px; left: 0; right: 0; text-align: center; font-size: 0.72rem; color: var(--text3); }
+.fc-tag { position: absolute; top: 14px; padding: 3px 10px; border: 3px solid; border-radius: 8px; font-weight: 800; font-size: 1rem; opacity: 0; transform: rotate(-12deg); pointer-events: none; }
+.fc-tag-ok { left: 14px; color: #2ec4b6; border-color: #2ec4b6; }
+.fc-tag-ng { right: 14px; color: #ff5d6c; border-color: #ff5d6c; transform: rotate(12deg); }
+.fc-card.to-ok { border-color: #2ec4b6; } .fc-card.to-ok .fc-tag-ok { opacity: 1; }
+.fc-card.to-ng { border-color: #ff5d6c; } .fc-card.to-ng .fc-tag-ng { opacity: 1; }
+.fc-btns { display: flex; gap: 8px; }
+.fc-btns .btn { flex: 1; font-size: 0.88rem; padding-left: 4px; padding-right: 4px; white-space: nowrap; }
+.fc-ok { background: #2ec4b6 !important; color: #fff !important; }
+.fc-ng { background: #ff5d6c !important; color: #fff !important; }
+.fc-result { margin: 8px 0; font-weight: 700; }
+.fc-result.ok { color: #2ec4b6; } .fc-result.ng { color: #ff5d6c; }
+.fc-choice-btns { display: flex; flex-direction: column; gap: 6px; }
+.fc-msg { margin-bottom: 6px; }
 </style>
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
@@ -716,10 +762,11 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
           <option value="choice">🎴 4択択一モード</option>
           <option value="minhaya">⚡ みんはや形式 (1文字ずつ4択)</option>
           <option value="tap">👆 文字タップモード (Duolingo風)</option>
-          <option value="self">🧠 自己申告モード (Anki風)</option>
         </select>
       </div>
       <button class="btn btn-start" style="margin:14px 0 10px;" onclick="startQuiz('normal')">🚀 クイズスタート</button>
+      <!-- ★【0.04.30】自己申告モード（Anki風）は「🃏 カードモード」として独立（成績も別） -->
+      <button class="btn btn-secondary" style="margin:0 0 10px;" onclick="openCardMode()">🃏 カードモード<span style="font-size:0.7rem; font-weight:500;">　めくって覚える（右に振ったら「わかる」）</span></button>
       <div class="form-row" style="margin:0;">
         <button class="btn btn-accent home-sub-btn" style="flex:1;" onclick="startQuiz('tokkun')">🔥 集中特訓<span style="font-size:0.65rem; font-weight:500;">苦手・しっかりのみ</span></button>
         <button class="btn btn-success home-sub-btn" style="flex:1;" onclick="startQuiz('review')">♻️ ランダム復習<span style="font-size:0.65rem; font-weight:500;">卒業済みから出題</span></button>
@@ -924,6 +971,11 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
     <div id="calApp"></div>
   </div>
 
+  <!-- ★【0.04.30】🃏 カードモード -->
+  <div id="pgCards" class="screen">
+    <div id="cardApp" class="drill-app"></div>
+  </div>
+
   <div id="pgListen" class="screen">
     <div class="page-head"><h2>🎧 聞き流し</h2><div class="page-head-btns"><button class="chip" onclick="openPage('pgHome')">戻る</button></div></div>
     <div id="listenApp"></div>
@@ -1001,7 +1053,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
         </div>
       </div>
       <label class="toggle-pill" style="margin-top:12px;"><input type="checkbox" id="chkShareStats" onchange="toggleShareStats()">📊 成績をフレンドと共有する</label>
-      <div class="hint-small" style="margin-top:6px;">有効にすると、カテゴリーごとの成績（正解数・成績率）がフレンドと共有され、ランキングにも表示されます。</div>
+      <div class="hint-small" style="margin-top:6px;">はじめからオンです。カテゴリーごとの成績（正解数・成績率）がフレンドと共有され、ランキングにも表示されます。見せたくないときはオフにしてください。</div>
       <button class="btn btn-secondary" style="margin-top:10px;" onclick="openPage('pgCompareStats')">📊 フレンドと成績を比較</button>
     </div>
 
@@ -1011,10 +1063,10 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
     </div>
 
     <div class="card">
-      <div class="setting-box-title">📲 アプリ・通知</div>
+      <div class="setting-box-title">📲 アプリ・通知 <span class="friend-req-badge app-upd-badge" style="display:none;">1</span></div>
       <div id="notifySettings" class="hint-small">読み込み中...</div>
-      <a class="btn btn-secondary" style="margin-top:10px; text-decoration:none; justify-content:center;" href="apk/susuruanki.apk" download onclick="if(typeof isAndroidApp==='function'&&isAndroidApp()){event.preventDefault();appInstallApk();}">🤖 Android アプリ（APK）をダウンロード</a>
-      <div class="hint-small" style="margin-top:4px;">Android の端末で開いてインストールします（「提供元不明のアプリ」の許可が必要なことがあります）。中身はこのウェブ版と同じで、学習データも共通です。Chrome を使わないので、Chrome に時間制限があっても開けます。アプリの中で押すと、最新のアプリに上書きで入れ直します（新しいアプリがあるときは、開いたときにも知らせます）。iPhone・パソコンは上の「アプリとしてインストール」を使ってください。</div>
+      <a id="apkDlBtn" class="btn btn-secondary" style="margin-top:10px; text-decoration:none; justify-content:center;" href="apk/susuruanki.apk" download onclick="if(typeof isAndroidApp==='function'&&isAndroidApp()){appApkCheckNow(event);}">🤖 Android アプリ（APK）をダウンロード</a>
+      <div id="apkDlHint" class="hint-small" style="margin-top:4px;">Android の端末で開いてインストールします（「提供元不明のアプリ」の許可が必要なことがあります）。中身はこのウェブ版と同じで、学習データも共通です。Chrome を使わないので、Chrome に時間制限があっても開けます。アプリの中で押すと、最新のアプリに上書きで入れ直します（新しいアプリがあるときは、開いたときにも知らせます）。iPhone・パソコンは上の「アプリとしてインストール」を使ってください。</div>
     </div>
 
     <div class="card">
@@ -1066,7 +1118,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
         <button class="btn btn-secondary" onclick="exportTextOpen()">📝 テキスト出力</button>
         <button class="btn btn-secondary" onclick="importTextOpen()">📝 テキスト入力</button>
       </div>
-      <div class="hint-small" style="margin-top:8px;">JSONは学習記録・画像も含む完全バックアップ、CSVはカードのみです。構造式・漢文はテキストなのでどちらにも含まれます。<br>CSVの列：問題・答え・フォルダー（「親>子」で入れ子）・メモ・選択肢（「a / b / c」）・形式（「例文」「テスト」）。同じフォルダーに同じ問題があれば、重複させずに更新するかどうかを確認します（空欄のメモは消しません）。</div>
+      <div class="hint-small" style="margin-top:8px;">JSONは学習記録・画像も含む完全バックアップ、CSVはカードのみです。読み上げの読み方（歴史的仮名づかい → 現代仮名づかい など）は、JSON・CSVのどちらにも入ります（CSVでは形式「読み方」の行）。構造式・漢文はテキストなのでどちらにも含まれます。<br>CSVの列：問題・答え・フォルダー（「親>子」で入れ子）・メモ・選択肢（「a / b / c」）・形式（「例文」「テスト」）。同じフォルダーに同じ問題があれば、重複させずに更新するかどうかを確認します（空欄のメモは消しません）。</div>
       <button class="btn btn-secondary" style="margin-top:10px;" onclick="repairInflatedStats()">🩹 異常な成績（正解数・誤答数が1000回以上）を修復</button>
     </div>
 
@@ -1451,6 +1503,10 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
       <input type="text" id="txtChemSearch" class="form-control" placeholder="例: サリチル酸 / C2H6O / CH3COOH / カルボキシ基" oninput="renderChemSearchResults(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault(); searchChemOnline();}">
       <button type="button" class="btn btn-secondary" style="width:auto; padding:0 12px; font-size:0.8rem; white-space:nowrap;" onclick="searchChemOnline()">🌐 ネット検索</button>
     </div>
+    <div class="form-row" style="margin-top:6px; align-items:center;">
+      <button type="button" class="chip" onclick="chemAiDraw()">🤖 AI で描く</button>
+      <label class="toggle-pill" style="display:flex; align-items:center; gap:6px;"><input type="checkbox" id="chkChemAppend">選んだものを足していく（複数の構造式）</label>
+    </div>
     <div id="chemSearchStatus" class="hint-small" style="margin-top:4px;"></div>
     <div id="chemSearchResults" class="chip-row" style="max-height:120px; overflow-y:auto;"></div>
 
@@ -1466,7 +1522,11 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
         ・同じ数字で環を閉じる　例: C1CCCCC1（シクロヘキサン）<br>
         ・<b>/ \</b> でシス・トランス　例: C/C=C\C（シス）、C/C=C/C（トランス）<br>
         ・<b>*</b> は結合の腕（線だけ残ります）　例: *C(=O)O（−COOH）、*C(=O)O*（エステル結合）<br>
-        ・<b>.</b> で区切ると、別々の分子を並べて描けます　例: CC(=O)O.OCC
+        ・<b>.</b> で区切ると、別々の分子を並べて描けます　例: CC(=O)O.OCC<br>
+        ・<b>□</b> は空欄（穴埋め）　例: CC(=O)□<br>
+        ・<b>[R]</b> <b>[R1]</b> <b>[X]</b> など、元素でない記号はそのまま描きます　例: [R]C(=O)O[R']（エステル）<br>
+        ・<b> → </b> <b> + </b> で反応式、<b> | </b> で構造式を並べます（前後に空白）　例: CC(=O)O + OCC → CC(=O)OCC + O<br>
+        ・ネットで見つからないものは「🤖 AI で描く」（AI のキー が必要。描いたものは必ず確かめてください）
       </div>
     </details>
 
@@ -1489,8 +1549,12 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
     <label class="section-label">① 白文（漢字の本文）を入力</label>
     <input type="text" id="txtKanbunPlain" class="form-control" style="font-family:'Noto Serif JP', serif; font-size:1.1rem;" placeholder="例: 学而時習之" oninput="onKanbunPlainInput()">
 
-    <label class="section-label" style="margin-top:12px;">② 字をタップして返り点・送り仮名を付ける</label>
+    <label class="section-label" style="margin-top:12px;">② 字をタップしてふりがな・送り仮名を付ける ／ 🔢 読む順にタップすると返り点を自動で付ける</label>
+    <div id="kbNumBar" class="chip-row" style="margin-bottom:6px;"></div>
+    <div id="kbNumHint" class="hint-small" style="margin-bottom:4px;"></div>
     <div id="kanbunTiles" class="kb-tiles"></div>
+    <div id="kbNumStatus" class="hint-small" style="margin-top:4px;"></div>
+    <details style="margin-top:4px;"><summary class="hint-small" style="cursor:pointer;">ℹ️ 読む順の番号の付け方</summary><div class="hint-small">・「🔢 読む順にタップ」をオンにして、先頭から読む順に字をタップします（1, 2, 3…）。<br>・所以（ゆゑん）のように、まとめて読む熟語は「＝ 次も同じ番号」を押してから2字目をタップ（同じ番号になります）。<br>・未・将・当などの再読文字は、1回目に読むところでタップし、2回目に読むところでもう一度タップします。<br>・置き字（而・於 など）はタップしません（置き字になります）。<br>・句形の A・B などは熟語が入るものとして、レ点ではなく一二点で返ります。<br>・全部の字に番号が付くと、返り点（レ・一二・上下・甲乙・天地）と熟語の竪点（-）が付きます。</div></details>
 
     <div id="kanbunUnitPanel" class="kb-unit-panel" style="display:none;">
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
@@ -1513,7 +1577,9 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
       <div class="toggle-grid" style="margin-top:8px;">
         <label class="toggle-pill"><input type="checkbox" id="chkKanbunOki" onchange="onKanbunFieldInput('oki')">置き字（読まない）</label>
         <label class="toggle-pill"><input type="checkbox" id="chkKanbunKana" onchange="onKanbunFieldInput('kana')">書き下しでは読みをひらがなで</label>
+        <label class="toggle-pill"><input type="checkbox" id="chkKanbunHy" onchange="onKanbunFieldInput('hy')">次の字と熟語（竪点 -）</label>
       </div>
+      <div style="margin-top:6px;"><div class="hint-small">再読文字の2回目の読み（例：未 → ず。空なら再読しない）</div><input type="text" id="txtKanbunSai" class="form-control" style="padding:8px;" placeholder="例: ず" oninput="onKanbunFieldInput('sai')"></div>
     </div>
 
     <label class="section-label" style="margin-top:12px;">👀 プレビュー</label>
@@ -1655,9 +1721,11 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 <script src="streak.js"></script>
 <script src="tts.js"></script>
 <script src="drill.js"></script>
+<script src="cards.js"></script>
 <script src="plan.js"></script>
 <script src="race.js"></script>
 <script src="text-import.js"></script>
+<script src="vt-export.js"></script>
 <script src="listen.js"></script>
 <script src="shared.js"></script>
 <script src="group.js"></script>

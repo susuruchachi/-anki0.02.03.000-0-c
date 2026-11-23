@@ -1,7 +1,26 @@
 // ----------------- JSON / CSV 管理 -----------------
 function exportJSON() {
-  const blob = new Blob([JSON.stringify({ app: 'susuru_anki', version: typeof APP_VERSION !== 'undefined' ? APP_VERSION : '', exportedAt: Date.now(), db, categories, categoryTree, catSubjects }, null, 2)], { type: 'application/json' });
+  const blob = new Blob([JSON.stringify({ app: 'susuru_anki', version: typeof APP_VERSION !== 'undefined' ? APP_VERSION : '', exportedAt: Date.now(), db, categories, categoryTree, catSubjects, ttsDict: vtxLiveDict() }, null, 2)], { type: 'application/json' });
   saveBlobFile(blob, `susuru_anki_${Date.now()}.json`);
+}
+// ★【0.04.37】読み上げの読み方（歴史的仮名づかい → 現代仮名づかい など。ttsDict）もバックアップに入れる（消したものは入れない）
+function vtxLiveDict() {
+  const o = {};
+  Object.entries(typeof ttsDict === 'object' && ttsDict ? ttsDict : {}).forEach(([k, v]) => { if (v && !v.deleted && v.r) o[k] = { r: v.r, at: v.at || Date.now() }; });
+  return o;
+}
+// バックアップの読み方を、今の読み方に混ぜる（同じ書き方は新しく登録した方）。混ぜた数を返す
+function mergeBackupDict(d) {
+  if (!d || typeof d !== 'object') return 0;
+  let n = 0;
+  Object.entries(d).forEach(([k, v]) => {
+    if (!k || !v || !v.r) return;
+    const cur = ttsDict[k];
+    if (cur && !cur.deleted && cur.r === v.r) return;
+    if (cur && (cur.at || 0) > (v.at || 0)) return;
+    ttsDict[k] = { r: String(v.r), at: v.at || Date.now() }; n++;
+  });
+  return n;
 }
 // ★【0.03.12】JSONの取り込みは「今のデータに追加（統合）」か「置き換え」を選ぶ（以前は確認なしで全部置き換えていた）
 function importJSON(e) {
@@ -54,11 +73,12 @@ function importBackupMerge(p) {
   r = reconcileUnionState(r);
   r.structAt = -1; // 親子関係・教科タグが食い違うときは今のデータを優先する
   mergeIntoLocal(r);
+  const nd = mergeBackupDict(p.ttsDict); // ★【0.04.37】読み方
   structAt = Date.now(); _structHash = structFingerprint();
   autoMerge(true);
   saveData(true);
   if (typeof refreshVisibleViews === 'function') refreshVisibleViews(true);
-  alert(`📦 取り込みました（統合）。\nカード: ${before}枚 → ${db.length}枚\nフォルダー: ${categories.length}個`);
+  alert(`📦 取り込みました（統合）。\nカード: ${before}枚 → ${db.length}枚\nフォルダー: ${categories.length}個${nd ? `\n読み方: ${nd}件` : ''}`);
   openPage('pgHome');
 }
 // 共有・購読中のカテゴリーのカード（置き換え・全消去の対象にしない。消すと共有している全員の手元から消えてしまうため）
@@ -106,14 +126,17 @@ function importBackupReplace(p) {
   Object.keys(categoryTree).forEach(k => { markCatCreated(k); categoryTree[k].forEach(markCatCreated); });
   structAt = Date.now();
   ensureSystemSanity(); autoMerge(true);
+  const nd = mergeBackupDict(p.ttsDict); // ★【0.04.37】読み方（置き換えでも、今の読み方は消さずに混ぜる）
   saveData(true);
   if (typeof refreshVisibleViews === 'function') refreshVisibleViews(true);
-  alert(`📦 取り込みました（置き換え）。\nカード: ${db.length}枚`);
+  alert(`📦 取り込みました（置き換え）。\nカード: ${db.length}枚${nd ? `\n読み方: ${nd}件` : ''}`);
   openPage('pgHome');
 }
 function exportCSV() {
   let lines = [["問題", "答え", "フォルダー", "番号", "メモ", "選択肢", "形式", "星", "レベル", "正解数", "不正解数"]];
   sortCardsByNumber([...db]).forEach(q => lines.push([q.question, q.answer, getCategoryPathString(q.category), q.no ? cardNoText(q.no) : '', q.note || '', Array.isArray(q.choices) ? q.choices.join(' / ') : '', q.kind === 'test' ? 'テスト' : q.kind === 'cloze' ? '例文' : q.kind === 'self' ? '自己申告' : q.kind === 'intro' ? '導入' : '', starsText(q.stars), q.level, q.correct, q.incorrect]));
+  // ★【0.04.37】読み方（歴史的仮名づかい → 現代仮名づかい など）は、形式「読み方」の行で（問題＝書き方、答え＝読み）
+  Object.entries(vtxLiveDict()).forEach(([k, v]) => lines.push([k, v.r, '', '', '', '', '読み方', '', '', '', '']));
   const csv = lines.map(l => l.map(t => `"${String(t === undefined || t === null ? '' : t).replace(/"/g, '""')}"`).join(",")).join("\n");
   const b = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csv], { type: 'text/csv;charset=utf-8;' });
   saveBlobFile(b, `susuru_anki_${Date.now()}.csv`);
@@ -201,7 +224,8 @@ function csvApplyPlanAsk(plan, label) {
     if (!plan) return;
     const adds = plan.filter(x => x.type === 'add').length;
     const ups = plan.filter(x => x.type === 'update');
-    if (!adds && !ups.length) { alert('📊 新しいカードも、変更のあるカードもありませんでした。'); return; }
+    const rds = plan.filter(x => x.type === 'reading').length;
+    if (!adds && !ups.length && !rds) { alert('📊 新しいカードも、変更のあるカードも、新しい読み方もありませんでした。'); return; }
     if (!ups.length) { applyCSVImport(plan, false); return; }
     const ansCh = ups.filter(x => x.changes.includes('答え') || x.changes.includes('問題')).length;
     const sample = ups.slice(0, 3).map(x => `・${escapeHtml(String(x.ex.question).slice(0, 18))}（${x.changes.join('・')}）`).join('<br>');
@@ -226,6 +250,12 @@ function planCSVImport(rows) {
   for (let i = 1; i < rows.length; i++) {
     const c = rows[i]; if (c.length <= Math.max(iQ, iA)) continue;
     let q = c[iQ]?.trim(); const a = c[iA]?.trim(); if (!q || !a) continue;
+    // ★【0.04.37】形式「読み方」の行は、カードではなく読み上げの読み方
+    if (iK !== -1 && /^(読み方|読み|reading)$/i.test(String(c[iK] || '').trim())) {
+      const cur = ttsDict[q];
+      if (!cur || cur.deleted || cur.r !== a) plan.push({ type: 'reading', s: q, r: a });
+      continue;
+    }
     // 星：「星」列、または問題の後ろの「★★」
     const qs = splitQuestionStars(q); q = qs.q;
     const stars = iSt !== -1 && String(c[iSt] || '').trim() ? parseStars(c[iSt]) : qs.stars;
@@ -270,7 +300,9 @@ function applyCSVImport(plan, withUpdates) {
   if (withUpdates) takeSnapshot('CSVの取り込み（更新）');
   let added = 0, updated = 0;
   const touchedCats = new Set();
+  let readings = 0;
   plan.forEach(x => {
+    if (x.type === 'reading') { ttsDict[x.s] = { r: x.r, at: Date.now() }; readings++; return; } // ★【0.04.37】読み方
     if (x.type === 'update' && withUpdates) {
       const ex = db.find(d => d.id === x.ex.id); if (!ex) return;
       Object.assign(ex, x.upd); touchCard(ex); updated++; touchedCats.add(ex.category);
@@ -290,7 +322,8 @@ function applyCSVImport(plan, withUpdates) {
   });
   autoMerge();
   if (typeof pushSharedDocsForCategories === 'function') pushSharedDocsForCategories([...touchedCats]);
-  alert(`📊 CSVを取り込みました。\n新規追加: ${added}件\n更新: ${updated}件`); openPage('pgHome');
+  if (readings) { try { saveData(true); } catch (e) {} }
+  alert(`📊 CSVを取り込みました。\n新規追加: ${added}件\n更新: ${updated}件${readings ? `\n読み方: ${readings}件` : ''}`); openPage('pgHome');
 }
 
 window.resetScores = function resetScores() {
@@ -352,8 +385,10 @@ function exportTextOpen() {
       ${textCats().map(c => `<label class="bulkdel-row" style="padding-left:${depth(c) * 16}px;"><input type="checkbox" class="txtExpCat" value="${escAttr(c)}" onchange="textPickChildren(this)"><div>${escapeHtml(c)} <span class="hint-small">${count(c)}${total(c) !== count(c) ? `／中も合わせて ${total(c)}` : ''}枚</span></div></label>`).join('')}
     </div>
     <label class="section-label" style="margin-top:8px;">形</label>
-    <select id="txtExpFormat" class="form-control"><option value="tab">1行に「問題 タブ 答え」（フォルダーの一括追加と同じ）</option><option value="lines">2行ずつ（問題の行・答えの行）</option></select>
+    <select id="txtExpFormat" class="form-control" onchange="textFmtHint()"><option value="vt">📄 単語帳の形（暗記の「テキストから問題を作る」で読める。番号・派生語・熟語・例文・Check!・導入の文もそのまま）</option><option value="tab">1行に「問題 タブ 答え」（フォルダーの一括追加と同じ）</option><option value="lines">2行ずつ（問題の行・答えの行）</option></select>
+    <div id="txtFmtHint" class="hint-small" style="margin-top:4px;"></div>
     <div class="plan-btns" style="margin-top:10px; flex-wrap:wrap;"><button class="btn btn-primary" onclick="exportTextDo('file')">💾 保存</button><button class="btn btn-secondary" onclick="exportTextDo('copy')">📋 コピー</button><button class="btn btn-secondary" onclick="textCloseOverlay()">やめる</button></div>`);
+  textFmtHint();
 }
 function textPickAll(on) { document.querySelectorAll('.txtExpCat').forEach(x => { x.checked = on; }); }
 function textPickChildren(el) {
@@ -373,10 +408,31 @@ function exportTextBuild(cats, fmt) {
   });
   return { text: L.join('\n') + '\n', n };
 }
+function textFmtHint() {
+  const el = document.getElementById('txtFmtHint'), f = (document.getElementById('txtExpFormat') || {}).value; if (!el) return;
+  el.textContent = f === 'vt' ? 'セクションのフォルダー（例：鉄壁 › #28 産業）ごとに書き出します。「🧠 暗記」→「📄 テキストから問題を作る」に貼ると、同じカードになります（成績は書き出しません）。'
+    : 'カードの問題と答えだけを書き出します（メモ・選択肢・番号は書きません）。設定の「📝 テキスト入力」やフォルダーの「一括追加」で戻せます。';
+}
 async function exportTextDo(how) {
   const cats = [...document.querySelectorAll('.txtExpCat:checked')].map(x => x.value);
   if (!cats.length) return alert('フォルダーを選んでください。');
-  const { text, n } = exportTextBuild(cats, document.getElementById('txtExpFormat').value);
+  const fmt = document.getElementById('txtExpFormat').value;
+  if (fmt === 'vt') {
+    // ★【0.04.32】単語帳の形：書いたテキストを読み直して、元のカードと同じになるか確かめてから
+    const r = vtxExport(cats);
+    if (!r.n) return alert('選んだフォルダーにカードがありません。');
+    const bad = r.checks.filter(x => !x.v.same);
+    if (bad.length) {
+      const lines = bad.flatMap(x => x.v.diffs).slice(0, 8).join('\n'), cnt = bad.reduce((s, x) => s + x.v.diffs.length, 0);
+      if (!confirm(`⚠️ 読み込み直したときに、元と同じにならないカードが ${cnt}枚あります（単語帳の形で表せない形のカード）：\n${lines}${cnt > 8 ? '\n…' : ''}\n\nこのまま書き出しますか？`)) return;
+    }
+    if (how === 'copy') { try { await navigator.clipboard.writeText(r.text); alert(`📋 ${r.secs.length}セクション（${r.n}枚）をコピーしました。`); } catch (e) { alert('⚠️ コピーできませんでした。「保存」を使ってください。'); } return; }
+    const name = r.secs.length === 1 ? r.secs[0].replace(/[\\/:*?"<>|#]/g, '_').trim() : 'すするanki-単語帳';
+    saveBlobFile(new Blob([r.text], { type: 'text/plain;charset=utf-8' }), `${name}-${new Date().toISOString().slice(0, 10)}.txt`);
+    textCloseOverlay();
+    return;
+  }
+  const { text, n } = exportTextBuild(cats, fmt);
   if (!n) return alert('選んだフォルダーにカードがありません。');
   if (how === 'copy') {
     try { await navigator.clipboard.writeText(text); alert(`📋 ${n}枚のカードをコピーしました。`); } catch (e) { alert('⚠️ コピーできませんでした。「ファイルに保存」を使ってください。'); }

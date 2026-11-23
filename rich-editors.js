@@ -54,7 +54,9 @@ const CHEM_DICTIONARY = [
 const CHEM_FRAGMENTS = [
   ['ベンゼン環', 'C1=CC=CC=C1'], ['-OH', 'O'], ['-COOH', 'C(=O)O'], ['-CHO', 'C=O'], ['-NH2', 'N'], ['-NO2', 'N(=O)=O'],
   ['-SO3H', 'S(=O)(=O)O'], ['-Cl', 'Cl'], ['-Br', 'Br'], ['-CH3', 'C'], ['エステル', 'C(=O)O'], ['二重結合 =', '='], ['三重結合 #', '#'],
-  ['枝 ( )', '()'], ['環を閉じる 1', '1'], ['結合の腕 *', '*']
+  ['枝 ( )', '()'], ['環を閉じる 1', '1'], ['結合の腕 *', '*'],
+  // ★【0.04.34】空欄・記号・複数の構造式
+  ['空欄 □', '□'], ['記号 [R]', '[R]'], ['記号 [X]', '[X]'], ['→ 反応の矢印', ' → '], ['＋ 足す', ' + '], ['｜ 並べる', ' | ']
 ];
 
 let _richEditorTarget = null; // 挿入先のテキストエリア
@@ -139,10 +141,16 @@ function chemResultChip(label, smiles, title) {
   const b = document.createElement('button');
   b.type = 'button'; b.className = 'chip chip-strong'; b.innerText = label;
   if (title) b.title = title;
-  b.onclick = () => { document.getElementById('txtChemSmiles').value = smiles; updateChemPreview(); };
+  b.onclick = () => chemUseSmiles(smiles);
   return b;
 }
 
+// ★【0.04.34】選んだ構造：「足していく」がオンで、もう構造式があれば「 | 」で並べる（複数の構造式）
+function chemUseSmiles(smiles) {
+  const el = document.getElementById('txtChemSmiles'), add = document.getElementById('chkChemAppend');
+  el.value = add && add.checked && el.value.trim() ? `${el.value.trim()} | ${smiles}` : smiles;
+  updateChemPreview();
+}
 function renderChemSearchResults(query) {
   const box = document.getElementById('chemSearchResults');
   if (!box) return;
@@ -197,20 +205,41 @@ async function searchChemOnline() {
     if (/[ぁ-んァ-ヶ一-龠]/.test(q)) {
       status.innerText = '🌐 日本語名で検索中...';
       const r = await lookupJapaneseChemName(q);
-      document.getElementById('txtChemSmiles').value = r.smiles;
+      chemUseSmiles(r.smiles);
       status.innerText = `✅ 「${r.title}」が見つかりました（${r.source}${r.cid ? ' CID: ' + r.cid : ''}）。プレビューで確認してください`;
       updateChemPreview();
       return;
     }
     status.innerText = '🌐 PubChemで検索中...';
     const r = await pubchemByName(q);
-    document.getElementById('txtChemSmiles').value = r.smiles;
+    chemUseSmiles(r.smiles);
     status.innerText = `✅ 「${r.title}」が見つかりました（PubChem CID: ${r.cid}）`;
     updateChemPreview();
   } catch (e) {
+    // ★【0.04.34】見つからなければ AI に SMILES で描いてもらう
+    if (typeof aiAvailable === 'function' && aiAvailable()) return chemAiDraw(q, true);
     status.innerText = counts ? '⚠️ その分子式の化合物が見つかりませんでした。'
-      : '⚠️ 見つかりませんでした。別の名前（慣用名・英語名）や分子式で試してください。';
+      : '⚠️ 見つかりませんでした。別の名前（慣用名・英語名）や分子式で試してください（設定 → 🤖 AI でキーを入れると、見つからないものは AI が描きます）。';
   }
+}
+// ★【0.04.34】AI に SMILES で描いてもらう（見つからない化合物・官能基・部分構造・反応式も）
+async function chemAiDraw(q, afterSearch) {
+  q = String(q || document.getElementById('txtChemSearch').value || '').trim();
+  const status = document.getElementById('chemSearchStatus');
+  if (!q) { status.innerText = '描きたいもの（化合物名・官能基・説明）を上の欄に入れてください。'; return; }
+  if (typeof aiAvailable !== 'function' || !aiAvailable()) { status.innerText = '⚠️ AI のキーが設定されていません（設定 → 🤖 AI）。'; return; }
+  status.innerText = `${afterSearch ? 'ネットでは見つからなかったので、' : ''}🤖 AI が構造式を考えています…`;
+  const t0 = Date.now();
+  try {
+    const txt = await aiRequest('あなたは高校化学の先生です。指示どおりに、JSONだけを出力します。', [{ text:
+      `「${q}」の構造式を SMILES で書いてください。\n決まり：\n・高校化学の教科書の書き方。ベンゼン環はケクレ構造（C1=CC=CC=C1 のように二重結合を書く。小文字の芳香族表記は使わない）\n・官能基・置換基・結合など、何も付いていない結合の腕は * （例：カルボキシ基 *C(=O)O、エステル結合 *C(=O)O*）\n・R・R'・X などの記号は [R] [R'] [X] のように角かっこで\n・空欄にする所は □\n・反応式なら、物質を「 + 」、左辺と右辺を「 → 」で区切る（前後に空白）\n・いくつかの物質を並べるなら「 | 」で区切る\n・分からない・化合物でないときは smiles を空に\nJSONだけ：{"smiles":"…","name":"日本語の名前","note":"一言（構造の説明）"}` }],
+      { json: true, maxTokens: 600, timeout: 20000, totalTimeout: 40000 });
+    const r = parseAiJson(txt) || {};
+    const sm = String(r.smiles || '').trim();
+    if (!sm) { status.innerText = `⚠️ AI にも分かりませんでした${r.note ? '（' + r.note + '）' : ''}。名前を変えて試すか、SMILES を直接書いてください。`; return; }
+    chemUseSmiles(sm);
+    status.innerHTML = `🤖 AI が描きました：${escapeHtml(r.name || q)}${r.note ? `（${escapeHtml(r.note)}）` : ''}。<b>正しいか、プレビューで必ず確かめてください。</b> ${typeof aiModelTag === 'function' ? aiModelTag(aiModelSince(t0)) : ''}`;
+  } catch (e) { status.innerText = '⚠️ AI に頼めませんでした：' + (e.message || e); }
 }
 // 以前の名前でも呼べるように
 const searchChemOnPubChem = searchChemOnline;
@@ -225,13 +254,19 @@ function updateChemPreview() {
   const smiles = document.getElementById('txtChemSmiles').value.trim();
   _chemPreviewOk = false;
   if (!smiles) { box.innerHTML = '<div class="hint-small">ここにプレビューが表示されます</div>'; return; }
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  // ★【0.04.34】「 → 」「 + 」「 | 」で区切った複数の構造式は、並べて描く
+  const parts = chemSplitParts(smiles);
   box.innerHTML = '';
-  box.appendChild(svg);
-  drawSmilesInto(svg, smiles, 1.5).then(ok => {
+  const wrap = document.createElement('div'); wrap.className = 'chem-multi'; box.appendChild(wrap);
+  const jobs = parts.map(p => {
+    if (p.smiles === undefined) { const o = document.createElement('span'); o.className = 'chem-op'; o.textContent = p.op; wrap.appendChild(o); return Promise.resolve(true); }
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); wrap.appendChild(svg);
+    return drawSmilesInto(svg, p.smiles, parts.length > 1 ? 1.1 : 1.5);
+  });
+  Promise.all(jobs).then(res => {
     if (document.getElementById('txtChemSmiles').value.trim() !== smiles) return; // 入力が進んでいたら無視
-    _chemPreviewOk = ok;
-    if (!ok) box.innerHTML = '<div class="chem-err">⚠️ この書き方では構造式を描けません。カッコや環の番号の対応を確認してください。</div>';
+    _chemPreviewOk = res.every(Boolean);
+    if (!_chemPreviewOk) box.insertAdjacentHTML('beforeend', '<div class="chem-err">⚠️ この書き方では描けない構造式があります。カッコや環の番号の対応を確認してください。</div>');
   }).catch(() => { box.innerHTML = '<div class="chem-err">⚠️ 構造式ライブラリを読み込めません（通信状況を確認してください）</div>'; });
 }
 
@@ -258,6 +293,7 @@ function openKanbunEditor(textareaId) {
   _richEditorRange = hit ? [hit.start, hit.end] : null;
   _kbUnits = hit ? parseKanbun(hit.body) : [];
   _kbSel = _kbUnits.length ? 0 : -1;
+  _kbNumMode = false; _kbSame = false; _kbHist = []; kbOrdFromMarks(); // ★【0.04.33】読む順の番号
   document.getElementById('txtKanbunPlain').value = _kbUnits.map(u => u.ch).join('');
   document.getElementById('kanbunEditorTitle').innerText = hit ? '📜 漢文を編集' : '📜 漢文を挿入';
   // 問題文から開いた場合だけ「書き下し文を答えに入れる」を出す
@@ -273,7 +309,7 @@ function closeKanbunEditor() { closeRichOverlay('kanbunEditorOverlay'); }
 function onKanbunPlainInput() {
   const chars = Array.from(document.getElementById('txtKanbunPlain').value.replace(/\s/g, ''));
   const old = _kbUnits;
-  _kbUnits = chars.map((ch, i) => (old[i] && old[i].ch === ch) ? old[i] : { ch, re: false, mark: null, okuri: '', furi: '', oki: false, kana: false });
+  _kbUnits = chars.map((ch, i) => (old[i] && old[i].ch === ch) ? old[i] : { ch, re: false, mark: null, okuri: '', furi: '', oki: false, kana: false, ord: [] });
   if (_kbSel >= _kbUnits.length) _kbSel = _kbUnits.length - 1;
   if (_kbSel < 0 && _kbUnits.length) _kbSel = 0;
   renderKanbunEditor();
@@ -324,6 +360,10 @@ function onKanbunFieldInput(field) {
     u.oki = document.getElementById('chkKanbunOki').checked;
   } else if (field === 'kana') {
     u.kana = document.getElementById('chkKanbunKana').checked;
+  } else if (field === 'hy') {
+    u.hy = document.getElementById('chkKanbunHy').checked;
+  } else if (field === 'sai') {
+    u.sai = document.getElementById('txtKanbunSai').value.trim();
   }
   renderKanbunEditor(true);
 }
@@ -336,19 +376,29 @@ function renderKanbunEditor(keepFields) {
   _kbUnits.forEach((u, i) => {
     const t = document.createElement('button');
     t.type = 'button';
-    t.className = 'kb-tile' + (i === _kbSel ? ' active' : '') + (u.oki ? ' oki' : '');
-    const k = kaeriLabel(u);
+    t.className = 'kb-tile' + (i === _kbSel && !_kbNumMode ? ' active' : '') + (u.oki ? ' oki' : '') + (_kbNumMode ? ' numbering' : '');
+    const k = kaeriLabel(u) + (u.hy ? '-' : '');
+    const ord = (u.ord || []).join('・');
     t.innerHTML = `<span class="kb-tile-ch">${escapeHtml(u.ch)}</span>` +
       (u.okuri ? `<span class="kb-tile-okuri">${escapeHtml(u.okuri)}</span>` : '') +
       (k ? `<span class="kb-tile-kaeri">${escapeHtml(k)}</span>` : '') +
-      (u.furi ? `<span class="kb-tile-furi">${escapeHtml(u.furi)}</span>` : '');
-    t.onclick = () => selectKanbunUnit(i);
+      (u.furi ? `<span class="kb-tile-furi">${escapeHtml(u.furi)}</span>` : '') +
+      (ord ? `<span class="kb-tile-ord">${escapeHtml(ord)}</span>` : '');
+    t.onclick = () => (_kbNumMode ? kbTap(i) : selectKanbunUnit(i));
     tiles.appendChild(t);
   });
 
+  // ★【0.04.33】読む順の番号のボタン
+  const nb = document.getElementById('kbNumBar');
+  if (nb) nb.innerHTML = `<button type="button" class="chip${_kbNumMode ? ' active' : ''}" onclick="kbToggleNumMode()">🔢 読む順にタップ${_kbNumMode ? '（オン）' : ''}</button>` +
+    (_kbNumMode ? `<button type="button" class="chip${_kbSame ? ' active' : ''}" onclick="kbArmSame()">＝ 次も同じ番号（熟語）</button><button type="button" class="chip" onclick="kbUndo()">↩ 1つ戻す</button>` : '') +
+    `<button type="button" class="chip" onclick="kbClearNums()">🗑 番号を消す</button><button type="button" class="chip" onclick="kbApplyKaeri(false)">✨ 返り点を付ける</button>`;
+  const nh = document.getElementById('kbNumHint');
+  if (nh) nh.textContent = _kbNumMode ? (_kbSame ? '熟語の次の字をタップ（前と同じ番号になります）' : `次は ${kbNextNumber()} 番。読む順に字をタップ（置き字はタップしない）`) : '';
+
   // 選択中の字の注記パネル
   const panel = document.getElementById('kanbunUnitPanel');
-  const u = _kbUnits[_kbSel];
+  const u = _kbNumMode ? null : _kbUnits[_kbSel];
   panel.style.display = u ? 'block' : 'none';
   if (u) {
     document.getElementById('kanbunSelChar').innerText = u.ch;
@@ -359,6 +409,8 @@ function renderKanbunEditor(keepFields) {
       document.getElementById('txtKanbunFuri').value = u.furi || '';
       document.getElementById('chkKanbunOki').checked = !!u.oki;
       document.getElementById('chkKanbunKana').checked = !!u.kana;
+      document.getElementById('chkKanbunHy').checked = !!u.hy;
+      document.getElementById('txtKanbunSai').value = u.sai || '';
     }
   }
 
@@ -457,4 +509,131 @@ function updateCardPreview() {
   wrap.style.display = 'block';
   setRichContent(document.getElementById('cardPreviewQ'), q || '（問題文なし）', { escape: true, chemScale: 1.1, kanbunRows: 9 });
   setRichContent(document.getElementById('cardPreviewA'), a || '（答えなし）', { escape: true, chemScale: 1.1, kanbunRows: 9 });
+}
+
+// ================================================================
+// ★【0.04.33】読む順に番号を振って、返り点を自動で付ける
+// ・「🔢 読む順にタップ」をオンにして、字を読む順にタップすると 1, 2, 3… と番号が付く
+// ・熟語（所以 など、まとめて読む字）は「＝ 次も同じ番号」を押してからタップ（同じ番号になる）
+// ・同じ字をもう一度タップすると、再読文字（未・将・当…：その場で1回目、返ってきて2回目を読む）
+// ・番号が全部付いたら（または「✨ 返り点を付ける」で）、返り点（レ・一二・上下・甲乙・天地）・竪点（熟語の -）を付ける
+//   句形の A・B などのアルファベットは熟語が入るものとして、レ点ではなく一二点（以上）で返る
+// ・番号を付けなかった字（句読点以外）は置き字にする
+// ================================================================
+let _kbNumMode = false, _kbSame = false, _kbHist = [];
+const KB_PUNCT_RE = /[、。，．・：；！？「」『』（）()〔〕［］\s]/;
+const KB_LETTER_RE = /[A-Za-zＡ-Ｚａ-ｚ]/;
+// 再読文字の読み（1回目：ふりがな・送り仮名 ／ 2回目）
+const KB_SAI = { '未': ['いま', 'ダ', 'ず'], '将': ['まさ', 'ニ', 'す'], '且': ['まさ', 'ニ', 'す'], '当': ['まさ', 'ニ', 'べし'], '応': ['まさ', 'ニ', 'べし'], '宜': ['よろ', 'シク', 'べし'], '須': ['すべか', 'ラク', 'べし'], '猶': ['な', 'ホ', 'ごとし'], '由': ['な', 'ホ', 'ごとし'], '盍': ['なん', 'ゾ', 'ざる'] };
+const kbCountable = u => !KB_PUNCT_RE.test(u.ch);
+// 返り点から番号を作る（編集を開いたとき）
+function kbOrdFromMarks() {
+  _kbUnits.forEach(u => { u.ord = []; });
+  if (!_kbUnits.length || !_kbUnits.some(u => u.mark || u.re)) return; // 返り点が無ければ番号は付けない（タップで付ける）
+  const B = kanbunBlocks(_kbUnits), blockOf = {}; B.forEach((b, k) => b.forEach(i => { blockOf[i] = k; }));
+  let n = 0, lastBlock = -1;
+  const seen = new Set();
+  kanbunReadingOrder(_kbUnits).forEach(i => {
+    const u = _kbUnits[i];
+    if (!kbCountable(u) || u.oki) { lastBlock = -1; return; }
+    const again = seen.has(i); seen.add(i);
+    if (!again && blockOf[i] === lastBlock) { u.ord.push(n); return; }
+    n++; u.ord.push(n); lastBlock = blockOf[i];
+  });
+}
+function kbToggleNumMode() {
+  _kbNumMode = !_kbNumMode; _kbSame = false;
+  renderKanbunEditor();
+}
+function kbNextNumber() { return Math.max(0, ..._kbUnits.flatMap(u => u.ord || [])) + 1; }
+function kbTap(i) {
+  const u = _kbUnits[i]; if (!u || !kbCountable(u)) return;
+  u.ord = u.ord || [];
+  if (_kbSame) {
+    const last = _kbHist[_kbHist.length - 1];
+    const n = last !== undefined ? _kbUnits[last].ord[_kbUnits[last].ord.length - 1] : kbNextNumber();
+    if (u.ord.length) return;
+    u.ord.push(n);
+  } else if (u.ord.length === 1) {
+    if (!confirm(`「${u.ch}」にもう1つ番号を付けて、再読文字（2回読む字）にしますか？`)) return;
+    u.ord.push(kbNextNumber());
+  } else if (u.ord.length >= 2) return;
+  else u.ord.push(kbNextNumber());
+  _kbHist.push(i); _kbSame = false;
+  // 全部の字に番号が付いたら、返り点を付ける
+  if (_kbUnits.every(x => !kbCountable(x) || (x.ord && x.ord.length))) kbApplyKaeri(true);
+  else renderKanbunEditor();
+}
+function kbUndo() {
+  const i = _kbHist.pop(); if (i === undefined) return;
+  const u = _kbUnits[i]; if (u && u.ord) u.ord.pop();
+  renderKanbunEditor();
+}
+function kbClearNums() {
+  _kbUnits.forEach(u => { u.ord = []; }); _kbHist = []; _kbSame = false;
+  renderKanbunEditor();
+}
+function kbArmSame() { if (!_kbHist.length) return alert('先に、熟語の1字目をタップしてください。'); _kbSame = !_kbSame; renderKanbunEditor(); }
+
+// 番号から返り点を作る。{ ok, msg }
+function kbAutoKaeri(U) {
+  U.forEach(u => {
+    if (!kbCountable(u)) return;
+    u.oki = !(u.ord && u.ord.length);
+    u.re = false; u.mark = null; u.hy = false;
+    if (!(u.ord && u.ord.length === 2)) u.sai = '';
+  });
+  // まとまり：続いている同じ番号の字（熟語）。再読文字は1字で1つ
+  const bl = [];
+  U.forEach((u, i) => {
+    if (!u.ord || !u.ord.length) return;
+    const sai = u.ord.length === 2, last = bl[bl.length - 1];
+    if (last && !sai && !last.sai && last.end === i - 1 && last.rank === u.ord[0]) { last.end = i; last.jk = true; return; }
+    bl.push({ start: i, end: i, rank: u.ord[u.ord.length - 1], sai, jk: KB_LETTER_RE.test(u.ch) });
+  });
+  const ranks = bl.map(b => b.rank);
+  if (new Set(ranks).size !== ranks.length) return { ok: false, msg: '同じ番号は、続いている字（熟語）にだけ付けてください。' };
+  const seq = bl.slice().sort((a, b) => a.rank - b.rank), segs = [];
+  let open = null;
+  for (let t = 1; t < seq.length; t++) {
+    const src = seq[t - 1], tgt = seq[t];
+    if (tgt.start > src.start) { open = null; continue; } // 下へ進む（ふつうに読む）
+    // すぐ上の1字に、1字から返る → レ点（熟語・A などからは一二点）
+    if (tgt.end === src.start - 1 && !src.jk && !tgt.jk) { tgt.re = true; open = null; continue; }
+    if (open && open[open.length - 1] === src) open.push(tgt); else { open = [src, tgt]; segs.push(open); }
+  }
+  // 一二点の組が、ほかの組をまたぐときは上下点、さらにまたぐときは甲乙点・天地点
+  const FAM = [['一', '二', '三', '四', '五'], ['上', '中', '下'], ['甲', '乙', '丙', '丁'], ['天', '地', '人']];
+  segs.forEach(sg => { sg.lo = Math.min(...sg.map(b => b.start)); sg.hi = Math.max(...sg.map(b => b.end)); });
+  segs.sort((a, b) => (a.hi - a.lo) - (b.hi - b.lo));
+  for (const sg of segs) {
+    let f = 0;
+    segs.forEach(o => { if (o !== sg && o.fam !== undefined && o.lo <= sg.hi && o.hi >= sg.lo) f = Math.max(f, o.fam + 1); });
+    while (f < FAM.length && FAM[f].length < sg.length) f++;
+    if (f >= FAM.length) return { ok: false, msg: '返る字が多すぎて、返り点で表せませんでした。' };
+    sg.fam = f;
+    const marks = f === 1 && sg.length === 2 ? ['上', '下'] : FAM[f]; // 上下点が2つなら「上・下」（中は使わない）
+    sg.forEach((b, k) => { U[b.start].mark = marks[k]; });
+  }
+  bl.forEach(b => {
+    if (b.re) U[b.start].re = true;
+    if (b.end > b.start && (U[b.start].mark || b.re)) for (let i = b.start; i < b.end; i++) U[i].hy = true; // 熟語の竪点
+    if (b.sai) { const u = U[b.start], d = KB_SAI[u.ch]; u.sai = u.sai || (d ? d[2] : 'ず'); if (d) { if (!u.furi) u.furi = d[0]; if (!u.okuri) u.okuri = d[1]; } }
+  });
+  // 付けた返り点で読むと、番号の順になるか確かめる
+  const want = [];
+  U.forEach((u, i) => (u.ord || []).forEach(n => want.push({ n, i })));
+  want.sort((a, b) => a.n - b.n || a.i - b.i);
+  const got = kanbunReadingOrder(U).filter(i => kbCountable(U[i]) && !U[i].oki);
+  const ok = got.length === want.length && got.every((i, k) => i === want[k].i);
+  return ok ? { ok: true } : { ok: false, msg: 'この読む順は、返り点で表せませんでした（番号を確かめるか、返り点を手で直してください）。' };
+}
+function kbApplyKaeri(auto) {
+  if (!_kbUnits.some(u => u.ord && u.ord.length)) return alert('先に「🔢 読む順にタップ」で、字を読む順にタップしてください。');
+  const r = kbAutoKaeri(_kbUnits);
+  if (r.ok) _kbNumMode = false;
+  renderKanbunEditor();
+  const st = document.getElementById('kbNumStatus');
+  if (st) st.innerHTML = r.ok ? '<span style="color:var(--success);">✨ 返り点を付けました。送り仮名・ふりがなを確かめてください。</span>' : `<span class="drill-ng">⚠️ ${escapeHtml(r.msg)}</span>`;
+  if (!r.ok && !auto) alert('⚠️ ' + r.msg);
 }

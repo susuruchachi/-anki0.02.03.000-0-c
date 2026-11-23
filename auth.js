@@ -1,6 +1,12 @@
 // ----------------- Firebase Auth -----------------
 function firebaseLogin() { 
   if (typeof appGoogleLogin === 'function' && appGoogleLogin()) return; // ★【0.04.03】Android アプリの中では、アプリ側でログイン
+  // ★【0.04.45】iOS アプリの中では Google のログインができない（Google がアプリの中の画面でのログインを許さない）ので、メールアドレスで
+  if (typeof isIOSApp === 'function' && isIOSApp()) {
+    alert('iPad のアプリの中では、Google でログインできません。\n下の「📧 メールアドレスでログイン」から入ってください。\n\nまだメールアドレスを追加していなければ、先に Safari のすするanki（いつものウェブ版）で、Google でログインしたまま設定の「📧 メールアドレスとパスワードを追加」から追加してください。同じアカウントに入れます。');
+    document.querySelectorAll('details').forEach(x => { if (/メールアドレスでログイン/.test(x.textContent || '')) { x.open = true; x.scrollIntoView({ block: 'center' }); } });
+    return;
+  }
   const provider = new firebase.auth.GoogleAuthProvider();
   provider.setCustomParameters({ 'prompt': 'select_account' });
   
@@ -71,11 +77,13 @@ auth.onAuthStateChanged(user => {
     if (typeof startFriendRequestWatch === 'function') startFriendRequestWatch(); // ★【0.03.25】フレンド申請
     if (typeof startGroupWatch === 'function') startGroupWatch(); // ★【0.04.20】グループ
     if (typeof calStartSubWatch === 'function') calStartSubWatch(); // ★【0.04.22】URL で購読するカレンダー
+    if (typeof calStartLinkWatch === 'function') calStartLinkWatch(); // ★【0.04.36】航海日誌と同期
   } else {
     if (typeof stopCloudListener === 'function') stopCloudListener();
     if (typeof startFriendRequestWatch === 'function') startFriendRequestWatch(); // ログアウトしたら見張りをやめる
     if (typeof startGroupWatch === 'function') startGroupWatch();
     if (typeof calStartSubWatch === 'function') calStartSubWatch();
+    if (typeof calStartLinkWatch === 'function') calStartLinkWatch();
     ls.innerHTML = `<span style="color:var(--warn);">未ログイン</span>`;
     setTimeout(renderLoginMethods, 0);
     const btnLogin = document.getElementById('btnFbLogin');

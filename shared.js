@@ -24,11 +24,13 @@ function getSharedAccess(docId) {
 const SHARED_META_KEY = 'susuru_anki_shared_meta';
 let sharedMeta = (() => { try { return JSON.parse(localStorage.getItem(SHARED_META_KEY) || '{}') || {}; } catch (e) { return {}; } })();
 function saveSharedMeta() { try { localStorage.setItem(SHARED_META_KEY, JSON.stringify(sharedMeta)); } catch (e) {} }
-function setSharedMeta(docId, root, cats, ids) {
+// cc：共有ドキュメントに実際にあったフォルダー（手元の名前の変更では変えない。ほかの人の変更を見分けるため）
+function setSharedMeta(docId, root, cats, ids, cloudCats) {
   if (!docId) return;
   const m = sharedMeta[docId] || {};
   if (root) m.root = root;
   if (cats) m.cats = [...new Set(cats)];
+  if (cloudCats) m.cc = [...new Set(cloudCats)];
   if (ids) m.ids = [...new Set(ids)];
   sharedMeta[docId] = m; saveSharedMeta();
 }
@@ -91,6 +93,73 @@ function sharedCardDiffers(lq, cq) {
   return SHARED_CONTENT_FIELDS.some(f => !(f === 'no' && cq.no === undefined) && JSON.stringify(lq[f] === undefined ? null : lq[f]) !== JSON.stringify(cq[f] === undefined ? null : cq[f]));
 }
 
+// ★【0.04.42】ほかの人が共有ドキュメントのフォルダーの名前を変えた・消したのを、手元にも反映する（共同編集者も）
+//  前回見た共有ドキュメントのフォルダー（sharedMeta.cats）のうち、今のドキュメントに無いもの＝ほかの人が変えた・消した。
+//  ・新しい名前は、カード（手元では前の名前・ドキュメントでは新しい名前）と、中のフォルダーの置き場所から見分ける
+//    （空のフォルダーなら、同じ場所に1つだけ増えたフォルダー）。見分けられたら、手元でも名前を変えたのと同じにする
+//  ・新しい名前が無い（消された）フォルダーは、空なら片付ける
+//  前は閲覧専用の人の空のフォルダーしか片付けず、共同編集者の手元には前の名前のフォルダーが残り、書き戻すとまた共有に戻っていた
+function sharedReconcileCats(docId, data) {
+  const meta = sharedMeta[docId] || {};
+  if (!Array.isArray(data.categories)) return false;
+  // 前の版から：cc が無いときは、手元の一番上のフォルダーの中身すべてを前回の分とみなす（すでに残ってしまっている前の名前も片付ける）
+  let prev = meta.cc;
+  if (!Array.isArray(prev)) { const root = meta.root && categories.includes(meta.root) ? meta.root : (categories.includes(data.catName) ? data.catName : null); prev = [...new Set([...(meta.cats || []), ...(root ? getAllSubcategories(root) : [])])]; }
+  const now = new Set(data.categories), prevSet = new Set(prev);
+  const gone = prev.filter(c => !now.has(c) && categories.includes(c));
+  if (!gone.length) return false;
+  const goneSet = new Set(gone), votes = {};
+  const vote = (g, n) => { if (!goneSet.has(g) || goneSet.has(n) || !now.has(n)) return; (votes[g] = votes[g] || {})[n] = (votes[g][n] || 0) + 1; };
+  const byId = new Map(db.filter(q => q.sharedDocId === docId).map(q => [q.id, q]));
+  (data.cards || []).forEach(cq => { const lq = cq && byId.get(cq.id); if (lq && cq.category) vote(lq.category, cq.category); });
+  const tree = data.categoryTree || {};
+  const cloudParent = c => Object.keys(tree).find(p => (tree[p] || []).includes(c)) || null;
+  const localParent = c => Object.keys(categoryTree).find(p => (categoryTree[p] || []).includes(c)) || null;
+  Object.keys(tree).forEach(p => (tree[p] || []).forEach(c => { const lp = localParent(c); if (lp) vote(lp, p); }));
+  const map = {};
+  Object.keys(votes).forEach(g => { const best = Object.entries(votes[g]).sort((a, b) => b[1] - a[1])[0]; if (best) map[g] = best[0]; });
+  // 空のフォルダーの名前の変更：同じ親の下で、なくなったものと増えたものが1つずつ
+  const added = data.categories.filter(c => !prevSet.has(c) && !Object.values(map).includes(c));
+  gone.filter(g => !map[g]).forEach(g => {
+    const lp = localParent(g), lpN = lp && map[lp] ? map[lp] : lp;
+    const cands = added.filter(n => cloudParent(n) === lpN && !Object.values(map).includes(n));
+    const others = gone.filter(x => !map[x] && x !== g && (() => { const q = localParent(x); return (q && map[q] ? map[q] : q) === lpN; })());
+    if (cands.length === 1 && !others.length) map[g] = cands[0];
+  });
+  // 名前を変える（中身ごと新しい名前へ）。親から順に
+  const depth = c => { let d = 0, x = c; while ((x = localParent(x)) && d < 50) d++; return d; };
+  gone.slice().sort((a, b) => depth(a) - depth(b)).forEach(g => {
+    const n = map[g];
+    if (n) {
+      if (!categories.includes(n)) categories.push(n);
+      markCatCreated(n);
+      db.forEach(q => { if (q.category === g) { q.category = n; touchCard(q); } });
+      const kids = categoryTree[g] || [];
+      delete categoryTree[g];
+      for (const k in categoryTree) categoryTree[k] = (categoryTree[k] || []).filter(c => c !== g);
+      if (kids.length) { categoryTree[n] = categoryTree[n] || []; kids.forEach(c => { if (c !== n && !categoryTree[n].includes(c)) categoryTree[n].push(c); }); }
+      if (!localParent(n)) { const cp = cloudParent(n); if (cp && categories.includes(cp)) (categoryTree[cp] = categoryTree[cp] || []).push(n); }
+      if (typeof catSubjects !== 'undefined' && catSubjects && Object.prototype.hasOwnProperty.call(catSubjects, g)) { if (!(n in catSubjects)) catSubjects[n] = catSubjects[g]; delete catSubjects[g]; }
+      if (typeof catSkip !== 'undefined' && catSkip && Object.prototype.hasOwnProperty.call(catSkip, g)) { if (!(n in catSkip)) catSkip[n] = catSkip[g]; delete catSkip[g]; }
+      categories = categories.filter(c => c !== g);
+      markCatsDeleted([g]);
+      renameInSharedMeta(g, n);
+      if (typeof replaceInScopePaths === 'function') replaceInScopePaths(g, n);
+      if (typeof studyPlan !== 'undefined' && studyPlan && studyPlan.plans) Object.values(studyPlan.plans).forEach(pl => { if (pl && pl.root === g && !pl.groupId) { pl.root = n; pl.planAt = Date.now(); } });
+    }
+  });
+  // 消されたフォルダー：空なら片付ける（下から）
+  gone.filter(g => !map[g] && categories.includes(g)).sort((a, b) => depth(b) - depth(a)).forEach(g => {
+    if (db.some(q => q.category === g) || (categoryTree[g] || []).length) return;
+    markCatsDeleted([g]);
+    categories = categories.filter(c => c !== g);
+    for (const k in categoryTree) categoryTree[k] = (categoryTree[k] || []).filter(c => c !== g);
+    delete categoryTree[g];
+  });
+  const m = sharedMeta[docId]; if (m) { if (Array.isArray(m.cats)) m.cats = m.cats.filter(c => !goneSet.has(c)); m.cc = data.categories.slice(); saveSharedMeta(); }
+  return true;
+}
+
 // ★ 定期同期＆起動時同期ロジック
 async function syncSubscriptions() {
   if (!currentUser) return;
@@ -116,6 +185,8 @@ async function syncSubscriptions() {
       const prevMeta = sharedMeta[docId] || {};
       const seenBefore = new Set(prevMeta.ids || []);
       let localWins = false;
+      // ★【0.04.42】ほかの人が変えた・消したフォルダーを先に反映する（共同編集者も・閲覧専用の人も）
+      if (sharedReconcileCats(docId, data)) changed = true;
       
       // 1. クラウドから削除されたカードをローカルからも消す
       //    編集できる人：前回クラウドにあったのに今は無い＝他の人が削除した → 消す／一度もクラウドに無い＝手元で追加した → 書き戻す
@@ -172,19 +243,7 @@ async function syncSubscriptions() {
           }
         });
       }
-      // 3'. 閲覧専用：共有ドキュメントから無くなった空のフォルダー（作成者が名前を変えた・消した）を片付ける
-      if (!canEdit && Array.isArray(prevMeta.cats)) {
-        const nowCats = new Set(data.categories || []);
-        const gone = prevMeta.cats.filter(c => !nowCats.has(c) && categories.includes(c) && !db.some(q => q.category === c) && !(categoryTree[c] || []).length);
-        if (gone.length) {
-          markCatsDeleted(gone);
-          categories = categories.filter(c => !gone.includes(c));
-          for (const k in categoryTree) categoryTree[k] = (categoryTree[k] || []).filter(c => !gone.includes(c));
-          gone.forEach(c => delete categoryTree[c]);
-          changed = true;
-        }
-      }
-      setSharedMeta(docId, data.catName, data.categories || [], [...cloudCardIds]);
+      setSharedMeta(docId, data.catName, data.categories || [], [...cloudCardIds], data.categories || []);
       if (localWins) needPush.push(docId);
       // ★【0.03.15】作成者：以前からの共有コードを、コードで探せる対応表に登録しておく
       if (isOwner && data.shareCode && !registeredShareCodeDocs().includes(docId)) ensureShareCode(docId).catch(e => console.warn('共有コードの登録に失敗:', e));
@@ -209,6 +268,8 @@ async function pushSharedDocFromLocal(docId) {
     const snap = await ref.get();
     if (!snap.exists) { detachSharedDoc(docId); saveData(); return; }
     const data = snap.data();
+    // ★【0.04.42】まだ受け取っていない、ほかの人のフォルダーの名前の変更・削除を先に反映（前の名前を書き戻さない）
+    if (sharedReconcileCats(docId, data)) { try { autoMerge(); } catch (e) {} saveData(); }
     const localCards = db.filter(q => q.sharedDocId === docId);
     const localIds = new Set(localCards.map(q => q.id));
     const delSet = new Set(deletedCards);
@@ -229,7 +290,7 @@ async function pushSharedDocFromLocal(docId) {
     }
     await ref.update(JSON.parse(JSON.stringify(update)));
     if (data.isPublic) syncPublicIndex(docId, Object.assign({}, data, update));
-    setSharedMeta(docId, rootCat, allRelated || data.categories || [], newCards.map(c => c.id));
+    setSharedMeta(docId, rootCat, allRelated || data.categories || [], newCards.map(c => c.id), allRelated || data.categories || []);
   } catch (e) { console.warn('共有ドキュメントへの書き戻しに失敗:', e); }
 }
 // フォルダー（とその中身）に関係する編集可能な共有ドキュメントをすべて書き戻す
@@ -305,7 +366,7 @@ async function shareCategory(catName, opts = {}) {
     if (!ownedDocs.includes(docRef.id)) ownedDocs.push(docRef.id);
     markDocJoined(docRef.id);
     sharedDocPermissions[docRef.id] = { canEdit: true, isOwner: true };
-    setSharedMeta(docRef.id, catName, allTargets, subset.map(s => s.id));
+    setSharedMeta(docRef.id, catName, allTargets, subset.map(s => s.id), allTargets);
     const ids = new Set(subset.map(s => s.id));
     db.forEach(q => { if (ids.has(q.id)) { q.sharedDocId = docRef.id; touchCard(q); } });
     saveData(); syncSubscriptions();
@@ -505,7 +566,7 @@ function subscribeToSharedData(docId, data) {
       db.push(c); count++;
     }
   });
-  setSharedMeta(docId, data.catName, data.categories || [], (data.cards || []).map(c => c.id));
+  setSharedMeta(docId, data.catName, data.categories || [], (data.cards || []).map(c => c.id), data.categories || []);
   return count;
 }
 
@@ -532,7 +593,7 @@ async function makePublicCategory(catName) {
     if (!ownedDocs.includes(docRef.id)) ownedDocs.push(docRef.id);
     markDocJoined(docRef.id);
     sharedDocPermissions[docRef.id] = { canEdit: true, isOwner: true };
-    setSharedMeta(docRef.id, catName, allTargets, subset.map(s => s.id));
+    setSharedMeta(docRef.id, catName, allTargets, subset.map(s => s.id), allTargets);
     const ids = new Set(subset.map(s => s.id));
     db.forEach(q => { if (ids.has(q.id)) { q.sharedDocId = docRef.id; touchCard(q); } });
     saveData(); syncSubscriptions();

@@ -205,7 +205,7 @@ service cloud.firestore {
       allow delete: if isAuthenticated() && resource.data.owner == uid();
       allow update: if isAuthenticated() && resource.data.owner == uid() && request.resource.data.owner in request.resource.data.members;
       allow update: if isAuthenticated() && isMember()
-        && changedKeys().hasOnly(['name', 'invited', 'invitedBy', 'invitedNames', 'names', 'cats', 'events', 'updatedAt']);
+        && changedKeys().hasOnly(['name', 'invited', 'invitedBy', 'invitedNames', 'names', 'cats', 'events', 'plans', 'updatedAt']);
       allow update: if isAuthenticated() && isMember() && resource.data.owner != uid()
         && changedKeys().hasOnly(['members', 'names', 'updatedAt'])
         && request.resource.data.members.toSet() == resource.data.members.toSet().difference([uid()].toSet());
@@ -221,6 +221,11 @@ service cloud.firestore {
       allow read, delete: if isAuthenticated() && resource.data.uid == uid();
       allow create: if isAuthenticated() && request.resource.data.uid == uid() && id.split('_')[0] == uid();
       allow update: if isAuthenticated() && resource.data.uid == uid() && request.resource.data.uid == uid();
+    }
+
+    // ⚓ 航海日誌（koukai-nisshi-calendar）と同期するカレンダー（★0.04.36）。本人だけ
+    match /susuru_anki_cal/{userId} {
+      allow read, write: if isAuthenticated() && uid() == userId;
     }
 
     // ここに書いていないコレクションは、読み書きできない

@@ -1,7 +1,7 @@
 // ★★★ すするanki0.02.51-g - ソーシャル機能（ランキング・フレンド・チャット・成績比較・オンライン対戦） ★★★
 
 // ★ グローバル変数の安全な初期化
-window.shareStats = localStorage.getItem('shareStats') === 'true';
+window.shareStats = localStorage.getItem('shareStats') !== 'false';
 
 // ★ 本日のデイリーランキング表示
 let rankingMode = 'quiz'; // ★【0.03.39】'quiz'（通常のクイズ）／'drill'（暗記テスト）
@@ -166,7 +166,10 @@ function renderFriendRequests() {
   // ★【0.04.26】フレンド申請の欄にはフレンド申請・紹介だけ、グループの欄にはグループへの招待だけ。設定のボタン・下のメニューには両方の合計
   const nf = _friendReqIn.length + _friendIntros.length, ng = typeof groupInvites !== 'undefined' ? groupInvites.length : 0, n = nf;
   document.querySelectorAll('.friend-req-badge').forEach(b => {
-    const k = b.classList.contains('group-inv-badge') ? ng : b.classList.contains('friend-only-badge') ? nf : nf + ng;
+    if (b.classList.contains('app-upd-badge') || b.classList.contains('drill-active-dot')) return; // アプリの更新の印は app-bridge.js、暗記の途中の印は drill.js が出す
+    // ★【0.04.38】下のメニューの「設定」には、新しい Android アプリ（APK）があるときも印を出す
+    const apk = b.classList.contains('bnav-badge') && typeof appApkBadgeCount === 'function' ? appApkBadgeCount() : 0;
+    const k = b.classList.contains('group-inv-badge') ? ng : b.classList.contains('friend-only-badge') ? nf : nf + ng + apk;
     b.textContent = k; b.style.display = k ? 'inline-flex' : 'none';
   });
   const box = document.getElementById('friendRequestsBox');
@@ -353,7 +356,7 @@ async function sendChatMessage() {
 // ★ 成績保存
 // ★【0.03.39】mode：'drill' なら暗記テストの成績として別に記録する（通常のクイズとは混ぜない）
 async function recordCategoryScore(catName, isCorrect, mode) {
-  const isShared = typeof window.shareStats !== 'undefined' ? window.shareStats : (localStorage.getItem('shareStats') === 'true');
+  const isShared = typeof window.shareStats !== 'undefined' ? window.shareStats : (localStorage.getItem('shareStats') !== 'false');
   if(!currentUser || !isShared) return;
 
   const d = getTodayStr();

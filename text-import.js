@@ -535,9 +535,25 @@ async function vtCopyPrompt() {
   try { await navigator.clipboard.writeText(VOCAB_TEXT_PROMPT); showAppToast('📋 プロンプトをコピーしました。AI にページと一緒に送って、返ってきたテキストを貼ってください'); }
   catch (e) { const ta = document.getElementById('vtText'); ta.value = VOCAB_TEXT_PROMPT; ta.select(); alert('コピーできなかったので、テキスト欄に入れました。全部選んでコピーしてください（貼るときは消してから）。'); }
 }
+// ★【0.04.32】1つのテキストに「# SECTION …」が2つ以上あれば、セクションごとに分ける（設定の「📝 テキスト出力」の単語帳の形）
+function vtSplitSections(text) {
+  const lines = String(text || '').replace(/\r/g, '').split('\n'), idx = [];
+  lines.forEach((l, i) => { if (/^#\s*SECTION\b/i.test(l.trim())) idx.push(i); });
+  if (idx.length < 2) return null;
+  return idx.map((st, k) => lines.slice(k ? st : 0, idx[k + 1] !== undefined ? idx[k + 1] : lines.length).join('\n'));
+}
+// 「// 保存先：鉄壁」の行（書き出したテキストに入っている）→ その親フォルダー
+function vtSavedParent(text) {
+  const m = String(text || '').match(/^\/\/\s*保存先[：:]\s*(.+)$/m); if (!m) return null;
+  const leaf = m[1].trim().split('>').pop().trim();
+  return categories.includes(leaf) ? leaf : null;
+}
 function vtPreview() {
   const text = document.getElementById('vtText').value;
+  const multi = vtSplitSections(text);
+  if (multi) return vtPreviewMulti(text, multi);
   const parsed = vtParse(text);
+  { const sp = vtSavedParent(text), pe = document.getElementById('vtParent'); if (sp && pe && pe.value !== sp) { pe.value = sp; const b = pe.parentElement && pe.parentElement.querySelector('.fp-btn-txt'); if (b) b.textContent = getCategoryPath(sp).join(' › '); } }
   const nameEl = document.getElementById('vtName');
   if (!nameEl.value.trim()) nameEl.value = vtSectionName(parsed.title) || (parsed.groups[0] ? parsed.groups[0].name : '');
   _vt = { text, parsed, name: nameEl.value.trim(), parent: document.getElementById('vtParent').value };
@@ -559,7 +575,28 @@ function vtPreview() {
     <div class="drill-btns" style="margin-top:8px;"><button class="btn btn-primary" onclick="vtCommit(true)">💾 保存して暗記テストを始める</button><button class="btn btn-secondary" onclick="vtCommit(false)">💾 保存だけ</button></div>
     ${upd || `<div class="hint-small" style="margin-top:4px;">保存すると「${dE(_vt.parent ? _vt.parent + ' › ' : '')}${dE(_vt.name)}」の下にグループごとのフォルダーができます。クイズ（ホームの出題範囲）でもそのまま使えます。</div>`}</div>`;
 }
+function vtPreviewMulti(text, parts) {
+  const parent = vtSavedParent(text) ?? document.getElementById('vtParent').value;
+  const secs = parts.map(t => { const parsed = vtParse(t); return { text: t, parsed, name: vtSectionName(parsed.title) }; }).filter(x => x.parsed.groups.length);
+  _vt = { text, multi: secs, parent, name: '' };
+  const R = document.getElementById('vtResult');
+  R.innerHTML = `<div class="drill-saved" style="margin-top:10px;"><b>📖 読み取り結果：${secs.length}セクション</b>
+    <div class="hint-small">保存先：${dE(parent ? getCategoryPath(parent).join(' › ') : 'いちばん上')}</div>
+    ${secs.map(x => { const c = vtCards(x.parsed, x.name).cards; return `<div class="hint-small">📁 ${dE(x.name)}：グループ ${x.parsed.groups.length}・カード ${c.length}</div>`; }).join('')}
+    <div class="drill-btns" style="margin-top:8px;"><button class="btn btn-primary" onclick="vtCommit(false)">💾 全部保存</button></div>
+    <div class="hint-small" style="margin-top:4px;">前に取り込んだセクションは、同じ問題のカードの成績・メモを引き継いで書き換えます。</div></div>`;
+}
 function vtCommit(start) {
+  if (_vt && _vt.multi) {
+    if (typeof takeSnapshot === 'function') takeSnapshot(`テキストから問題を作成（${_vt.multi.length}セクション）`);
+    let a = 0, u = 0, rm = 0, last = '';
+    _vt.multi.forEach(x => { const r = vtSave(x.parsed, _vt.parent, x.name); a += r.added; u += r.updated; rm += r.removed; last = r.section; });
+    const n = _vt.multi.length; _vt = null;
+    if (typeof refreshVisibleViews === 'function') refreshVisibleViews(true);
+    drillHome();
+    if (typeof showAppToast === 'function') showAppToast(`📄 ${n}セクションを保存しました（追加 ${a}・更新 ${u}${rm ? `・重なり ${rm}枚をまとめました` : ''}）`);
+    return;
+  }
   if (!_vt || !_vt.parsed) return;
   const name = (document.getElementById('vtName').value || '').trim() || _vt.name;
   if (!name) return alert('フォルダー名を入れてください。');

@@ -8,6 +8,12 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- ★【0.04.27】通知（Android 13 から、通知を出すには許可が要る） -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- ★【0.04.44】アラーム（連続記録・予定）：時刻ちょうどに鳴らす・全画面で出す・再起動のあとも予約し直す -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <application
         android:name=".SusuruApplication"
@@ -52,6 +58,13 @@
             </intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_calendar_info" />
         </receiver>
+        <!-- ★【0.04.43】★ 大事な予定のウィジェット（★を付けた予定と、あと何日） -->
+        <receiver android:name=".StarWidget" android:exported="false" android:label="@string/starWidgetName">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_star_info" />
+        </receiver>
         <!-- ★【0.04.27】プッシュ通知（Firebase Cloud Messaging）を受け取る -->
         <service android:name=".PushService" android:exported="false">
             <intent-filter>
@@ -67,6 +80,26 @@
             </intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_board_info" />
         </receiver>
+
+        <!-- ★【0.04.44】アラーム：鳴らす・ボタン・再起動やアプリの更新のあとに予約し直す -->
+        <receiver android:name=".AlarmReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+            </intent-filter>
+        </receiver>
+        <activity
+            android:name=".AlarmActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:taskAffinity=".alarm"
+            android:screenOrientation="portrait"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true" />
 
         <!-- ★【0.04.12】アプリの中のブラウザ（チャットなどのリンクを開く） -->
         <activity
