@@ -279,6 +279,7 @@ function showQuizResults() {
       ${res.some(r => !r.correct) ? '<button class="btn btn-accent" onclick="retryQuizMistakes()">🔁 間違えた問題をもう一度</button>' : ''}
       ${(_quizSession.pool || []).length ? `<button class="btn btn-secondary" onclick="replayQuizSession()">🔄 同じ範囲をもう一回（${_quizSession.pool.length}問）</button>` : ''}
       ${quizNextLabel() ? `<button class="btn btn-primary" onclick="startNextQuiz()">${quizNextLabel()}</button>` : ''}
+      <button class="btn btn-secondary" onclick="openPage(\'pgQuiz\')">🎯 クイズに戻る</button>
       <button class="btn btn-secondary" onclick="openPage(\'pgHome\')">🏠 ホーム</button>
       <button class="btn btn-secondary" onclick="openPage(\'pgStats\')">📊 実績を見る</button>
     </div>`;
@@ -360,7 +361,7 @@ function quitQuiz() {
   lastQuizScopePath = [...selectedScopePath];
   // ★【0.03.37】途中でやめても、解いた問題があれば結果を見せる
   if (!window.currentOnlineMatch && _quizSession.results.length) showQuizResults();
-  else openPage('pgHome');
+  else openPage('pgQuiz'); // ★【0.04.57】クイズのタブへ戻る
 }
 
 // ================================================================

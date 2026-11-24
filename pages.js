@@ -111,7 +111,7 @@ function executePageTransition(pageId, isBackAction) {
   document.querySelectorAll('.screen').forEach(s => { s.classList.remove('active'); s.style.display='none'; });
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   // ★【0.03.00】下部ナビの選択状態と、クイズ中の表示切り替え
-  const navOwner = { pgUpdates: 'pgHome', pgTutorial: 'pgHome', pgPublicCategories: 'pgBox', pgShared: 'pgBox', pgMatchHistory: 'pgOnlineMatch', pgFriends: 'pgBackup', pgCompareStats: 'pgBackup', pgQuizResult: 'pgHome', pgListen: 'pgHome', pgCalendar: 'pgHome', pgCards: 'pgDrill' };
+  const navOwner = { pgUpdates: 'pgHome', pgTutorial: 'pgHome', pgPublicCategories: 'pgBox', pgShared: 'pgBox', pgMatchHistory: 'pgQuiz', pgOnlineMatch: 'pgQuiz', pgTree: 'pgBox', pgFriends: 'pgBackup', pgCompareStats: 'pgBackup', pgQuizResult: 'pgQuiz', pgListen: 'pgQuiz', pgCalendar: 'pgHome', pgCards: 'pgDrill' }; // ★【0.04.57】クイズ・ショップのタブ
   const navPage = navOwner[pageId] || pageId;
   document.querySelectorAll('.bnav-item').forEach(b => b.classList.toggle('active', b.dataset.page === navPage));
   const wasInQuiz = document.body.classList.contains('in-quiz');
@@ -123,6 +123,8 @@ function executePageTransition(pageId, isBackAction) {
   if(tgt) { tgt.style.display='flex'; tgt.classList.add('active'); }
 
   if(pageId==='pgHome') { const el = document.getElementById('navHome'); if(el) el.classList.add('active'); buildQuizScopeDropdown(); updateHomeSummary(); }
+  if(pageId==='pgQuiz') { const el = document.getElementById('navQuiz'); if(el) el.classList.add('active'); buildQuizScopeDropdown(); } // ★【0.04.57】
+  if(pageId==='pgShop') { const el = document.getElementById('navShop'); if(el) el.classList.add('active'); if (typeof renderShopPanel === 'function') renderShopPanel(); }
   if(pageId==='pgTree') { const el = document.getElementById('navTree'); if(el) el.classList.add('active'); renderTree(); }
   if(pageId==='pgBox') { const el = document.getElementById('navBox'); if(el) el.classList.add('active'); renderBox(); }
   if(pageId==='pgStats') { const el = document.getElementById('navStats'); if(el) el.classList.add('active'); renderStatsAndCharts(); }

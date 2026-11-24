@@ -229,7 +229,7 @@ function gameBuy(item, arg) {
   try { saveData(); } catch (e) {}
   gameCelebrate(item === 'repair' ? '🔧' : item === 'shield' ? '🛡️' : item === 'boost' ? '⚡' : item === 'reroll' ? '🔄' : '🎁', '交換しました！', item === 'repair' ? `連続記録が ${getStreakInfo().cur}日に戻りました。今日も1問解こう！` : what);
   try { renderStreakCard(); } catch (e) {}
-  renderGameBar(); renderGamePanel();
+  renderGameBar(); renderGamePanel(); renderShopPanel();
 }
 const GAME_REROLL_COST = 80, GAME_BOOST_COST = 200;
 // ⚡ XP 2倍の残り（ms）
@@ -241,7 +241,7 @@ function gameSetSel(key, val) {
   try { saveData(); } catch (e) {}
   if (key === 'sel_theme') gameApplyTheme();
   if (typeof publishStatsSummary === 'function') publishStatsSummary(false);
-  renderGameBar(); renderGamePanel();
+  renderGameBar(); renderGamePanel(); renderShopPanel();
 }
 
 // ---------------- 🏷️ 称号（名前の横に出す） ----------------
@@ -316,8 +316,7 @@ function gameShipHTML(st) {
       ${deco}<div class="ship-sea"></div><span class="ship-main">${ship}</span></div>
     <div class="hint-small" style="margin-top:6px;">${shipName}（Lv.${lv}${lv < 30 ? `・${lv < 5 ? 5 : lv < 15 ? 15 : 30} で大きくなる` : ''}）・飾り ${got}/${all}</div>
     <div class="ship-parts">${GAME_SHIP_PARTS.map(p => `<div class="game-badge${has(p) ? ' got' : ''}"><div class="game-badge-i">${has(p) ? p.icon : '🔒'}</div><div class="game-badge-n">${p.name}</div><div class="game-badge-p">${p.cond}</div></div>`).join('')}</div>
-    <div class="setting-box-title" style="margin-top:10px;">🛒 特別な飾り（コインで交換）</div>
-    <div class="game-shop">${GAME_SHIP_SHOP.map(p => gameShopRow(p.icon, p.name, own(p.id) ? '船に乗っています' : '船のまわりに出ます', p.id, p.cost, own(p.id) ? '<span class="hint-small">✅</span>' : null)).join('')}</div>`;
+    <div class="hint-small" style="margin-top:8px;">🦜 オウム・🐬 イルカ・🌈 虹・🎆 花火・🐉 竜の特別な飾りは <a href="#" onclick="event.preventDefault(); openPage('pgShop')">🛒 ショップ</a> で交換できます。</div>`;
 }
 
 // ---------------- 📖 図鑑（フォルダーごとのスタンプ） ----------------
@@ -371,7 +370,7 @@ async function gameSendCheer(uid, i) {
   try { saveData(); } catch (e) {}
   const ov = document.getElementById('gameCheerOverlay'); if (ov) ov.style.display = 'none';
   gameCelebrate('📣', '応援スタンプを送りました', GAME_CHEERS[i]);
-  renderGameBar(); renderGamePanel();
+  renderGameBar(); renderGamePanel(); renderShopPanel();
 }
 
 // ---------------- 🏆 週間リーグ（フレンドと、今週の XP で競う） ----------------
@@ -417,7 +416,7 @@ function gameClaimLeague() {
   gameShop[id] = { item: 'league', coins, rank: i + 1, n: rows.length, wk: last, d: gameToday(), at: Date.now() };
   try { saveData(); } catch (e) {}
   setTimeout(() => gameCelebrate(i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '🏅', `先週の週間リーグ ${i + 1}位！`, `ごほうび 💰 ${coins}コイン`), 600);
-  renderGameBar(); renderGamePanel();
+  renderGameBar(); renderGamePanel(); renderShopPanel();
 }
 
 // ---------------- 表示 ----------------
@@ -437,6 +436,7 @@ function renderGameBar() {
     <div class="game-xp"><div class="game-xp-fill" style="width:${Math.min(100, Math.round(L.into / L.need * 100))}%"></div></div>
     <div class="game-xp-text">あと ${L.need - L.into} XP で Lv.${L.lv + 1}</div>
     ${gameMsHTML(ms, false)}`;
+  const hg = document.getElementById('homeGoCoins'); if (hg) hg.textContent = `💰 ${gameCoins(st).have.toLocaleString()}コイン`;
   if (bl > 0) { clearTimeout(renderGameBar._t); renderGameBar._t = setTimeout(renderGameBar, Math.min(60000, bl + 500)); }
 }
 // 実績の画面：タブ（ごほうび・ショップ・船・図鑑・リーグ）
@@ -445,7 +445,8 @@ function gameSetTab(t) { _gameTab = t; renderGamePanel(); }
 function renderGamePanel() {
   const el = document.getElementById('gamePanel'); if (!el || typeof db === 'undefined') return;
   const st = gameStats(), L = gameLevelOf(st.xp), c = gameCoins(st);
-  const tabs = [['top', '⭐ ごほうび'], ['shop', '🛒 ショップ'], ['ship', '⛵ 船'], ['book', '📖 図鑑'], ['league', '🏆 リーグ']];
+  if (_gameTab === 'shop') _gameTab = 'top';
+  const tabs = [['top', '⭐ ごほうび'], ['ship', '⛵ 船'], ['book', '📖 図鑑'], ['league', '🏆 リーグ']];
   let body = '';
   if (_gameTab === 'top') {
     const sh = gameShieldInfo(), next = gameNextTitle(L.lv), fl = gameFlame(st.streak), bs = gameBadges(st), got = bs.filter(b => b.got).length;
@@ -467,12 +468,11 @@ function renderGamePanel() {
       <div class="hint-small">連続記録 30日で 💙 青い炎、100日で 💜 紫の炎、365日で 🌈 虹の炎になります。</div>
       <div class="setting-box-title" style="margin-top:12px;">🏅 バッジ（${got} / ${bs.length}）</div>
       ${Object.values(groups).map(list => `<div class="game-badges">${list.map(b => `<div class="game-badge${b.got ? ' got' : ''}" title="${escAttr(b.name)}"><div class="game-badge-i">${b.got ? b.icon : '🔒'}</div><div class="game-badge-n">${escapeHtml(b.name)}</div>${b.got ? '' : `<div class="game-badge-p">${Math.min(b.now, b.need).toLocaleString()}/${b.need.toLocaleString()}</div>`}</div>`).join('')}</div>`).join('')}`;
-  } else if (_gameTab === 'shop') body = gameShopHTML(st);
-  else if (_gameTab === 'ship') body = gameShipHTML(st);
+  } else if (_gameTab === 'ship') body = gameShipHTML(st);
   else if (_gameTab === 'book') body = gameStampsHTML();
   else body = `<div id="gameLeagueBox">${gameLeagueHTML()}</div>`;
   el.innerHTML = `<div class="game-coinline">💰 <b>${c.have.toLocaleString()}</b> コイン<span class="hint-small">（正解1・ミッション10・バッジ30・レベル20・リーグ）</span></div>
-    <div class="game-tabs">${tabs.map(([k, n]) => `<button class="chip${_gameTab === k ? ' active' : ''}" onclick="gameSetTab('${k}')">${n}</button>`).join('')}</div>${body}`;
+    <div class="game-tabs">${tabs.map(([k, n]) => `<button class="chip${_gameTab === k ? ' active' : ''}" onclick="gameSetTab('${k}')">${n}</button>`).join('')}<button class="chip" onclick="openPage('pgShop')">🛒 ショップへ</button></div>${body}`;
 }
 function gameLeagueHTML() {
   if (typeof currentUser === 'undefined' || !currentUser) return '<div class="hint-small">ログインしてフレンドを追加すると、毎週フレンドと XP を競えます。</div>';
@@ -484,6 +484,13 @@ function gameLeagueHTML() {
   return `<div class="game-tier">${T.name} リーグ${T.tier < GAME_TIERS.length - 1 ? `<span class="hint-small">（1位で ${GAME_TIERS[T.tier + 1]} に昇格）</span>` : ''}</div>
     <div class="game-league">${L.now.map((r, i) => `<div class="game-lg-row${r.me ? ' me' : ''}"><span class="game-lg-r">${i < 3 && r.xp > 0 ? medal[i] : i + 1}</span><span class="game-lg-n">${escapeHtml(r.name)}${r.lv ? ` <small>Lv.${r.lv}</small>` : ''}${r.ttl ? `<br><small>${escapeHtml(r.ttl)}${r.tier ? '・' + GAME_TIERS[r.tier] : ''}</small>` : ''}</span><b>${r.xp.toLocaleString()} XP</b>${i < 3 ? `<span class="game-lg-p">💰${Math.round(GAME_LEAGUE_PRIZE[i] * mult)}</span>` : ''}${r.me ? '' : `<button class="chip" title="応援スタンプ（${GAME_CHEER_COST}コイン）" onclick="gameCheerMenu(${jsArg(r.uid)}, ${jsArg(r.name)})">📣</button>`}</div>`).join('')}</div>
     <div class="hint-small" style="margin-top:4px;">${left > 0 ? `日曜の夜まで、あと${left}日` : '今日（日曜）まで'}。週が変わると、順位でコインがもらえます（上の段位ほど多い。1人で解いた週は無し）。1位で昇格、3人以上で最下位だと降格します。📣 で応援スタンプを送れます。まだ新しい版にしていないフレンドは 0 XP に見えます。</div>`;
+}
+// ★【0.04.57】🛒 ショップのタブ（下のナビ）
+function renderShopPanel() {
+  const el = document.getElementById('shopPanel'); if (!el || typeof db === 'undefined') return;
+  const st = gameStats(), c = gameCoins(st);
+  el.innerHTML = `<div class="game-coinline">💰 <b>${c.have.toLocaleString()}</b> コイン</div>
+    <div class="hint-small" style="margin-bottom:8px;">正解1問 1・ミッション1つ 10（全部の日は＋20）・バッジ1つ 30・レベル1つ 20・週間リーグでたまります。</div>${gameShopHTML(st)}`;
 }
 function gameShopRow(icon, name, desc, item, cost, btn) {
   const c = gameCoins();
@@ -497,13 +504,14 @@ function gameShopHTML(st) {
     : gameShopRow('🔧', '記録の復活', `1〜2日休んで連続記録が途切れたときに、ここに出ます（休んだ日1日につき ${GAME_REPAIR_COST}コイン）`, 'repair', 0, '<span class="hint-small">—</span>');
   h += '</div><div class="setting-box-title" style="margin-top:10px;">⚡ 勉強の道具</div><div class="game-shop">';
   h += gameShopRow('⚡', 'XP 2倍（15分）', bl > 0 ? `使っています：あと${Math.ceil(bl / 60000)}分` : 'リーグで追い上げたいときに。15分のあいだ、解いた・正解の XP が2倍', 'boost', GAME_BOOST_COST, bl > 0 ? '<span class="hint-small">使用中</span>' : null);
-  h += gameShopRow('🔄', 'ミッションの入れかえ券', `今日のミッションの目標を半分にします（ミッションの横の 🔄 から・${GAME_REROLL_COST}コイン）`, 'reroll', GAME_REROLL_COST, `<button class="chip" onclick="gameSetTab('top')">ミッションへ</button>`);
+  h += gameShopRow('🔄', 'ミッションの入れかえ券', `今日のミッションの目標を半分にします（ミッションの横の 🔄 から・${GAME_REROLL_COST}コイン）`, 'reroll', GAME_REROLL_COST, `<button class="chip" onclick="_gameTab = 'top'; openPage('pgStats')">ミッションへ</button>`);
   h += '</div><div class="setting-box-title" style="margin-top:10px;">🏷️ 特別な称号</div><div class="game-shop">';
   GAME_SP_TITLES.forEach(t => { const own = gameOwned(t.id), on = gameSel('sel_title') === t.id; h += gameShopRow('🏷️', t.name, own ? (on ? '名前の横に付けています' : '交換ずみ') : '名前の横に付けられる称号', t.id, t.cost, own ? (on ? '<span class="hint-small">✅</span>' : `<button class="chip" onclick="gameSetSel('sel_title', '${t.id}')">付ける</button>`) : null); });
   h += '</div><div class="setting-box-title" style="margin-top:10px;">🎨 アプリのテーマの色</div><div class="game-shop">';
   GAME_THEMES.forEach(t => { const own = gameOwned('theme_' + t.id), on = selT === t.id; h += gameShopRow(`<span class="theme-dot" style="background:linear-gradient(135deg, ${t.p}, ${t.a})"></span>`, t.name, own ? (on ? '使っています' : '交換ずみ') : 'ボタンや枠の色が変わります', 'theme_' + t.id, t.cost, own ? (on ? `<button class="chip" onclick="gameSetSel('sel_theme', '')">もとに戻す</button>` : `<button class="chip" onclick="gameSetSel('sel_theme', '${t.id}')">使う</button>`) : null); });
-  h += '</div><div class="hint-small" style="margin-top:8px;">⛵ 船の飾りは「⛵ 船」のタブで交換できます。</div>';
-  return h;
+  h += '</div><div class="setting-box-title" style="margin-top:10px;">⛵ 船の特別な飾り</div><div class="game-shop">';
+  GAME_SHIP_SHOP.forEach(p => { const own = gameOwned(p.id); h += gameShopRow(p.icon, p.name, own ? '船に乗っています（実績 → ⛵ 船）' : '「わたしの船」のまわりに出ます', p.id, p.cost, own ? '<span class="hint-small">✅</span>' : null); });
+  return h + '</div>';
 }
 
 // ★【0.04.55】炎の色はショップで交換しない（連続記録の長さだけ）：交換した分は取り消して、コインを返す

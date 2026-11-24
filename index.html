@@ -476,6 +476,12 @@ body.light-mode .setting-box { background: rgba(240,242,245,0.4); }
 .streak-fire.flame-purple { filter: hue-rotate(250deg) saturate(1.5); }
 .streak-fire.flame-rainbow { animation: gameRainbow 3s linear infinite; }
 @keyframes gameRainbow { from { filter: hue-rotate(0deg) saturate(1.6); } to { filter: hue-rotate(360deg) saturate(1.6); } }
+.home-go { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+.home-go-btn { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 11px 12px; border-radius: 12px; border: 1px solid var(--border); background: var(--bg2); color: var(--text); cursor: pointer; font-family: inherit; text-align: left; }
+.home-go-btn i { font-style: normal; font-size: 1.4rem; }
+.home-go-btn b { font-size: 0.92rem; }
+.home-go-btn span { font-size: 0.66rem; color: var(--text2); }
+.home-go-btn:active { transform: scale(0.98); }
 .streak-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; margin-bottom: 10px; cursor: pointer; }
 .streak-card.done { border-color: #f59e0b; background: linear-gradient(135deg, rgba(245,158,11,0.16), var(--bg2)); }
 .streak-card.risk { border-color: var(--warn); }
@@ -782,10 +788,12 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
       <div class="logo-text" style="font-size:1.3rem;">すするanki</div>
       <div class="version-badge" id="appVersionBadge" style="display:inline-block; margin-top:6px; font-size:0.8rem;"></div>
     </div>
-    <button class="nav-item active" id="navHome" onclick="openPage('pgHome')"><i>🏠</i>ホーム・クイズ</button>
+    <button class="nav-item active" id="navHome" onclick="openPage('pgHome')"><i>🏠</i>ホーム</button>
+    <button class="nav-item" id="navQuiz" onclick="openPage('pgQuiz')"><i>🎯</i>クイズ</button>
     <button class="nav-item" id="navTree" onclick="openPage('pgTree')"><i>📁</i>構造エクスプローラー</button>
     <button class="nav-item" id="navBox" onclick="openPage('pgBox')"><i>📝</i>問題カード箱</button>
     <button class="nav-item" id="navOnlineMatch" onclick="openPage('pgOnlineMatch')"><i>⚔️</i>オンライン対戦</button>
+    <button class="nav-item" id="navShop" onclick="openPage('pgShop')"><i>🛒</i>ショップ</button>
     <button class="nav-item" id="navStats" onclick="openPage('pgStats')"><i>📊</i>実績・学習状況</button>
     <button class="nav-item" id="navBackup" onclick="openPage('pgBackup')"><i>⚙️</i>管理・設定</button>
     <div style="height:1px; background:var(--border); margin:10px 24px;"></div>
@@ -823,8 +831,20 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 
     <div id="planHomeCard" class="card plan-card" style="display:none;"></div>
 
+    <!-- ★【0.04.57】ホームを整理：クイズは「🎯 クイズ」のタブ、交換は「🛒 ショップ」のタブへ。ホームにはすぐ始められるボタンだけ -->
+    <div class="home-go">
+      <button class="home-go-btn" onclick="openPage('pgQuiz')"><i>🎯</i><b>クイズ</b><span>範囲を選んで解く</span></button>
+      <button class="home-go-btn" onclick="openPage('pgDrill')"><i>🧠</i><b>暗記テスト</b><span>週間プラン・暗記</span></button>
+      <button class="home-go-btn" onclick="openPage('pgOnlineMatch')"><i>⚔️</i><b>対戦</b><span>フレンドとオンライン</span></button>
+      <button class="home-go-btn" onclick="openPage('pgShop')"><i>🛒</i><b>ショップ</b><span id="homeGoCoins">コインで交換</span></button>
+    </div>
+  </div>
+
+
+  <!-- ★【0.04.57】🎯 クイズ（ホームから分けた） -->
+  <div id="pgQuiz" class="screen">
+    <div class="page-head"><h2>🎯 クイズ</h2><div class="page-head-btns"><button class="chip" onclick="openPage('pgOnlineMatch')">⚔️ 対戦</button><button class="chip" onclick="openPage('pgTree')">📁 フォルダー</button></div></div>
     <div class="card quiz-card">
-      <div class="setting-box-title">🎯 クイズ</div>
       <div class="form-group" id="scopeGroup">
         <label class="section-label" style="font-weight:500;">出題範囲</label>
         <select id="selScopeSubject" class="form-control" style="margin-bottom:8px; display:none;" onchange="onScopeSubjectChange(this.value)"></select>
@@ -917,6 +937,11 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
     </details>
   </div>
 
+  <!-- ★【0.04.57】🛒 ショップ（game.js の renderShopPanel） -->
+  <div id="pgShop" class="screen">
+    <div class="page-head"><h2>🛒 ショップ</h2><div class="page-head-btns"><button class="chip" onclick="openPage('pgStats')">🏆 ごほうび</button></div></div>
+    <div class="card"><div id="shopPanel"></div></div>
+  </div>
   <div id="pgUpdates" class="screen">
     <h2>📢 お知らせ・アプデ履歴</h2>
     <div id="updatesListArea" style="display:flex; flex-direction:column; gap:10px;">
@@ -945,7 +970,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
   </div>
 
   <div id="pgBox" class="screen">
-    <h2 id="boxTitle">📝 問題カード箱</h2>
+    <div class="page-head"><h2 id="boxTitle">📝 問題カード箱</h2><div class="page-head-btns"><button class="chip" onclick="openPage('pgTree')">📁 フォルダー</button></div></div>
     <div class="form-group form-row" style="margin-bottom: 12px;">
       <input type="text" id="txtSearchBox" class="form-control" placeholder="🔍 問題・答えを検索..." oninput="scheduleBoxSearch()">
       <button class="btn btn-secondary" style="width:auto; padding:0 16px; white-space:nowrap;" onclick="showAllCards()">全表示</button>
@@ -1052,7 +1077,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
   </div>
 
   <div id="pgListen" class="screen">
-    <div class="page-head"><h2>🎧 聞き流し</h2><div class="page-head-btns"><button class="chip" onclick="openPage('pgHome')">戻る</button></div></div>
+    <div class="page-head"><h2>🎧 聞き流し</h2><div class="page-head-btns"><button class="chip" onclick="openPage('pgQuiz')">戻る</button></div></div>
     <div id="listenApp"></div>
   </div>
 
@@ -1455,10 +1480,10 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
   <!-- ★【0.03.00】下部ナビゲーション（クイズ中は非表示） -->
   <nav class="bottom-nav" id="bottomNav">
     <button class="bnav-item active" data-page="pgHome" onclick="openPage('pgHome')"><i>🏠</i>ホーム</button>
-    <button class="bnav-item" data-page="pgTree" onclick="openPage('pgTree')"><i>📁</i>フォルダー</button>
-    <button class="bnav-item" data-page="pgBox" onclick="openPage('pgBox')"><i>📝</i>カード</button>
-    <button class="bnav-item" data-page="pgOnlineMatch" onclick="openPage('pgOnlineMatch')"><i>⚔️</i>対戦</button>
+    <button class="bnav-item" data-page="pgQuiz" onclick="openPage('pgQuiz')"><i>🎯</i>クイズ</button>
     <button class="bnav-item" data-page="pgDrill" onclick="openPage('pgDrill')"><i>🧠</i>暗記<span class="friend-req-badge bnav-badge drill-active-dot" style="display:none; background:var(--warn);">⏸</span></button>
+    <button class="bnav-item" data-page="pgBox" onclick="openPage('pgBox')"><i>📝</i>カード</button>
+    <button class="bnav-item" data-page="pgShop" onclick="openPage('pgShop')"><i>🛒</i>ショップ</button>
     <button class="bnav-item" data-page="pgStats" onclick="openPage('pgStats')"><i>📊</i>実績</button>
     <button class="bnav-item" data-page="pgBackup" onclick="openPage('pgBackup')"><i>⚙️</i>設定<span class="friend-req-badge bnav-badge" style="display:none;"></span></button>
   </nav>

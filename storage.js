@@ -664,7 +664,7 @@ function refreshVisibleViews(contentChanged = true) {
     if (contentChanged) {
       if (isActive('pgTree') && typeof renderTree === 'function') renderTree();
       if (isActive('pgBox') && typeof renderBox === 'function') renderBox();
-      if (isActive('pgHome')) { if (typeof buildQuizScopeDropdown === 'function') buildQuizScopeDropdown(); if (typeof renderPlanHome === 'function') renderPlanHome(); }
+      if (isActive('pgHome') || isActive('pgQuiz')) { if (typeof buildQuizScopeDropdown === 'function') buildQuizScopeDropdown(); if (typeof renderPlanHome === 'function') renderPlanHome(); }
     }
     if (typeof updateHomeSummary === 'function') updateHomeSummary();
     if (isActive('pgDrill') && typeof _drillActive !== 'undefined' && !_drillActive && typeof drillHome === 'function') drillHome(); // ほかの端末の途中経過
