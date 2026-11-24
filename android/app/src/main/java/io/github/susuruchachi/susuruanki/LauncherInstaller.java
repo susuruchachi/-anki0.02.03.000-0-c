@@ -55,16 +55,25 @@ public class LauncherInstaller {
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
             if (a.isFinishing() || a.isDestroyed() || !foreground || installed(a)) return;
             p.edit().putLong("askedAt", System.currentTimeMillis()).apply();
-            try {
-                new AlertDialog.Builder(a)
-                    .setTitle("🚀 すするアプリを入れませんか？")
-                    .setMessage("すするanki・航海日誌・すする帳簿を、1つのところからすぐ開ける小さなアプリです（ホーム画面のウィジェット・アイコンの長押し付き）。\n\nこのアプリは今まで通りそのまま使えます。")
-                    .setPositiveButton("入れる", (d, w) -> start(a))
-                    .setNegativeButton("あとで", null)
-                    .setNeutralButton("今後は聞かない", (d, w) -> p.edit().putBoolean("never", true).apply())
-                    .show();
-            } catch (Exception ignored) {}
+            dialog(a, p);
         }, 3000);
+    }
+
+    // 上のバーの「▦ すするアプリ」を押したとき（まだ入っていない）：すぐ聞く
+    static void offerNow(Activity a) {
+        dialog(a, a.getSharedPreferences(PREFS, Context.MODE_PRIVATE));
+    }
+
+    private static void dialog(Activity a, SharedPreferences p) {
+        try {
+            new AlertDialog.Builder(a)
+                .setTitle("🚀 すするアプリを入れませんか？")
+                .setMessage("すするanki・航海日誌・すする帳簿を、1つのところからすぐ開ける小さなアプリです（ホーム画面のウィジェット・アイコンの長押し付き）。\n\nこのアプリは今まで通りそのまま使えます。")
+                .setPositiveButton("入れる", (d, w) -> start(a))
+                .setNegativeButton("あとで", null)
+                .setNeutralButton("今後は聞かない", (d, w) -> p.edit().putBoolean("never", true).apply())
+                .show();
+        } catch (Exception ignored) {}
     }
 
     static void onPause() { foreground = false; }

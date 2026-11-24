@@ -98,7 +98,7 @@ struct LauncherHome: View {
                         Button { open(a) } label: { tile(a) }.buttonStyle(.plain)
                     }
 
-                    Text("アプリを開いているときは、画面のはしの ▦ ボタンでここに戻れます。長押しで、ほかのアプリにすぐ切りかえ。ドラッグで好きな場所に動かせます。ホーム画面のアイコンの長押しからも開けます。")
+                    Text("アプリを開いているときは、上のバーの「ランチャー」でここに戻れます。バーの右のボタンで、ほかのアプリにすぐ切りかえられます。ホーム画面のアイコンの長押しからも開けます。")
                         .font(.footnote).foregroundStyle(sub)
 
                     settings
