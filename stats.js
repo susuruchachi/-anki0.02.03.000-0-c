@@ -70,7 +70,8 @@ function statsSummary() {
   const c = k => db.filter(STATUS_TESTS[k]).length;
   return { streak: s.cur, best: s.best, today: s.todayCount, week, month, daysTotal: s.total,
     grad: c('grad'), master: c('master'), normal: c('normal'), weak: c('weak') + c('shikkari'), unseen: c('unseen'), cards: db.length, date: today,
-    lv: typeof gameStats === 'function' ? (() => { try { return gameLevelOf(gameStats().xp).lv; } catch (e) { return 0; } })() : 0 }; // ★【0.04.53】⭐ レベル
+    lv: typeof gameStats === 'function' ? (() => { try { return gameLevelOf(gameStats().xp).lv; } catch (e) { return 0; } })() : 0, // ★【0.04.53】⭐ レベル
+    ...(typeof gameLeagueMine === 'function' ? (() => { try { return gameLeagueMine(); } catch (e) { return {}; } })() : {}) }; // ★【0.04.54】週間リーグ（wk・wxp・lwxp）
 }
 // ★【0.04.17】解いたら数秒後に送る（前は2分に1回までだったので、フレンドの画面になかなか出なかった）
 let _sumSent = '', _sumTimer = null;
