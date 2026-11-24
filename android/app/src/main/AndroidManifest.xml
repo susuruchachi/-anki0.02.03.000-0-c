@@ -15,6 +15,11 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- ★【0.04.52】 すするアプリ（ランチャー）が入っているかを見る（LauncherInstaller） -->
+    <queries>
+        <package android:name="io.github.susuruchachi.susurulauncher" />
+    </queries>
+
     <application
         android:name=".SusuruApplication"
         android:allowBackup="true"
@@ -73,6 +78,8 @@
         </service>
         <!-- ★【0.04.24】アプリの自動更新（入れた結果・閉じて1分後に起こす） -->
         <receiver android:name=".InstallResultReceiver" android:exported="false" />
+        <!-- ★【0.04.52】 すするアプリを入れた結果（LauncherInstaller） -->
+        <receiver android:name=".LauncherInstaller$Result" android:exported="false" />
         <!-- ★【0.04.19】大きいウィジェット（フレンドとのランキング・自分の進み具合） -->
         <receiver android:name=".BoardWidget" android:exported="false" android:label="@string/boardName">
             <intent-filter>

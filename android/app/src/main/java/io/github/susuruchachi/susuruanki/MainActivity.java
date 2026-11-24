@@ -195,7 +195,7 @@ public class MainActivity extends Activity {
     }
 
     @Override
-    protected void onPause() { super.onPause(); CookieManager.getInstance().flush(); }
+    protected void onPause() { super.onPause(); LauncherInstaller.onPause(); CookieManager.getInstance().flush(); }
 
     // ★【0.04.24】アプリの自動更新：閉じて（裏に回して）1分たち、プレイ中でなく、確認なしで入れられるなら入れ替える
     //  （裏に回ったアプリは止められることがあるので、アラームで起こしてもらう。InstallResultReceiver が入れる）
@@ -208,6 +208,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        LauncherInstaller.maybeOffer(this); // ★【0.04.52】 すするアプリ（ランチャー）がまだなら、入れるか聞く
         // 裏で入れようとしたら確認が要った：開いたときに確認を出す
         if (InstallResultReceiver.askLater) { InstallResultReceiver.askLater = false; bg.execute(() -> ApkUpdater.install(getApplicationContext())); }
     }
