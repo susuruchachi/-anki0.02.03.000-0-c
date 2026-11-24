@@ -61,6 +61,7 @@ function updateHomeSummary() {
   set('homeSumUnseen', db.filter(q => q.correct === 0 && q.incorrect === 0 && q.level >= 0).length);
   set('homeSumGrad', db.filter(isGrad).length);
   if (typeof renderStreakCard === 'function') renderStreakCard();
+  if (typeof renderGameBar === 'function') try { renderGameBar(); } catch (e) {} // ★【0.04.53】🏆 ごほうび
 }
 
 async function fetchAndRenderTutorial() {

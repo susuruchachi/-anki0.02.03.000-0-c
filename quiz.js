@@ -1944,6 +1944,7 @@ async function recordDailyLogAdjust(delta) {
 // ★【0.03.39】opts.drill：暗記テストの答え（ランキングの正解数は暗記テストの分を別に数える：drillScore）
 async function recordDailyLog(isCorrect, opts = {}) {
   if (typeof notifyMarkStudied === 'function') notifyMarkStudied(); // ★【0.03.14】今日は学習済み（催促しない）
+  if (typeof gameOnAnswer === 'function') gameOnAnswer(!!isCorrect); // ★【0.04.53】🏆 ごほうび（正解数・コンボ）。markStudyDay より先に
   if (typeof markStudyDay === 'function') markStudyDay(); // ★【0.03.62】連続記録
   // ★【0.04.17】1問ごとに、プランバトルの記録・成績のまとめもフレンドに届ける（数秒まとめて）
   if (typeof raceSync === 'function') raceSync();
