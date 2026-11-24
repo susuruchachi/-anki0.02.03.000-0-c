@@ -445,6 +445,33 @@ body.light-mode .setting-box { background: rgba(240,242,245,0.4); }
 .game-shop-item { display: flex; align-items: center; gap: 8px; padding: 7px 9px; border-radius: 10px; background: var(--bg3, rgba(255,255,255,0.04)); }
 .game-shop-i { font-size: 1.4rem; width: 1.8rem; text-align: center; }
 .game-shop-n { font-weight: 700; font-size: 0.82rem; }
+.game-coinline { font-size: 0.85rem; margin-bottom: 6px; }
+.game-coinline b { color: #fbbf24; font-size: 1rem; }
+.game-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 10px; }
+.game-boost { font-size: 0.72rem; color: #fbbf24; font-weight: 700; margin-top: 3px; }
+.game-rr { padding: 2px 6px !important; font-size: 0.72rem !important; }
+.game-tier { font-weight: 800; font-size: 0.95rem; margin-bottom: 6px; }
+.theme-dot { display: inline-block; width: 1.4rem; height: 1.4rem; border-radius: 50%; }
+.cheer-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.ship-scene { position: relative; height: 190px; border-radius: 14px; overflow: hidden; background: linear-gradient(180deg, #7dd3fc 0%, #bae6fd 55%, #0ea5e9 56%); }
+.ship-scene.night { background: linear-gradient(180deg, #0f172a 0%, #312e81 55%, #1e3a8a 56%); }
+.ship-sea { position: absolute; left: 0; right: 0; bottom: 0; height: 44%; background: linear-gradient(180deg, rgba(14,165,233,.85), #0369a1); }
+.ship-scene.night .ship-sea { background: linear-gradient(180deg, rgba(30,58,138,.9), #172554); }
+.ship-main { position: absolute; left: 50%; bottom: 26%; transform: translateX(-50%); font-size: 4.2rem; animation: shipBob 3s ease-in-out infinite; z-index: 2; }
+.ship-deco { position: absolute; font-size: 1.5rem; z-index: 3; }
+.ship-deco.gull { font-size: 1.1rem; animation: shipBob 4s ease-in-out infinite; }
+.ship-deco.star { font-size: 0.9rem; }
+@keyframes shipBob { 0%, 100% { transform: translate(-50%, 0) rotate(-2deg); } 50% { transform: translate(-50%, -6px) rotate(2deg); } }
+.ship-deco.gull { animation-name: gullBob; }
+@keyframes gullBob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+.ship-parts { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 6px; margin-top: 8px; }
+.stamp-list { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.stamp-row { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 8px; background: var(--bg3, rgba(255,255,255,0.04)); font-size: 0.78rem; opacity: .7; }
+.stamp-row.got { opacity: 1; }
+.stamp-i { font-size: 1.1rem; }
+.stamp-n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stamp-bar { width: 60px; height: 6px; border-radius: 3px; background: var(--bg4); overflow: hidden; }
+.stamp-bar i { display: block; height: 100%; background: #fbbf24; }
 .streak-fire.flame-blue { filter: hue-rotate(185deg) saturate(1.4); }
 .streak-fire.flame-purple { filter: hue-rotate(250deg) saturate(1.5); }
 .streak-fire.flame-rainbow { animation: gameRainbow 3s linear infinite; }
