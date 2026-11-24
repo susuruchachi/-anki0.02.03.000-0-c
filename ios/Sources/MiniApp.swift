@@ -32,6 +32,10 @@ enum MiniApp: String, CaseIterable, Identifiable {
     // ログインできたら susuruanki://auth?state=…&id=…&at=… で戻ってくるので、ページの takeLogin・<loginArrived>() に渡す
     var loginPage: URL? { self == .anki ? nil : URL(string: "https://\(host)\(path)app-login.html") }
     var loginArrived: String { self == .koukai ? "__koukaiLoginArrived" : "__kashikariLoginArrived" }
+    // ★【0.04.61】航海日誌の Googleカレンダー（gcal.js）：Google の Web client と、許可のあと戻ってくるところ（ブラウザと同じ。登録してある）
+    var gcal: (clientID: String, redirect: String)? {
+        self == .koukai ? ("926791749187-pq139a7m09tnp8pupfineqp8ibruhu9v.apps.googleusercontent.com", "https://koukai-nisshi-calendar.vercel.app/") : nil
+    }
 
     var bg: UIColor {
         self == .anki ? UIColor(red: 8 / 255, green: 12 / 255, blue: 20 / 255, alpha: 1)

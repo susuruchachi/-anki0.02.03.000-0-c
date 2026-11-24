@@ -1,7 +1,8 @@
 // ★【0.04.45】ウェブ版を表示する画面と、ページとのやり取り
 // ★【0.04.50】ランチャーの中の1つのアプリ（MiniApp）として、すするanki・航海日誌・すする帳簿のどれにも使う
 //  ・すするanki：ページに window.SusuruIOS を入れ、ページからは webkit.messageHandlers.susuru に送ってもらう（前と同じ）
-//  ・航海日誌・すする帳簿：Android アプリと同じ window.KoukaiApp・window.KashikariApp（setWidgetData・saveFile・googleSignIn・takeLogin）
+//  ・航海日誌・すする帳簿：Android アプリと同じ window.KoukaiApp・window.KashikariApp（setWidgetData・saveFile・googleSignIn・takeLogin。
+//    ★【0.04.61】航海日誌の Googleカレンダーの gcalAuthorize も）
 //    を入れる（ページは変えずにそのまま動く）。ページからは webkit.messageHandlers.koukai・kashikari に届く
 
 import AuthenticationServices
@@ -133,6 +134,7 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKNavig
         googleSignIn: function(){ post('googleSignIn'); },
         googleSignInBrowser: function(){ post('googleSignIn'); },
         takeLogin: function(){ var t = window.__iosLogin || null; window.__iosLogin = null; return t; },
+        gcalAuthorize: function(scopes, interactive){ post('gcalAuthorize', JSON.stringify({ scopes: String(scopes || ''), interactive: !!interactive })); },
         signOutGoogle: function(){}
       };
       window.SusuruLauncher = { openApp: function(a){ post('openApp', a || ''); } };
@@ -177,6 +179,7 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKNavig
                     }
                 case "saveFile": saveFile(json: data)
                 case "googleSignIn": startGoogleLogin()
+                case "gcalAuthorize": gcalAuthorize(json: data)
                 default: break
                 }
             }
@@ -228,6 +231,73 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKNavig
         } else {
             deliverLogin(["kind": "error", "error": err?.localizedDescription ?? "わからないエラー"])
         }
+    }
+
+    // ---------------- 📆 Googleカレンダーの許可（★【0.04.61】航海日誌） ----------------
+    // 航海日誌の gcal.js は、アプリの中では KoukaiApp.gcalAuthorize(scopes, interactive) で Google のアクセストークン（1時間）をもらう
+    // （Android はアプリが Google に頼む）。iOS では WKWebView の中で Google が許可の画面を出さないので、iOS のログインの画面
+    // （ASWebAuthenticationSession。Safari の Google のログインを使える）で許可をもらう：
+    //  ・Google の許可の画面 → 航海日誌のページ（Web client の「承認済みのリダイレクト URI」に入っている、ブラウザと同じ戻り先）の
+    //    #access_token=…&state=ios-… に戻る → ページ（index.html のいちばん上）がすぐ susuruanki://gcal#… に移る → ここで受け取る
+    //  ・もらったトークンは期限までアプリが覚えておく（ページを読み直しても、画面を出さずに渡せる）。期限が切れたら、ページが「つなぎ直す」を出す
+    private static let gcalKey = "koukai_gcal_token"
+    private func gcalAuthorize(json: String) {
+        guard let cfg = app.gcal,
+              let d = json.data(using: .utf8), let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] else { return }
+        let scopes = ((o["scopes"] as? String) ?? "").split(separator: " ").map(String.init).filter { !$0.isEmpty }
+        let interactive = (o["interactive"] as? Bool) ?? false
+        // 覚えているトークン（まだ5分以上使える・同じ許可）。「つなぎ直す」を押したとき（interactive）は、取り直す
+        if !interactive, let t = UserDefaults.standard.dictionary(forKey: Self.gcalKey), let v = t["v"] as? String, let exp = t["exp"] as? Double,
+           exp > Date().timeIntervalSince1970 + 300, Set((t["scopes"] as? [String]) ?? []).isSuperset(of: scopes) {
+            deliverGcal(v, nil, false); return
+        }
+        guard interactive else { deliverGcal(nil, "つなぎ直してください", true); return }
+        guard authSession == nil else { return }
+        let state = "ios-" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        var c = URLComponents(string: "https://accounts.google.com/o/oauth2/v2/auth")!
+        c.queryItems = [
+            URLQueryItem(name: "client_id", value: cfg.clientID),
+            URLQueryItem(name: "redirect_uri", value: cfg.redirect),
+            URLQueryItem(name: "response_type", value: "token"),
+            URLQueryItem(name: "scope", value: scopes.joined(separator: " ")),
+            URLQueryItem(name: "include_granted_scopes", value: "true"),
+            URLQueryItem(name: "state", value: state),
+        ]
+        guard let u = c.url else { return }
+        let s = ASWebAuthenticationSession(url: u, callback: .customScheme("susuruanki")) { [weak self] cb, err in
+            Task { @MainActor in self?.finishGcal(cb, err, state, scopes) }
+        }
+        s.presentationContextProvider = self
+        s.prefersEphemeralWebBrowserSession = false
+        authSession = s
+        if !s.start() { authSession = nil; deliverGcal(nil, "Google の画面を開けませんでした", false) }
+    }
+
+    private func finishGcal(_ cb: URL?, _ err: Error?, _ state: String, _ scopes: [String]) {
+        authSession = nil
+        guard let cb, cb.host == "gcal" else {
+            let canceled = (err as? ASWebAuthenticationSessionError)?.code == .canceledLogin
+            deliverGcal(nil, canceled ? "Google の画面が閉じられました" : (err?.localizedDescription ?? "Google に断られました"), false)
+            return
+        }
+        let cc = URLComponents(url: cb, resolvingAgainstBaseURL: false)
+        var f = URLComponents(); f.percentEncodedQuery = cc?.percentEncodedFragment ?? cc?.percentEncodedQuery ?? ""
+        let q = Dictionary((f.queryItems ?? []).compactMap { i in i.value.map { (i.name, $0) } }, uniquingKeysWith: { a, _ in a })
+        guard q["state"] == state else { deliverGcal(nil, "Google からの返事を確かめられませんでした", false); return }
+        if let e = q["error"] { deliverGcal(nil, e == "access_denied" ? "Googleカレンダーの許可がもらえませんでした" : "Google に断られました（\(e)）", false); return }
+        guard let v = q["access_token"], !v.isEmpty else { deliverGcal(nil, "Google のトークンを受け取れませんでした", false); return }
+        let granted = Set((q["scope"] ?? "").replacingOccurrences(of: "+", with: " ").split(separator: " ").map(String.init))
+        guard granted.isSuperset(of: scopes) else { deliverGcal(nil, "Googleカレンダーの許可が足りません（すべてにチェックを入れてください）", false); return }
+        let exp = Date().timeIntervalSince1970 + max(60, (Double(q["expires_in"] ?? "") ?? 3600) - 120)
+        UserDefaults.standard.set(["v": v, "exp": exp, "scopes": Array(granted)], forKey: Self.gcalKey)
+        deliverGcal(v, nil, false)
+    }
+
+    // ページの window.__koukaiGcalToken(トークン, エラー, 画面が要るか) に渡す
+    private func deliverGcal(_ v: String?, _ e: String?, _ needsUi: Bool) {
+        guard isViewLoaded, let web else { return }
+        let args: [String: Any] = ["v": v ?? NSNull(), "e": e ?? NSNull(), "n": needsUi]
+        Task { _ = try? await web.callAsyncJavaScript("if (typeof window.__koukaiGcalToken === 'function') window.__koukaiGcalToken(v, e, n);", arguments: args, in: nil, contentWorld: .page) }
     }
 
     // ページの takeLogin が返すもの（JSON の文字）を置いて、ページに「届いた」と知らせる
