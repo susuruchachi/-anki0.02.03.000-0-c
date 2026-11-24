@@ -390,7 +390,7 @@ function showUpdateBar() {
 }
 // ★【0.04.10】更新が来たら、遊んでいないとき（ホーム・フォルダー・設定・暗記テストの最初の画面など）に自動で読み込み直す。
 //  クイズ・対戦・暗記テストの問題・聞き流しの再生中・ダイアログを開いている・文字を入力している間は決して読み込み直さない
-const AUTO_UPDATE_PAGES = ['pgHome', 'pgDrill', 'pgListen', 'pgStats', 'pgTree', 'pgBox', 'pgUpdates', 'pgFriends', 'pgPublicCategories', 'pgCompareStats', 'pgBackup', 'pgMatchHistory', 'pgTutorial'];
+const AUTO_UPDATE_PAGES = ['pgHome', 'pgQuiz', 'pgShop', 'pgDrill', 'pgListen', 'pgStats', 'pgTree', 'pgBox', 'pgUpdates', 'pgFriends', 'pgPublicCategories', 'pgCompareStats', 'pgBackup', 'pgMatchHistory', 'pgTutorial'];
 let _autoUpdating = false;
 function appIdleForUpdate(ignoreVisible) { // ★【0.04.24】ignoreVisible：裏に回るときに（Android アプリの自動更新）
   if (document.body.classList.contains('in-quiz') || window.currentOnlineMatch) return false;

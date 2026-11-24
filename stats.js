@@ -52,6 +52,7 @@ function renderStatsAndCharts() {
   });
 
   renderStatsFriends(); // ★【0.04.14】フレンドと比べる
+  if (typeof renderGamePanel === 'function') try { renderGamePanel(); } catch (e) {} // ★【0.04.53】🏆 ごほうび
   renderStudyHeatmap(); // ★【0.03.62】学習した日の記録（studyDays）から。以前は過去の日がでたらめだった
 }
 
@@ -68,7 +69,9 @@ function statsSummary() {
   let week = 0, month = 0; Object.entries(days).forEach(([k, n]) => { if (k >= mon && k <= today) week += n; if (k >= first && k <= today) month += n; });
   const c = k => db.filter(STATUS_TESTS[k]).length;
   return { streak: s.cur, best: s.best, today: s.todayCount, week, month, daysTotal: s.total,
-    grad: c('grad'), master: c('master'), normal: c('normal'), weak: c('weak') + c('shikkari'), unseen: c('unseen'), cards: db.length, date: today };
+    grad: c('grad'), master: c('master'), normal: c('normal'), weak: c('weak') + c('shikkari'), unseen: c('unseen'), cards: db.length, date: today,
+    lv: typeof gameStats === 'function' ? (() => { try { return gameLevelOf(gameStats().xp).lv; } catch (e) { return 0; } })() : 0, // ★【0.04.53】⭐ レベル
+    ...(typeof gameLeagueMine === 'function' ? (() => { try { return Object.assign(gameLeagueMine(), { ttl: gameMyTitle(), tier: gameTier().tier }); } catch (e) { return {}; } })() : {}) }; // ★【0.04.56】称号・段位 // ★【0.04.54】週間リーグ（wk・wxp・lwxp）
 }
 // ★【0.04.17】解いたら数秒後に送る（前は2分に1回までだったので、フレンドの画面になかなか出なかった）
 let _sumSent = '', _sumTimer = null;
@@ -103,11 +106,11 @@ async function renderStatsFriends() {
   const have = new Set(docs.map(d => d.uid)), noSum = friends.filter(u => !have.has(u)).slice(0, 10);
   const noNames = await Promise.all(noSum.map(u => (typeof friendNameOf === 'function' ? friendNameOf(u) : Promise.resolve('フレンド')).catch(() => 'フレンド')));
   const cols = [me, ...docs.map(fix).sort((a, b) => (b.week || 0) - (a.week || 0)), ...noSum.map((u, i) => ({ name: noNames[i], none: true }))];
-  const rows = [['🔥 連続記録（日）', 'streak'], ['🏆 最長（日）', 'best'], ['📝 今日の問題数', 'today'], ['📅 今週の問題数', 'week'], ['🗓️ 今月の問題数', 'month'], ['📆 学習した日（合計）', 'daysTotal'],
+  const rows = [['⭐ レベル', 'lv'], ['🔥 連続記録（日）', 'streak'], ['🏆 最長（日）', 'best'], ['📝 今日の問題数', 'today'], ['📅 今週の問題数', 'week'], ['🗓️ 今月の問題数', 'month'], ['📆 学習した日（合計）', 'daysTotal'],
     ['🎓 卒業', 'grad'], ['⚡ 得意', 'master'], ['⚠️ 苦手・しっかり', 'weak', true], ['🃏 カードの数', 'cards']];
   const best = (k, low) => { const v = cols.filter(c => !c.none).map(c => Number(c[k]) || 0); return low ? null : Math.max(...v); };
   const missing = friends.length - docs.length;
-  box.innerHTML = `<div class="stats-cmp-wrap"><table class="stats-cmp"><tr><th></th>${cols.map(c => `<th>${escapeHtml(c.name)}</th>`).join('')}</tr>
+  box.innerHTML = `<div class="stats-cmp-wrap"><table class="stats-cmp"><tr><th></th>${cols.map(c => `<th>${escapeHtml(c.name)}${c.ttl ? `<br><small style="font-weight:400; opacity:.8;">${escapeHtml(c.ttl)}</small>` : ''}</th>`).join('')}</tr>
     ${rows.map(([l, k, low]) => { const b = best(k, low); return `<tr><th>${l}</th>${cols.map(c => { if (c.none) return '<td class="hint-small">—</td>'; const v = Number(c[k]) || 0; return `<td class="${!low && b > 0 && v === b ? 'top' : ''}">${v}</td>`; }).join('')}</tr>`; }).join('')}
     <tr><th>🕒 記録</th>${cols.map(c => `<td class="hint-small">${c.me ? '今' : c.none ? 'まだ無し' : escapeHtml(String(c.date || '').slice(5).replace('-', '/'))}</td>`).join('')}</tr></table></div>
     ${missing > 0 ? `<div class="hint-small" style="margin-top:6px;">「—」のフレンドは、成績共有がオフか、まだ新しい版のアプリで問題を解いていないため、成績がまだ届いていません。</div>` : ''}

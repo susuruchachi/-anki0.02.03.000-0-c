@@ -368,7 +368,7 @@ function runCategoryAction(catName, act, info) {
     case 'quiz': {
       selectedScopePath = getCategoryPath(catName); lastQuizScopePath = [...selectedScopePath];
       try { saveScopePath(); } catch (e) {}
-      closeCategoryEditor(); openPage('pgHome'); buildQuizScopeDropdown();
+      closeCategoryEditor(); openPage('pgQuiz'); buildQuizScopeDropdown();
       return;
     }
     case 'skipauto': autoSkipSubfolders(catName); return;

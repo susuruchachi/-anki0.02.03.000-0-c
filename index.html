@@ -402,6 +402,86 @@ body.light-mode .setting-box { background: rgba(240,242,245,0.4); }
 .hm-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 8px; }
 .hm-legend { display: flex; align-items: center; gap: 3px; font-size: 0.62rem; color: var(--text2); flex-shrink: 0; }
 .hm-legend i { width: 11px; height: 11px; border-radius: 3px; background: var(--bg4); display: inline-block; }
+/* ★【0.04.53】🏆 ごほうび */
+.game-bar { background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 9px 12px; margin-bottom: 10px; cursor: pointer; }
+.game-row { display: flex; align-items: center; gap: 8px; }
+.game-lv { font-family: 'JetBrains Mono', monospace; font-weight: 900; color: #fbbf24; }
+.game-title { font-size: 0.8rem; font-weight: 700; color: var(--text); flex: 1; min-width: 0; }
+.game-shield { font-size: 0.9rem; letter-spacing: 1px; }
+.game-xp { height: 7px; border-radius: 4px; background: var(--bg4); overflow: hidden; margin-top: 6px; }
+.game-xp-fill { height: 100%; background: linear-gradient(90deg, #f59e0b, #fbbf24); border-radius: 4px; transition: width .4s; }
+.game-xp-text { font-size: 0.66rem; color: var(--text2); margin-top: 2px; text-align: right; }
+.game-ms { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.game-m { display: flex; align-items: center; gap: 6px; font-size: 0.76rem; padding: 4px 8px; border-radius: 8px; background: var(--bg3, rgba(255,255,255,0.04)); }
+.game-m.done { background: rgba(34,197,94,0.14); color: var(--success); }
+.game-m-t { flex: 1; min-width: 0; }
+.game-m b { font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; }
+.game-big { display: flex; align-items: center; gap: 12px; }
+.game-big-lv { font-family: 'JetBrains Mono', monospace; font-size: 1.6rem; font-weight: 900; color: #fbbf24; }
+.game-big-title { font-weight: 800; font-size: 1.05rem; }
+.game-badges { display: grid; grid-template-columns: repeat(auto-fill, minmax(66px, 1fr)); gap: 6px; margin-top: 6px; }
+.game-badge { text-align: center; padding: 6px 4px; border-radius: 10px; background: var(--bg3, rgba(255,255,255,0.04)); opacity: .55; }
+.game-badge.got { opacity: 1; background: rgba(251,191,36,0.14); border: 1px solid rgba(251,191,36,0.4); }
+.game-badge-i { font-size: 1.3rem; }
+.game-badge-n { font-size: 0.62rem; font-weight: 700; margin-top: 2px; }
+.game-badge-p { font-size: 0.58rem; color: var(--text2); }
+.game-toast { position: fixed; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 12px); transform: translate(-50%, -140%); z-index: 3000; display: flex; align-items: center; gap: 10px;
+  max-width: min(92vw, 420px); padding: 10px 14px; border-radius: 14px; background: linear-gradient(135deg, #3b2a06, #1e293b); border: 1px solid #fbbf24; color: #fff; box-shadow: 0 8px 30px rgba(0,0,0,.45); transition: transform .35s cubic-bezier(.2,1.4,.4,1); }
+.game-toast.show { transform: translate(-50%, 0); }
+.game-toast-icon { font-size: 1.8rem; animation: gameBounce .8s ease; }
+.game-toast-title { font-weight: 800; font-size: 0.9rem; color: #fde68a; }
+.game-toast-body { font-size: 0.76rem; color: #e2e8f0; }
+@keyframes gameBounce { 0% { transform: scale(.3) rotate(-20deg); } 60% { transform: scale(1.3) rotate(8deg); } 100% { transform: scale(1) rotate(0); } }
+.game-coin { font-size: 0.78rem; font-weight: 800; color: #fbbf24; }
+.game-league-line { font-size: 0.72rem; color: var(--text2); margin-top: 4px; }
+.game-league { display: flex; flex-direction: column; gap: 3px; margin-top: 4px; }
+.game-lg-row { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 8px; background: var(--bg3, rgba(255,255,255,0.04)); font-size: 0.8rem; color: var(--text); }
+.game-lg-row.me { background: rgba(251,191,36,0.14); border: 1px solid rgba(251,191,36,0.4); }
+.game-lg-r { width: 1.6em; text-align: center; font-weight: 800; }
+.game-lg-n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.game-lg-n small { color: var(--text2); font-weight: 400; }
+.game-lg-p { font-size: 0.68rem; color: #fbbf24; }
+.game-shop { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.game-shop-item { display: flex; align-items: center; gap: 8px; padding: 7px 9px; border-radius: 10px; background: var(--bg3, rgba(255,255,255,0.04)); }
+.game-shop-i { font-size: 1.4rem; width: 1.8rem; text-align: center; }
+.game-shop-n { font-weight: 700; font-size: 0.82rem; }
+.game-coinline { font-size: 0.85rem; margin-bottom: 6px; }
+.game-coinline b { color: #fbbf24; font-size: 1rem; }
+.game-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 10px; }
+.game-boost { font-size: 0.72rem; color: #fbbf24; font-weight: 700; margin-top: 3px; }
+.game-rr { padding: 2px 6px !important; font-size: 0.72rem !important; }
+.game-tier { font-weight: 800; font-size: 0.95rem; margin-bottom: 6px; }
+.theme-dot { display: inline-block; width: 1.4rem; height: 1.4rem; border-radius: 50%; }
+.cheer-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.ship-scene { position: relative; height: 190px; border-radius: 14px; overflow: hidden; background: linear-gradient(180deg, #7dd3fc 0%, #bae6fd 55%, #0ea5e9 56%); }
+.ship-scene.night { background: linear-gradient(180deg, #0f172a 0%, #312e81 55%, #1e3a8a 56%); }
+.ship-sea { position: absolute; left: 0; right: 0; bottom: 0; height: 44%; background: linear-gradient(180deg, rgba(14,165,233,.85), #0369a1); }
+.ship-scene.night .ship-sea { background: linear-gradient(180deg, rgba(30,58,138,.9), #172554); }
+.ship-main { position: absolute; left: 50%; bottom: 26%; transform: translateX(-50%); font-size: 4.2rem; animation: shipBob 3s ease-in-out infinite; z-index: 2; }
+.ship-deco { position: absolute; font-size: 1.5rem; z-index: 3; }
+.ship-deco.gull { font-size: 1.1rem; animation: shipBob 4s ease-in-out infinite; }
+.ship-deco.star { font-size: 0.9rem; }
+@keyframes shipBob { 0%, 100% { transform: translate(-50%, 0) rotate(-2deg); } 50% { transform: translate(-50%, -6px) rotate(2deg); } }
+.ship-deco.gull { animation-name: gullBob; }
+@keyframes gullBob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+.ship-parts { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 6px; margin-top: 8px; }
+.stamp-list { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.stamp-row { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 8px; background: var(--bg3, rgba(255,255,255,0.04)); font-size: 0.78rem; opacity: .7; }
+.stamp-row.got { opacity: 1; }
+.stamp-i { font-size: 1.1rem; }
+.stamp-n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stamp-bar { width: 60px; height: 6px; border-radius: 3px; background: var(--bg4); overflow: hidden; }
+.stamp-bar i { display: block; height: 100%; background: #fbbf24; }
+.streak-fire.flame-blue { filter: hue-rotate(185deg) saturate(1.4); }
+.streak-fire.flame-purple { filter: hue-rotate(250deg) saturate(1.5); }
+.streak-fire.flame-rainbow { animation: gameRainbow 3s linear infinite; }
+@keyframes gameRainbow { from { filter: hue-rotate(0deg) saturate(1.6); } to { filter: hue-rotate(360deg) saturate(1.6); } }
+.home-go { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+.home-go-btn { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 11px 12px; border-radius: 12px; border: 1px solid var(--border); background: var(--bg2); color: var(--text); cursor: pointer; font-family: inherit; text-align: left; }
+.home-go-btn i { font-style: normal; font-size: 1.4rem; }
+.home-go-btn b { font-size: 0.92rem; }
+.home-go-btn span { font-size: 0.66rem; color: var(--text2); }
+.home-go-btn:active { transform: scale(0.98); }
 .streak-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; margin-bottom: 10px; cursor: pointer; }
 .streak-card.done { border-color: #f59e0b; background: linear-gradient(135deg, rgba(245,158,11,0.16), var(--bg2)); }
 .streak-card.risk { border-color: var(--warn); }
@@ -708,10 +788,12 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
       <div class="logo-text" style="font-size:1.3rem;">すするanki</div>
       <div class="version-badge" id="appVersionBadge" style="display:inline-block; margin-top:6px; font-size:0.8rem;"></div>
     </div>
-    <button class="nav-item active" id="navHome" onclick="openPage('pgHome')"><i>🏠</i>ホーム・クイズ</button>
+    <button class="nav-item active" id="navHome" onclick="openPage('pgHome')"><i>🏠</i>ホーム</button>
+    <button class="nav-item" id="navQuiz" onclick="openPage('pgQuiz')"><i>🎯</i>クイズ</button>
     <button class="nav-item" id="navTree" onclick="openPage('pgTree')"><i>📁</i>構造エクスプローラー</button>
     <button class="nav-item" id="navBox" onclick="openPage('pgBox')"><i>📝</i>問題カード箱</button>
     <button class="nav-item" id="navOnlineMatch" onclick="openPage('pgOnlineMatch')"><i>⚔️</i>オンライン対戦</button>
+    <button class="nav-item" id="navShop" onclick="openPage('pgShop')"><i>🛒</i>ショップ</button>
     <button class="nav-item" id="navStats" onclick="openPage('pgStats')"><i>📊</i>実績・学習状況</button>
     <button class="nav-item" id="navBackup" onclick="openPage('pgBackup')"><i>⚙️</i>管理・設定</button>
     <div style="height:1px; background:var(--border); margin:10px 24px;"></div>
@@ -736,6 +818,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
     <!-- ★【0.03.00】学習状況のひと目サマリー（タップでカード箱を絞り込み） -->
     <!-- ★【0.03.62】🔥 連続記録 -->
     <div id="streakCard" class="streak-card" onclick="openPage('pgStats')"></div>
+    <div id="gameBar" class="game-bar" onclick="openPage('pgStats'); setTimeout(() => { const g = document.getElementById('gamePanel'); if (g) g.scrollIntoView({ block: 'start', behavior: 'smooth' }); }, 300);"></div>
     <!-- ★【0.04.20】📅 これからのテスト・期限・今日の授業 -->
     <div id="homeCalCard" class="cal-home" onclick="openCalendar()"></div>
 
@@ -748,8 +831,20 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 
     <div id="planHomeCard" class="card plan-card" style="display:none;"></div>
 
+    <!-- ★【0.04.57】ホームを整理：クイズは「🎯 クイズ」のタブ、交換は「🛒 ショップ」のタブへ。ホームにはすぐ始められるボタンだけ -->
+    <div class="home-go">
+      <button class="home-go-btn" onclick="openPage('pgQuiz')"><i>🎯</i><b>クイズ</b><span>範囲を選んで解く</span></button>
+      <button class="home-go-btn" onclick="openPage('pgDrill')"><i>🧠</i><b>暗記テスト</b><span>週間プラン・暗記</span></button>
+      <button class="home-go-btn" onclick="openPage('pgOnlineMatch')"><i>⚔️</i><b>対戦</b><span>フレンドとオンライン</span></button>
+      <button class="home-go-btn" onclick="openPage('pgShop')"><i>🛒</i><b>ショップ</b><span id="homeGoCoins">コインで交換</span></button>
+    </div>
+  </div>
+
+
+  <!-- ★【0.04.57】🎯 クイズ（ホームから分けた） -->
+  <div id="pgQuiz" class="screen">
+    <div class="page-head"><h2>🎯 クイズ</h2><div class="page-head-btns"><button class="chip" onclick="openPage('pgOnlineMatch')">⚔️ 対戦</button><button class="chip" onclick="openPage('pgTree')">📁 フォルダー</button></div></div>
     <div class="card quiz-card">
-      <div class="setting-box-title">🎯 クイズ</div>
       <div class="form-group" id="scopeGroup">
         <label class="section-label" style="font-weight:500;">出題範囲</label>
         <select id="selScopeSubject" class="form-control" style="margin-bottom:8px; display:none;" onchange="onScopeSubjectChange(this.value)"></select>
@@ -842,6 +937,11 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
     </details>
   </div>
 
+  <!-- ★【0.04.57】🛒 ショップ（game.js の renderShopPanel） -->
+  <div id="pgShop" class="screen">
+    <div class="page-head"><h2>🛒 ショップ</h2><div class="page-head-btns"><button class="chip" onclick="openPage('pgStats')">🏆 ごほうび</button></div></div>
+    <div class="card"><div id="shopPanel"></div></div>
+  </div>
   <div id="pgUpdates" class="screen">
     <h2>📢 お知らせ・アプデ履歴</h2>
     <div id="updatesListArea" style="display:flex; flex-direction:column; gap:10px;">
@@ -870,7 +970,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
   </div>
 
   <div id="pgBox" class="screen">
-    <h2 id="boxTitle">📝 問題カード箱</h2>
+    <div class="page-head"><h2 id="boxTitle">📝 問題カード箱</h2><div class="page-head-btns"><button class="chip" onclick="openPage('pgTree')">📁 フォルダー</button></div></div>
     <div class="form-group form-row" style="margin-bottom: 12px;">
       <input type="text" id="txtSearchBox" class="form-control" placeholder="🔍 問題・答えを検索..." oninput="scheduleBoxSearch()">
       <button class="btn btn-secondary" style="width:auto; padding:0 16px; white-space:nowrap;" onclick="showAllCards()">全表示</button>
@@ -977,7 +1077,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
   </div>
 
   <div id="pgListen" class="screen">
-    <div class="page-head"><h2>🎧 聞き流し</h2><div class="page-head-btns"><button class="chip" onclick="openPage('pgHome')">戻る</button></div></div>
+    <div class="page-head"><h2>🎧 聞き流し</h2><div class="page-head-btns"><button class="chip" onclick="openPage('pgQuiz')">戻る</button></div></div>
     <div id="listenApp"></div>
   </div>
 
@@ -989,6 +1089,12 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
   <div id="pgStats" class="screen">
     <h2>📊 習熟実績と学習状況</h2>
     
+    <!-- ★【0.04.53】🏆 ごほうび（game.js） -->
+    <div class="card">
+      <div class="setting-box-title">🏆 レベル・ミッション・バッジ</div>
+      <div id="gamePanel"></div>
+    </div>
+
     <div class="card">
       <div class="setting-box-title">🔥 連続記録と学習ヒートマップ</div>
       <div id="heatmapContainer" class="heatmap-grid"></div>
@@ -1374,10 +1480,10 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
   <!-- ★【0.03.00】下部ナビゲーション（クイズ中は非表示） -->
   <nav class="bottom-nav" id="bottomNav">
     <button class="bnav-item active" data-page="pgHome" onclick="openPage('pgHome')"><i>🏠</i>ホーム</button>
-    <button class="bnav-item" data-page="pgTree" onclick="openPage('pgTree')"><i>📁</i>フォルダー</button>
-    <button class="bnav-item" data-page="pgBox" onclick="openPage('pgBox')"><i>📝</i>カード</button>
-    <button class="bnav-item" data-page="pgOnlineMatch" onclick="openPage('pgOnlineMatch')"><i>⚔️</i>対戦</button>
+    <button class="bnav-item" data-page="pgQuiz" onclick="openPage('pgQuiz')"><i>🎯</i>クイズ</button>
     <button class="bnav-item" data-page="pgDrill" onclick="openPage('pgDrill')"><i>🧠</i>暗記<span class="friend-req-badge bnav-badge drill-active-dot" style="display:none; background:var(--warn);">⏸</span></button>
+    <button class="bnav-item" data-page="pgBox" onclick="openPage('pgBox')"><i>📝</i>カード</button>
+    <button class="bnav-item" data-page="pgShop" onclick="openPage('pgShop')"><i>🛒</i>ショップ</button>
     <button class="bnav-item" data-page="pgStats" onclick="openPage('pgStats')"><i>📊</i>実績</button>
     <button class="bnav-item" data-page="pgBackup" onclick="openPage('pgBackup')"><i>⚙️</i>設定<span class="friend-req-badge bnav-badge" style="display:none;"></span></button>
   </nav>
@@ -1719,6 +1825,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 <script src="ai.js"></script>
 <script src="picker.js"></script>
 <script src="streak.js"></script>
+<script src="game.js"></script>
 <script src="tts.js"></script>
 <script src="drill.js"></script>
 <script src="cards.js"></script>

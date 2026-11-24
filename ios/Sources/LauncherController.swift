@@ -1,6 +1,6 @@
 // ★【0.04.50】ランチャー：すするanki と航海日誌（★【0.04.51】とすする帳簿）を、1つのアプリの中で別々のアプリとして使う
 //  ・はじめはランチャーの画面（LauncherHome）。押したアプリを全画面で出す（設定で「前に開いていたアプリをすぐ出す」にもできる）
-//  ・アプリを出しているときは、画面のはしに小さな ▦ ボタン（SwitcherButton）：押すとランチャー、長押しでほかのアプリへ、ドラッグで動かせる
+//  ・アプリを出しているときは、上に細いバー（AppBar。★【0.04.58】前の動かせる ▦ ボタンの代わり）：「ランチャー」で戻る・右のボタンでほかのアプリへ
 //  ・アプリはどれも開いたまま裏に置いておく（切りかえてもそのまま。開いたときに、ほかのものも裏で読み込む＝ウィジェット・通知のデータが新しくなる）
 
 import SwiftUI
@@ -10,7 +10,8 @@ final class LauncherController: UIViewController {
     private var webs: [MiniApp: WebViewController] = [:]
     private lazy var model = LauncherModel()
     private var home: UIHostingController<LauncherHome>!
-    private lazy var switcher = SwitcherButton()
+    private let bar = AppBar()
+    private let appArea = UIView() // アプリの画面を置くところ（バーの下）
     private(set) var current: MiniApp?
     private let lastKey = "launcher_last_app"
 
@@ -20,6 +21,26 @@ final class LauncherController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = MiniApp.anki.bg
 
+        // バーとその下のアプリの画面（ランチャーの画面はその上にかぶせる）
+        appArea.backgroundColor = .clear
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        appArea.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(appArea)
+        view.addSubview(bar)
+        NSLayoutConstraint.activate([
+            bar.topAnchor.constraint(equalTo: view.topAnchor),
+            bar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            bar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            bar.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: AppBar.height),
+            appArea.topAnchor.constraint(equalTo: bar.bottomAnchor),
+            appArea.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            appArea.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            appArea.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+        bar.onHome = { [weak self] in self?.show(nil) }
+        bar.onPick = { [weak self] in self?.show($0) }
+        bar.isHidden = true
+
         home = UIHostingController(rootView: LauncherHome(model: model, open: { [weak self] in self?.show($0) }))
         home.view.backgroundColor = .clear
         addChild(home)
@@ -27,11 +48,6 @@ final class LauncherController: UIViewController {
         home.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         view.addSubview(home.view)
         home.didMove(toParent: self)
-
-        switcher.onHome = { [weak self] in self?.show(nil) }
-        switcher.onPick = { [weak self] in self?.show($0) }
-        switcher.isHidden = true
-        view.addSubview(switcher)
 
         // はじめの画面：ウィジェット・通知などから開いたなら、そのあと Router がそれを出す
         let last = UserDefaults.standard.string(forKey: lastKey).flatMap(MiniApp.init(rawValue:))
@@ -50,11 +66,6 @@ final class LauncherController: UIViewController {
         if current == nil { model.refresh() }
     }
 
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        switcher.place(in: view)
-    }
-
     // そのアプリの画面（無ければ作って、いちばん下に置く。items はそのアプリで開く画面）
     @discardableResult
     private func web(_ a: MiniApp, route items: [URLQueryItem] = []) -> WebViewController {
@@ -63,10 +74,15 @@ final class LauncherController: UIViewController {
         if !items.isEmpty { v.route(items) } // まだ読み込む前なので、はじめからその画面の URL で開く
         webs[a] = v
         addChild(v)
-        v.view.frame = view.bounds
-        v.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        v.view.translatesAutoresizingMaskIntoConstraints = false
         v.view.isHidden = current != a
-        view.insertSubview(v.view, at: 0)
+        appArea.addSubview(v.view)
+        NSLayoutConstraint.activate([
+            v.view.topAnchor.constraint(equalTo: appArea.topAnchor),
+            v.view.bottomAnchor.constraint(equalTo: appArea.bottomAnchor),
+            v.view.leadingAnchor.constraint(equalTo: appArea.leadingAnchor),
+            v.view.trailingAnchor.constraint(equalTo: appArea.trailingAnchor),
+        ])
         v.didMove(toParent: self)
         return v
     }
@@ -80,10 +96,9 @@ final class LauncherController: UIViewController {
         let apply = {
             for (k, v) in self.webs { v.view.isHidden = k != a }
             self.home.view.isHidden = a != nil
-            self.switcher.isHidden = a == nil
+            self.bar.isHidden = a == nil
         }
-        switcher.current = a
-        view.bringSubviewToFront(switcher)
+        if let a { bar.configure(a) }
         if animated, view.window != nil {
             UIView.transition(with: view, duration: 0.22, options: [.transitionCrossDissolve, .allowUserInteraction], animations: apply)
         } else {
@@ -110,78 +125,69 @@ final class LauncherController: UIViewController {
     }
 }
 
-// ---------------- 画面のはしの ▦ ボタン ----------------
-final class SwitcherButton: UIButton {
+// ---------------- 上の細いバー（★【0.04.58】） ----------------
+// 左：「ランチャー」（押すとランチャーの画面）　右：ほかのアプリ（押すとすぐ切りかえ）
+// 前は画面のはしに動かせる ▦ ボタンだったが、ページにかぶって邪魔なので、ページの上に固定したバーにした（ページはバーの下に出る）
+final class AppBar: UIView {
+    static let height: CGFloat = 38
     var onHome: (() -> Void)?
     var onPick: ((MiniApp) -> Void)?
-    var current: MiniApp? { didSet { updateMenu() } }
-    private let side: CGFloat = 42
-    private let posKey = "launcher_switcher_pos" // [右なら1・左なら0, 上からの割合]
-    private var dragging = false
-    private let idleAlpha: CGFloat = 0.45
+    private let stack = UIStackView()
+    private let line = UIView()
 
-    init() {
-        super.init(frame: CGRect(x: 0, y: 0, width: 42, height: 42))
-        var cfg = UIButton.Configuration.filled()
-        cfg.image = UIImage(systemName: "square.grid.2x2.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 16, weight: .semibold))
-        cfg.baseBackgroundColor = UIColor(white: 0.12, alpha: 0.9)
-        cfg.baseForegroundColor = .white
-        cfg.cornerStyle = .capsule
-        configuration = cfg
-        alpha = idleAlpha
-        layer.shadowColor = UIColor.black.cgColor
-        layer.shadowOpacity = 0.35
-        layer.shadowRadius = 4
-        layer.shadowOffset = CGSize(width: 0, height: 2)
-        accessibilityLabel = "ランチャー"
-        accessibilityHint = "長押しで、ほかのアプリに切りかえます"
-        addAction(UIAction { [weak self] _ in self?.onHome?() }, for: .primaryActionTriggered)
-        showsMenuAsPrimaryAction = false // 押す：ランチャー　長押し：メニュー
-        addGestureRecognizer(UIPanGestureRecognizer(target: self, action: #selector(drag(_:))))
-        updateMenu()
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.spacing = 6
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        line.translatesAutoresizingMaskIntoConstraints = false
+        line.backgroundColor = UIColor(white: 1, alpha: 0.08)
+        addSubview(line)
+        let g = safeAreaLayoutGuide
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: g.leadingAnchor, constant: 8),
+            stack.trailingAnchor.constraint(equalTo: g.trailingAnchor, constant: -8),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+            stack.heightAnchor.constraint(equalToConstant: AppBar.height),
+            line.leadingAnchor.constraint(equalTo: leadingAnchor),
+            line.trailingAnchor.constraint(equalTo: trailingAnchor),
+            line.bottomAnchor.constraint(equalTo: bottomAnchor),
+            line.heightAnchor.constraint(equalToConstant: 1 / UIScreen.main.scale),
+        ])
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
-    override var isHighlighted: Bool { didSet { if !dragging { alpha = isHighlighted ? 1 : idleAlpha } } }
-
-    private func updateMenu() {
-        var items: [UIMenuElement] = MiniApp.allCases.filter { $0 != current }.map { a in
-            UIAction(title: "\(a.emoji) \(a.title)") { [weak self] _ in self?.onPick?(a) }
+    private func button(_ title: String, symbol: String?, color: UIColor, bold: Bool, filled: Bool, action: @escaping () -> Void) -> UIButton {
+        var c = filled ? UIButton.Configuration.filled() : UIButton.Configuration.plain()
+        c.title = title
+        if let symbol { c.image = UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 13, weight: .semibold)); c.imagePadding = 5 }
+        c.baseForegroundColor = color
+        if filled { c.baseBackgroundColor = UIColor(white: 1, alpha: 0.08) }
+        c.cornerStyle = .capsule
+        c.contentInsets = NSDirectionalEdgeInsets(top: 5, leading: 10, bottom: 5, trailing: 10)
+        c.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { a in
+            var a = a; a.font = UIFont.systemFont(ofSize: 13, weight: bold ? .semibold : .regular); return a
         }
-        items.append(UIAction(title: "ランチャー", image: UIImage(systemName: "square.grid.2x2")) { [weak self] _ in self?.onHome?() })
-        menu = UIMenu(children: items)
+        let b = UIButton(configuration: c, primaryAction: UIAction { _ in action() })
+        b.setContentCompressionResistancePriority(.required, for: .horizontal)
+        return b
     }
 
-    private var saved: (right: Bool, y: CGFloat) {
-        let a = UserDefaults.standard.array(forKey: posKey) as? [Double] ?? []
-        return a.count == 2 ? (a[0] > 0.5, CGFloat(a[1])) : (true, 0.68)
-    }
-
-    func place(in container: UIView) {
-        guard !dragging else { return }
-        let s = saved
-        let r = container.bounds.inset(by: container.safeAreaInsets).insetBy(dx: 4, dy: 8)
-        let x = s.right ? r.maxX - side : r.minX
-        let y = r.minY + min(max(s.y, 0), 1) * max(0, r.height - side)
-        frame = CGRect(x: x, y: y, width: side, height: side)
-    }
-
-    @objc private func drag(_ g: UIPanGestureRecognizer) {
-        guard let sv = superview else { return }
-        switch g.state {
-        case .began:
-            dragging = true; alpha = 1
-        case .changed:
-            let t = g.translation(in: sv)
-            center = CGPoint(x: center.x + t.x, y: center.y + t.y)
-            g.setTranslation(.zero, in: sv)
-        default:
-            let r = sv.bounds.inset(by: sv.safeAreaInsets).insetBy(dx: 4, dy: 8)
-            let right = center.x > sv.bounds.midX
-            let y = r.height > side ? (frame.minY - r.minY) / (r.height - side) : 0
-            UserDefaults.standard.set([right ? 1.0 : 0.0, Double(min(max(y, 0), 1))], forKey: posKey)
-            dragging = false
-            UIView.animate(withDuration: 0.2) { self.place(in: sv); self.alpha = self.idleAlpha }
+    // 出しているアプリに合わせて、色とボタンを作り直す
+    func configure(_ current: MiniApp) {
+        backgroundColor = current.bg
+        stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let gold = UIColor(red: 0xE3 / 255, green: 0xC3 / 255, blue: 0x84 / 255, alpha: 1)
+        let home = button("ランチャー", symbol: "square.grid.2x2.fill", color: gold, bold: true, filled: false) { [weak self] in self?.onHome?() }
+        home.accessibilityHint = "ランチャーの画面に戻ります"
+        stack.addArrangedSubview(home)
+        let spacer = UIView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        stack.addArrangedSubview(spacer)
+        for a in MiniApp.allCases where a != current {
+            stack.addArrangedSubview(button("\(a.emoji) \(a.title)", symbol: nil, color: UIColor(white: 0.92, alpha: 1), bold: false, filled: true) { [weak self] in self?.onPick?(a) })
         }
     }
 }
