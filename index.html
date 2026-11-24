@@ -569,6 +569,11 @@ details.card[open] > summary { margin-bottom: 12px; border-bottom: 1px solid var
 /* ★【0.03.00】下部ナビゲーション */
 .bottom-nav { display: flex; background: var(--bg2); border-top: 1px solid var(--border); padding-bottom: env(safe-area-inset-bottom); z-index: 20; flex-shrink: 0; }
 .bnav-item { flex: 1; background: none; border: none; color: var(--text3); display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 7px 0 6px; font-size: 0.62rem; font-weight: 700; cursor: pointer; font-family: inherit; }
+/* ★【0.04.60】9つ並べる：狭い画面では少し小さく、それでも入らなければ横にすべらせる */
+.bottom-nav { overflow-x: auto; scrollbar-width: none; }
+.bottom-nav::-webkit-scrollbar { display: none; }
+.bnav-item { min-width: 40px; white-space: nowrap; }
+@media (max-width: 480px) { .bnav-item { font-size: 0.56rem; letter-spacing: -0.02em; } .bnav-item i { font-size: 1.08rem; } }
 .bnav-item i { font-style: normal; font-size: 1.2rem; line-height: 1.1; filter: grayscale(0.7); opacity: 0.75; }
 .bnav-item.active { color: var(--primary); }
 .bnav-item.active i { filter: none; opacity: 1; }
@@ -1498,7 +1503,9 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
     <button class="bnav-item active" data-page="pgHome" onclick="openPage('pgHome')"><i>🏠</i>ホーム</button>
     <button class="bnav-item" data-page="pgQuiz" onclick="openPage('pgQuiz')"><i>🎯</i>クイズ</button>
     <button class="bnav-item" data-page="pgDrill" onclick="openPage('pgDrill')"><i>🧠</i>暗記<span class="friend-req-badge bnav-badge drill-active-dot" style="display:none; background:var(--warn);">⏸</span></button>
+    <button class="bnav-item" data-page="pgTree" onclick="openPage('pgTree')"><i>📁</i>フォルダ</button>
     <button class="bnav-item" data-page="pgBox" onclick="openPage('pgBox')"><i>📝</i>カード</button>
+    <button class="bnav-item" data-page="pgOnlineMatch" onclick="openPage('pgOnlineMatch')"><i>⚔️</i>対戦</button>
     <button class="bnav-item" data-page="pgShop" onclick="openPage('pgShop')"><i>🛒</i>ショップ</button>
     <button class="bnav-item" data-page="pgStats" onclick="openPage('pgStats')"><i>📊</i>実績</button>
     <button class="bnav-item" data-page="pgBackup" onclick="openPage('pgBackup')"><i>⚙️</i>設定<span class="friend-req-badge bnav-badge" style="display:none;"></span></button>
