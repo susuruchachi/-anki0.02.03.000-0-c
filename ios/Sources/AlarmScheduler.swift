@@ -5,6 +5,7 @@
 // ★【0.04.46】入れ直すのは変わった分だけ（前は全部消してから入れ直していて、アプリを閉じたときに途中で止められ、消えたままになっていた。
 //  「アラームを試す」も消していた）。閉じるあいだも最後まで入れられるように、裏で少し動かしてもらう
 // 「止める」でその回だけ止まり、次の回（スヌーズの間隔）でまた鳴る。「今やる」・「開く」でアプリを開く
+// ★【0.04.61】一覧に無いアラーム（テストの分・取り消しに失敗した分）は、入れ直すたび・アプリを開くたびに消す（cleanupStray）
 
 import AlarmKit
 import AppIntents
@@ -29,6 +30,8 @@ final class AlarmScheduler {
     static let shared = AlarmScheduler()
     private let mgr = AlarmManager.shared
     private let mapKey = "susuru_alarm_map2" // 一覧の1つ（時刻・名前）→ 入れたアラームの id
+    private let testKey = "susuru_alarm_tests" // ★【0.04.61】「アラームを試す」で入れたアラームの id → 鳴る時刻
+    private var inFlight = Set<String>() // 入れている途中（まだ覚えていない）アラームの id。cleanupStray で消さない
 
     struct Item: Decodable { let at: Double; let title: String; let k: String?; let open: String? }
     struct Config: Decodable { let items: [Item]; let sig: String? }
@@ -48,6 +51,7 @@ final class AlarmScheduler {
     }
 
     func status() async -> [String: Any] {
+        cleanupStray()
         let list = (try? mgr.alarms) ?? []
         return ["ios": true, "auth": authText(), "count": list.count]
     }
@@ -63,6 +67,7 @@ final class AlarmScheduler {
         let first = UserDefaults.standard.object(forKey: mapKey) == nil
         var map = (UserDefaults.standard.dictionary(forKey: mapKey) as? [String: String]) ?? [:]
         map = map.filter { existing.contains($0.value) } // 鳴り終わった・消えたもの
+        if !first { cleanupStray(known: Set(map.values)) }
         let toCancel = map.filter { want[$0.key] == nil }
         let toAdd = want.filter { map[$0.key] == nil }
         if toCancel.isEmpty && toAdd.isEmpty && !first { UserDefaults.standard.set(map, forKey: mapKey); return }
@@ -75,17 +80,43 @@ final class AlarmScheduler {
         UserDefaults.standard.set(map, forKey: mapKey)
         for (k, it) in toAdd.sorted(by: { $0.value.at < $1.value.at }) {
             let id = UUID()
+            inFlight.insert(id.uuidString)
             if await schedule(id: id, at: Date(timeIntervalSince1970: it.at / 1000), title: it.title, open: it.open ?? "開く") {
                 map[k] = id.uuidString
                 UserDefaults.standard.set(map, forKey: mapKey) // 途中で止められても、入れた分は覚えておく
             }
+            inFlight.remove(id.uuidString)
         }
     }
 
     func test(title: String) async {
         guard await requestAuth() else { return }
-        // 一覧に入らないアラームなので、ページが一覧を送り直しても消えない
-        _ = await schedule(id: UUID(), at: Date().addingTimeInterval(5), title: title.isEmpty ? "⏰ アラームのテスト" : title, open: "開く")
+        // 一覧に入らないアラームなので、ページが一覧を送り直しても消えない（鳴ったあとは cleanupStray が消す）
+        let id = UUID(), at = Date().addingTimeInterval(5)
+        var t = (UserDefaults.standard.dictionary(forKey: testKey) as? [String: Double]) ?? [:]
+        t[id.uuidString] = at.timeIntervalSince1970 // 入れる前に覚えておく（入れている間に cleanupStray が消さないように）
+        UserDefaults.standard.set(t, forKey: testKey)
+        _ = await schedule(id: id, at: at, title: title.isEmpty ? "⏰ アラームのテスト" : title, open: "開く")
+    }
+
+    // ★【0.04.61】迷子のアラームを消す。テストのアラームが、鳴ったあとも残っていて、夜中（日付が変わったとき）にまた鳴ったことがあった
+    // （AlarmKit が時刻を過ぎた一度きりのアラームを残すことがあるらしい）。そこで、入れ直すたび・アプリを開くたびに
+    //  ・「アラームを試す」の分：鳴る時刻から1分すぎたら消す
+    //  ・一覧（map）にも、試すの分にも無いアラーム（取り消しに失敗したものなど）：消す
+    private func cleanupStray(known: Set<String>? = nil) {
+        let list = (try? mgr.alarms) ?? []
+        let known = known ?? Set(((UserDefaults.standard.dictionary(forKey: mapKey) as? [String: String]) ?? [:]).values)
+        var tests = (UserDefaults.standard.dictionary(forKey: testKey) as? [String: Double]) ?? [:]
+        let now = Date().timeIntervalSince1970
+        for a in list {
+            let idStr = a.id.uuidString
+            if known.contains(idStr) || inFlight.contains(idStr) { continue }
+            if let at = tests[idStr], at + 60 > now { continue } // まだ鳴っていない・鳴っているところ
+            try? mgr.cancel(id: a.id)
+            tests.removeValue(forKey: idStr)
+        }
+        tests = tests.filter { $0.value + 60 > now }
+        UserDefaults.standard.set(tests, forKey: testKey)
     }
 
     @discardableResult

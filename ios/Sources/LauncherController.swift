@@ -118,6 +118,7 @@ final class LauncherController: UIViewController {
         }
         guard u.scheme == "susuruanki" else { return }
         if c.host == "launcher" { show(nil); return }
+        guard c.host == "open" else { return } // ★【0.04.61】susuruanki://auth・gcal（ログインの画面の戻り）は、ここでは何もしない
         let name = c.queryItems?.first(where: { $0.name == "app" })?.value ?? MiniApp.anki.rawValue
         guard let a = MiniApp(rawValue: name) else { return }
         web(a, route: items)
