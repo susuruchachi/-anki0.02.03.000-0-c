@@ -125,8 +125,6 @@ function gameNextTitle(lv) { const n = GAME_TITLES.find(([l]) => l > lv); return
 
 // ---------------- 🔥 炎の色 ----------------
 function gameFlame(streak) {
-  const sel = gameFlameSel(), f = sel && gameOwned('flame_' + sel) && GAME_FLAMES.find(x => x.id === sel);
-  if (f) return { cls: f.cls, name: f.name + '（交換）' };
   if (streak >= 365) return { cls: 'flame-rainbow', name: '🌈 虹の炎' };
   if (streak >= 100) return { cls: 'flame-purple', name: '💜 紫の炎' };
   if (streak >= 30) return { cls: 'flame-blue', name: '💙 青い炎' };
@@ -194,16 +192,8 @@ function gameCoins(st) {
 }
 
 // ---------------- 🛒 ショップ ----------------
-const GAME_FLAMES = [
-  { id: 'green', name: '💚 緑の炎', cls: 'flame-green', cost: 300 },
-  { id: 'blue', name: '💙 青い炎', cls: 'flame-blue', cost: 500 },
-  { id: 'purple', name: '💜 紫の炎', cls: 'flame-purple', cost: 800 },
-  { id: 'gold', name: '💛 金の炎', cls: 'flame-gold', cost: 1200 },
-  { id: 'rainbow', name: '🌈 虹の炎', cls: 'flame-rainbow', cost: 2000 },
-];
 const GAME_SHIELD_COST = 150;
 function gameOwned(item) { return gameShopList().some(x => x.item === item); }
-function gameFlameSel() { const x = (gameShop || {}).sel_flame; return x && x.val ? x.val : ''; }
 function gameBuy(item) {
   const c = gameCoins(), today = gameToday(), id = 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   let cost = 0, what = '';
@@ -213,29 +203,17 @@ function gameBuy(item) {
   } else if (item === 'repair') {
     const r = gameRepairInfo(); if (!r) return alert('今は、戻せる連続記録がありません。');
     cost = r.cost; what = `🔧 記録の復活（${r.streak}日連続に戻す）`;
-  } else if (item.startsWith('flame_')) {
-    const f = GAME_FLAMES.find(x => 'flame_' + x.id === item); if (!f || gameOwned(item)) return;
-    cost = f.cost; what = f.name;
   } else return;
   if (c.have < cost) return alert(`💰 コインが足りません（${what}：${cost}コイン・今 ${c.have}コイン）。\n正解・ミッション・バッジ・週間リーグでたまります。`);
   if (!confirm(`${what} を ${cost}コインで交換しますか？\n（今 ${c.have}コイン → ${c.have - cost}コイン）`)) return;
   if (!gameShop || typeof gameShop !== 'object') gameShop = {};
   gameShop[id] = { item, cost, d: today, at: Date.now() };
   if (item === 'repair') gameRepairInfo().missed.forEach(d => { gameDays[d] = Object.assign({}, gameDayObj(d), { frz: 2 }); });
-  if (item.startsWith('flame_')) gameShop.sel_flame = { item: 'sel', val: item.slice(6), at: Date.now() };
   try { saveData(); } catch (e) {}
   gameCelebrate(item === 'repair' ? '🔧' : item === 'shield' ? '🛡️' : '🔥', '交換しました！', item === 'repair' ? `連続記録が ${getStreakInfo().cur}日に戻りました。今日も1問解こう！` : what);
   try { renderStreakCard(); } catch (e) {}
   renderGameBar(); renderGamePanel();
 }
-function gameSelFlame(id) {
-  if (!gameShop || typeof gameShop !== 'object') gameShop = {};
-  gameShop.sel_flame = { item: 'sel', val: id, at: Date.now() };
-  try { saveData(); } catch (e) {}
-  try { renderStreakCard(); } catch (e) {}
-  renderGamePanel();
-}
-
 // ---------------- 🏆 週間リーグ（フレンドと、今週の XP で競う） ----------------
 // 週は月曜から日曜。今週の XP ＝ その週の日の（解いた数＋正解＋学習した日10＋ミッション1つ20・全部30）
 // 成績のまとめ（stats.js の statsSummary：wk 今週の月曜・wxp 今週・lwxp 先週）で、フレンドと比べる
@@ -316,7 +294,7 @@ function renderGamePanel() {
     <div class="setting-box-title" style="margin-top:12px;">🛡️ お守り ${sh.held ? '🛡️'.repeat(sh.held) : '（0）'}</div>
     <div class="hint-small">7日続けるごとに1つもらえます（2つまで持てます）。1日休んでも、次の日にお守りが自動で連続記録を守ります（休んだ日の数だけ使います）。</div>
     <div class="setting-box-title" style="margin-top:12px;">🔥 炎の色：${fl.name}</div>
-    <div class="hint-small">連続記録 30日で 💙 青い炎、100日で 💜 紫の炎、365日で 🌈 虹の炎になります（ショップで交換した色にもできます）。</div>
+    <div class="hint-small">連続記録 30日で 💙 青い炎、100日で 💜 紫の炎、365日で 🌈 虹の炎になります。</div>
     <div class="setting-box-title" style="margin-top:12px;">🏅 バッジ（${got} / ${bs.length}）</div>
     ${Object.values(groups).map(list => `<div class="game-badges">${list.map(b => `<div class="game-badge${b.got ? ' got' : ''}" title="${escAttr(b.name)}"><div class="game-badge-i">${b.got ? b.icon : '🔒'}</div><div class="game-badge-n">${escapeHtml(b.name)}</div>${b.got ? '' : `<div class="game-badge-p">${Math.min(b.now, b.need).toLocaleString()}/${b.need.toLocaleString()}</div>`}</div>`).join('')}</div>`).join('')}`;
 }
@@ -332,21 +310,27 @@ function gameLeagueHTML() {
     <div style="margin-top:4px;">${left > 0 ? `日曜の夜まで、あと${left}日` : '今日（日曜）まで'}。週が変わると、順位でコインがもらえます（1人で解いた週は、もらえません）。まだ新しい版にしていないフレンドは 0 XP に見えます。</div>`;
 }
 function gameShopHTML(st) {
-  const c = gameCoins(st), sh = gameShieldInfo(), r = gameRepairInfo(), sel = gameFlameSel();
+  const c = gameCoins(st), sh = gameShieldInfo(), r = gameRepairInfo();
   const item = (icon, name, desc, cost, btn) => `<div class="game-shop-item"><div class="game-shop-i">${icon}</div><div style="flex:1; min-width:0;"><div class="game-shop-n">${name}</div><div class="hint-small">${desc}</div></div>${btn || `<button class="chip${c.have >= cost.cost ? ' active' : ''}" onclick="event.stopPropagation(); gameBuy('${cost.item}')">💰${cost.cost}</button>`}</div>`;
   let h = '<div class="game-shop">';
   h += item('🛡️', `お守り（今 ${sh.held}/${GAME_SHIELD_MAX}）`, '1日休んでも、連続記録を自動で守ります', { item: 'shield', cost: GAME_SHIELD_COST }, sh.held >= GAME_SHIELD_MAX ? '<span class="hint-small">いっぱい</span>' : null);
   if (r) h += item('🔧', `記録の復活（${r.streak}日連続に戻す）`, `${r.missed.length}日休んで途切れた連続記録を、元に戻します（休んだ日1日につき ${GAME_REPAIR_COST}コイン。2日休んだまで）`, { item: 'repair', cost: r.cost });
-  GAME_FLAMES.forEach(f => {
-    const own = gameOwned('flame_' + f.id);
-    h += item(`<span class="streak-fire ${f.cls}" style="font-size:1.3rem;">🔥</span>`, f.name, own ? (sel === f.id ? '使っています' : '交換ずみ') : 'ホームの連続記録の炎の色を変えます', { item: 'flame_' + f.id, cost: f.cost },
-      own ? (sel === f.id ? `<button class="chip" onclick="event.stopPropagation(); gameSelFlame('')">もとに戻す</button>` : `<button class="chip" onclick="event.stopPropagation(); gameSelFlame('${f.id}')">使う</button>`) : null);
-  });
   return h + '</div>';
+}
+
+// ★【0.04.55】炎の色はショップで交換しない（連続記録の長さだけ）：交換した分は取り消して、コインを返す
+function gameRefundFlames() {
+  let n = 0;
+  Object.entries(gameShop || {}).forEach(([id, v]) => {
+    if (v && !v.deleted && (String(v.item || '').startsWith('flame_') || id === 'sel_flame')) { gameShop[id] = { deleted: true, at: Date.now() }; n += Number(v.cost) || 0; }
+  });
+  if (n || Object.keys(gameShop || {}).some(k => k === 'sel_flame' && !gameShop[k].deleted)) { try { saveData(); } catch (e) {} }
+  if (n) setTimeout(() => gameCelebrate('💰', `${n}コインを返しました`, '炎の色は連続記録の長さで変わるようにしたので、交換した炎の色を取り消しました'), 2500);
 }
 
 // 起動・日付が変わったとき
 function gameInit() {
+  try { gameRefundFlames(); } catch (e) {}
   try { gameUseShields(); } catch (e) {}
   try { gameCheck(false); } catch (e) {}
   renderGameBar();
