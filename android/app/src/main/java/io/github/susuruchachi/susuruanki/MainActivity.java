@@ -90,7 +90,7 @@ public class MainActivity extends Activity {
 
         web = new WebView(this);
         web.setBackgroundColor(Color.parseColor("#080C14"));
-        setContentView(LauncherBar.wrap(this, web, Color.parseColor("#080C14"))); // ★【0.04.53】 上のバー（すするアプリ・ほかのアプリ）
+        setContentView(LauncherBar.wrap(this, web, Color.parseColor("#080C14"))); // ★【0.04.58】 上のバー（すするアプリ・ほかのアプリ）
 
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);

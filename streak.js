@@ -28,7 +28,9 @@ function getStreakInfo() {
   const today = getTodayStr();
   const doneToday = (days[today] || 0) > 0;
   let cur = 0, d = doneToday ? today : streakShift(today, -1);
-  while ((days[d] || 0) > 0) { cur++; d = streakShift(d, -1); }
+  // ★【0.04.53】🛡️ お守りで守った日（game.js）は、数には入れずに、つながっているとみなす
+  const frz = k => typeof gameFrozen === 'function' && gameFrozen(k);
+  while ((days[d] || 0) > 0 || frz(d)) { if ((days[d] || 0) > 0) cur++; d = streakShift(d, -1); }
   // 最長記録
   const keys = Object.keys(days).filter(k => days[k] > 0).sort();
   let best = 0, run = 0, prev = null;
@@ -44,12 +46,13 @@ function renderStreakCard() {
   const today = getTodayStr(), wd = ['日', '月', '火', '水', '木', '金', '土'];
   let dots = '';
   for (let i = 6; i >= 0; i--) {
-    const k = streakShift(today, -i), on = studyDayCount((studyDays || {})[k]) > 0;
-    dots += `<div class="streak-day${on ? ' on' : ''}${i === 0 ? ' today' : ''}"><div class="streak-dot">${on ? '🔥' : ''}</div><div class="streak-wd">${wd[new Date(k + 'T12:00:00').getDay()]}</div></div>`;
+    const k = streakShift(today, -i), on = studyDayCount((studyDays || {})[k]) > 0, fz = !on && typeof gameFrozen === 'function' && gameFrozen(k);
+    dots += `<div class="streak-day${on || fz ? ' on' : ''}${i === 0 ? ' today' : ''}"><div class="streak-dot">${on ? '🔥' : fz ? '🛡️' : ''}</div><div class="streak-wd">${wd[new Date(k + 'T12:00:00').getDay()]}</div></div>`;
   }
   const msg = s.doneToday ? `今日は ${s.todayCount}問 解きました` : (s.cur > 0 ? `⚠️ 今日1問解かないと ${s.cur}日の記録が途切れます` : '今日1問解いて記録をはじめよう');
   el.className = 'streak-card' + (s.doneToday ? ' done' : (s.cur > 0 ? ' risk' : ''));
-  el.innerHTML = `<div class="streak-main"><div class="streak-fire">${s.doneToday ? '🔥' : '🕯️'}</div>
+  const fl = typeof gameFlame === 'function' ? gameFlame(s.cur).cls : ''; // ★【0.04.53】炎の色
+  el.innerHTML = `<div class="streak-main"><div class="streak-fire ${s.doneToday ? fl : ''}">${s.doneToday ? '🔥' : '🕯️'}</div>
       <div style="flex:1; min-width:0;"><div class="streak-num">${s.cur}<span>日連続</span></div><div class="streak-msg">${msg}</div></div>
       <div class="streak-best">最長<b>${s.best}</b>日</div></div>
     <div class="streak-week">${dots}</div>`;

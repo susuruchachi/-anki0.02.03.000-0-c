@@ -178,6 +178,8 @@ function appWidgetSync(now) {
       const s = typeof getStreakInfo === 'function' ? getStreakInfo() : { cur: 0, best: 0, todayCount: 0 };
       const days = Object.keys(studyDays || {}).filter(k => studyDayCount(studyDays[k]) > 0).sort();
       const data = { streak: s.cur, best: s.best, today: s.todayCount, todayDate: getTodayStr(), last: days.length ? days[days.length - 1] : '', at: Date.now() };
+      // ★【0.04.53】🛡️ お守りで守った日も「続いている最後の日」に（ウィジェット・アラームが途切れたと思わないように）
+      try { const fz = Object.keys(gameDays || {}).filter(k => gameFrozen(k)).sort().pop(); if (fz && fz > data.last && fz < getTodayStr()) data.last = fz; } catch (e) {}
       if (typeof planList === 'function' && planList().length) {
         const t = typeof planUrgentTask === 'function' ? planUrgentTask() : null;
         if (t) {
