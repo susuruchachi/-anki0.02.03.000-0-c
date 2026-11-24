@@ -284,18 +284,23 @@ function gameMyTitle(st) {
 
 // ---------------- 🎨 テーマの色 ----------------
 const GAME_THEMES = [
-  { id: 'sakura', name: '🌸 桜', p: '#ff6fa8', p2: '#e0508c', a: '#ff9ec7', cost: 300 },
-  { id: 'ocean', name: '🌊 海', p: '#14b8d4', p2: '#0e98b0', a: '#3b82f6', cost: 300 },
-  { id: 'forest', name: '🌲 森', p: '#22a55a', p2: '#1a8a49', a: '#84cc16', cost: 300 },
-  { id: 'sunset', name: '🌇 夕焼け', p: '#f97316', p2: '#dc5f0c', a: '#ef4444', cost: 500 },
-  { id: 'night', name: '🌌 夜空', p: '#8b5cf6', p2: '#7140e0', a: '#ec4899', cost: 500 },
-  { id: 'gold', name: '🏆 金', p: '#d4a017', p2: '#b8890f', a: '#f59e0b', cost: 1000 },
+  { id: 'sakura', bg: '#261621', name: '🌸 桜', p: '#ff6fa8', p2: '#e0508c', a: '#ff9ec7', cost: 300 },
+  { id: 'ocean', bg: '#0b2030', name: '🌊 海', p: '#14b8d4', p2: '#0e98b0', a: '#3b82f6', cost: 300 },
+  { id: 'forest', bg: '#112016', name: '🌲 森', p: '#22a55a', p2: '#1a8a49', a: '#84cc16', cost: 300 },
+  { id: 'sunset', bg: '#24130c', name: '🌇 夕焼け', p: '#f97316', p2: '#dc5f0c', a: '#ef4444', cost: 500 },
+  { id: 'night', bg: '#14102e', name: '🌌 夜空', p: '#8b5cf6', p2: '#7140e0', a: '#ec4899', cost: 500 },
+  { id: 'gold', bg: '#1e190a', name: '🏆 金', p: '#d4a017', p2: '#b8890f', a: '#f59e0b', cost: 1000 },
 ];
 function gameApplyTheme() {
-  const id = gameSel('sel_theme'), t = GAME_THEMES.find(x => x.id === id && gameOwned('theme_' + x.id)), r = document.documentElement.style;
-  if (t) { r.setProperty('--primary', t.p); r.setProperty('--primary2', t.p2); r.setProperty('--accent', t.a); }
-  else { r.removeProperty('--primary'); r.removeProperty('--primary2'); r.removeProperty('--accent'); }
+  // ★【0.04.59】背景・カード・枠・文字の色までまとめて変える（index.html の body.theme-◯◯。明るい表示にも、それぞれの色がある）
+  const id = gameSel('sel_theme'), t = GAME_THEMES.find(x => x.id === id && gameOwned('theme_' + x.id)), cl = document.body.classList;
+  GAME_THEMES.forEach(x => cl.remove('theme-' + x.id));
+  if (t) cl.add('theme-' + t.id);
+  try { localStorage.setItem('susuru_anki_theme', t ? t.id : ''); } catch (e) {}
+  const r = document.documentElement.style; r.removeProperty('--primary'); r.removeProperty('--primary2'); r.removeProperty('--accent'); // 前の版の付け方を消す
 }
+// 開いたときすぐに（データを読む前に）前のテーマにする（ちらつかないように）
+try { const t0 = localStorage.getItem('susuru_anki_theme'); if (t0) document.body.classList.add('theme-' + t0); } catch (e) {}
 
 // ---------------- ⛵ わたしの船（育てる） ----------------
 const GAME_SHIP_PARTS = [
@@ -526,7 +531,7 @@ function gameShopHTML(st) {
   h += gameShopRow('⚡', 'XP 2倍（15分）', bl > 0 ? `使っています：あと${Math.ceil(bl / 60000)}分` : 'リーグで追い上げたいときに。15分のあいだ、解いた・正解の XP が2倍', 'boost', GAME_BOOST_COST, bl > 0 ? '<span class="hint-small">使用中</span>' : null);
   h += gameShopRow('🔄', 'ミッションの入れかえ券', `今日のミッションの目標を半分にします（ミッションの横の 🔄 から・${GAME_REROLL_COST}コイン）`, 'reroll', GAME_REROLL_COST, `<button class="chip" onclick="_gameTab = 'top'; openPage('pgStats')">ミッションへ</button>`);
   h += '</div><div class="setting-box-title" style="margin-top:10px;">🎨 アプリのテーマの色</div><div class="game-shop">';
-  GAME_THEMES.forEach(t => { const own = gameOwned('theme_' + t.id), on = selT === t.id; h += gameShopRow(`<span class="theme-dot" style="background:linear-gradient(135deg, ${t.p}, ${t.a})"></span>`, t.name, own ? (on ? '使っています' : '交換ずみ') : 'ボタンや枠の色が変わります', 'theme_' + t.id, t.cost, own ? (on ? `<button class="chip" onclick="gameSetSel('sel_theme', '')">もとに戻す</button>` : `<button class="chip" onclick="gameSetSel('sel_theme', '${t.id}')">使う</button>`) : null); });
+  GAME_THEMES.forEach(t => { const own = gameOwned('theme_' + t.id), on = selT === t.id; h += gameShopRow(`<span class="theme-dot" style="background:linear-gradient(135deg, ${t.bg || t.p} 0 45%, ${t.p} 45% 75%, ${t.a} 75%)"></span>`, t.name, own ? (on ? '使っています' : '交換ずみ') : '背景・カード・文字・ボタンの色がまとめて変わります（明るい表示にも）', 'theme_' + t.id, t.cost, own ? (on ? `<button class="chip" onclick="gameSetSel('sel_theme', '')">もとに戻す</button>` : `<button class="chip" onclick="gameSetSel('sel_theme', '${t.id}')">使う</button>`) : null); });
   h += '</div><div class="setting-box-title" style="margin-top:10px;">⛵ 船の特別な飾り</div><div class="game-shop">';
   GAME_SHIP_SHOP.forEach(p => { const own = gameOwned(p.id); h += gameShopRow(p.icon, p.name, own ? '船に乗っています（実績 → ⛵ 船）' : '「わたしの船」のまわりに出ます', p.id, p.cost, own ? '<span class="hint-small">✅</span>' : null); });
   return h + '</div>';

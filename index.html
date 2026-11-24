@@ -29,6 +29,21 @@ body.light-mode {
   --border: #d1d5db; --border2:#9ca3af; --text: #111827; --text2: #4b5563; --text3: #6b7280;
 }
 
+/* ★【0.04.59】🎨 テーマ（game.js の gameApplyTheme が body に theme-◯◯ を付ける）：背景・カード・枠・文字・ボタンの色をまとめて変える */
+body.theme-sakura { --bg:#1a0f16; --bg2:#261621; --bg3:#321d2b; --bg4:#402537; --border:#5a3550; --border2:#7a4a6c; --text:#fbeff5; --text2:#d3a9bf; --text3:#9c7488; --primary:#ff6fa8; --primary2:#e0508c; --accent:#ff9ec7; }
+body.light-mode.theme-sakura { --bg:#fff1f6; --bg2:#ffffff; --bg3:#fde2ec; --bg4:#f9c9dc; --border:#f4c2d6; --border2:#e295b5; --text:#3b1028; --text2:#7a3d5c; --text3:#a06a85; }
+body.theme-ocean { --bg:#06141b; --bg2:#0b2030; --bg3:#102b3d; --bg4:#16384f; --border:#1f4b66; --border2:#2d6688; --text:#e6f6fb; --text2:#8fbccd; --text3:#5f8ea0; --primary:#14b8d4; --primary2:#0e98b0; --accent:#3b82f6; }
+body.light-mode.theme-ocean { --bg:#ecf8fc; --bg2:#ffffff; --bg3:#d6eff7; --bg4:#b9e3f0; --border:#b9e1ee; --border2:#7cc3db; --text:#0b2a36; --text2:#2f5f72; --text3:#5a8696; }
+body.theme-forest { --bg:#0a140d; --bg2:#112016; --bg3:#172b1e; --bg4:#1e3826; --border:#2a4d34; --border2:#3b6847; --text:#ecf7ee; --text2:#9cc3a5; --text3:#6c917a; --primary:#22a55a; --primary2:#1a8a49; --accent:#84cc16; }
+body.light-mode.theme-forest { --bg:#eef7ef; --bg2:#ffffff; --bg3:#dcefdf; --bg4:#c3e3c8; --border:#c3e1c8; --border2:#8cc499; --text:#10261a; --text2:#3b5e46; --text3:#5f806a; }
+body.theme-sunset { --bg:#170c08; --bg2:#24130c; --bg3:#311a10; --bg4:#402214; --border:#5c331f; --border2:#7d472c; --text:#fdf0e8; --text2:#d8ad93; --text3:#a07a64; --primary:#f97316; --primary2:#dc5f0c; --accent:#ef4444; }
+body.light-mode.theme-sunset { --bg:#fff4ec; --bg2:#ffffff; --bg3:#ffe5d3; --bg4:#fdd0b3; --border:#f8cfb3; --border2:#eca27a; --text:#3a1806; --text2:#7a4528; --text3:#a06c4f; }
+body.theme-night { --bg:#0b0820; --bg2:#14102e; --bg3:#1c173d; --bg4:#251e4d; --border:#372d6b; --border2:#4b3f8c; --text:#efeafe; --text2:#a9a0d6; --text3:#776fa6; --primary:#8b5cf6; --primary2:#7140e0; --accent:#ec4899; }
+body.light-mode.theme-night { --bg:#f3f0ff; --bg2:#ffffff; --bg3:#e6e0ff; --bg4:#d3c9fb; --border:#d6ccfa; --border2:#a998ef; --text:#1d1440; --text2:#4c4180; --text3:#7268a6; }
+body.theme-gold { --bg:#120f06; --bg2:#1e190a; --bg3:#29220e; --bg4:#352c12; --border:#50431b; --border2:#6f5d25; --text:#fbf6e6; --text2:#d4c38e; --text3:#9e8f63; --primary:#d4a017; --primary2:#b8890f; --accent:#f59e0b; }
+body.light-mode.theme-gold { --bg:#fffaeb; --bg2:#ffffff; --bg3:#fbf0cc; --bg4:#f5e3a5; --border:#f0dc9e; --border2:#dcbd5c; --text:#2e2406; --text2:#6b5719; --text3:#8f7a3e; }
+body[class*='theme-'] .nav-item.active { background: color-mix(in srgb, var(--primary) 12%, transparent); }
+body[class*='theme-'] .badge-level { background: color-mix(in srgb, var(--primary) 15%, transparent); border-color: color-mix(in srgb, var(--primary) 35%, transparent); }
 body { background: var(--bg); color: var(--text); font-family: 'Noto Sans JP', sans-serif; overflow: hidden; position: fixed; width: 100%; user-select: none; -webkit-user-select: none; transition: background 0.3s, color 0.3s; }
 input, textarea, select { user-select: auto; -webkit-user-select: auto; font-family: inherit; color: inherit; -webkit-touch-callout: default; }
 
