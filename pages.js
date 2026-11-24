@@ -111,7 +111,7 @@ function executePageTransition(pageId, isBackAction) {
   document.querySelectorAll('.screen').forEach(s => { s.classList.remove('active'); s.style.display='none'; });
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   // ★【0.03.00】下部ナビの選択状態と、クイズ中の表示切り替え
-  const navOwner = { pgUpdates: 'pgHome', pgTutorial: 'pgHome', pgPublicCategories: 'pgBox', pgShared: 'pgBox', pgMatchHistory: 'pgQuiz', pgOnlineMatch: 'pgQuiz', pgTree: 'pgBox', pgFriends: 'pgBackup', pgCompareStats: 'pgBackup', pgQuizResult: 'pgQuiz', pgListen: 'pgQuiz', pgCalendar: 'pgHome', pgCards: 'pgDrill' }; // ★【0.04.57】クイズ・ショップのタブ
+  const navOwner = { pgUpdates: 'pgHome', pgTutorial: 'pgHome', pgPublicCategories: 'pgBox', pgShared: 'pgBox', pgMatchHistory: 'pgOnlineMatch', pgFriends: 'pgBackup', pgCompareStats: 'pgBackup', pgQuizResult: 'pgQuiz', pgListen: 'pgQuiz', pgCalendar: 'pgHome', pgCards: 'pgDrill' }; // ★【0.04.57】クイズ・ショップのタブ
   const navPage = navOwner[pageId] || pageId;
   document.querySelectorAll('.bnav-item').forEach(b => b.classList.toggle('active', b.dataset.page === navPage));
   const wasInQuiz = document.body.classList.contains('in-quiz');

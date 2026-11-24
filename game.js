@@ -27,6 +27,8 @@ function gameOnAnswer(ok) {
   const o = Object.assign({}, gameDayObj(d));
   _gameCombo = ok ? _gameCombo + 1 : 0;
   if (ok) o['c:' + DEVICE_ID] = (Number(o['c:' + DEVICE_ID]) || 0) + 1;
+  // ★【0.04.58】🦉 夜（22時〜朝4時）に解いた数（称号「夜ふかし学者」）
+  const hr = new Date().getHours(); if (hr >= 22 || hr < 4) o['n:' + DEVICE_ID] = (Number(o['n:' + DEVICE_ID]) || 0) + 1;
   if (_gameCombo > (Number(o['k:' + DEVICE_ID]) || 0)) o['k:' + DEVICE_ID] = _gameCombo;
   // ★【0.04.56】⚡ XP 2倍のあいだは、もう1回分（解いた1＋正解1）を b: に足す
   if (typeof gameBoostLeft === 'function' && gameBoostLeft() > 0) o['b:' + DEVICE_ID] = (Number(o['b:' + DEVICE_ID]) || 0) + 1 + (ok ? 1 : 0);
@@ -160,8 +162,9 @@ function gameCheck(announce) {
   if (typeof db === 'undefined') return;
   const st = gameStats(), lv = gameLevelOf(st.xp).lv, badges = gameBadges(st).filter(b => b.got).map(b => b.id);
   const today = gameToday(), ms = gameMissions(today).filter(m => m.done).map(m => m.id), sh = gameShieldInfo().earned;
+  const titles = gameSpTitles(st).filter(t => t.got).map(t => t.id);
   const seen = gameSeen();
-  const now = { lv, badges, day: today, missions: ms, shields: sh };
+  const now = { lv, badges, day: today, missions: ms, shields: sh, titles };
   if (!seen) { gameSaveSeen(now); return; } // はじめては、今までの分を知らせない
   if (!announce) { gameSaveSeen(Object.assign(now, { missions: seen.day === today ? [...new Set([...(seen.missions || []), ...ms])] : ms })); return; }
   const msgs = [];
@@ -171,6 +174,7 @@ function gameCheck(announce) {
   if (ms.length === allMs.length && prevMs.length < allMs.length) msgs.push(['🎁', '今日のミッション コンプリート！', 'ボーナス +30 XP。明日も新しいミッションがあります']);
   if (lv > (seen.lv || 1)) msgs.push(['⭐', `レベルアップ！ Lv.${lv}`, gameTitle(lv) !== gameTitle(seen.lv || 1) ? `新しい称号「${gameTitle(lv)}」になりました！` : `称号：${gameTitle(lv)}`]);
   badges.filter(id => !(seen.badges || []).includes(id)).forEach(id => { const b = gameBadgeDefs().find(x => x.id === id); if (b) msgs.push(['🏅', 'バッジを手に入れた！', `${b.icon} ${b.name}`]); });
+  if (seen.titles) titles.filter(id => !seen.titles.includes(id)).forEach(id => { const t = GAME_SP_TITLES.find(x => x.id === id); if (t) msgs.push(['🏷️', '特別な称号を手に入れた！', `${t.name}（実績の画面で、名前の横に付けられます）`]); });
   if (sh > (seen.shields || 0)) msgs.push(['🛡️', 'お守りを手に入れた！', '7日続けたので、お守りが1つ増えました（1日休んでも連続記録を守ります）']);
   gameSaveSeen(now);
   msgs.slice(0, 4).forEach((m, i) => setTimeout(() => gameCelebrate(...m), i * 1600));
@@ -215,7 +219,7 @@ function gameBuy(item, arg) {
   } else if (item === 'boost') { // ⚡ XP 2倍
     if (gameBoostLeft() > 0) return alert('もう XP 2倍の最中です。');
     cost = GAME_BOOST_COST; what = '⚡ XP 2倍（15分）';
-  } else if (item.startsWith('t_') || item.startsWith('theme_') || item.startsWith('ship_')) { // 称号・テーマ・船の飾り
+  } else if (item.startsWith('theme_') || item.startsWith('ship_')) { // テーマ・船の飾り
     const it = gameItemDef(item); if (!it || gameOwned(item)) return;
     cost = it.cost; what = it.name;
   } else return;
@@ -223,7 +227,6 @@ function gameBuy(item, arg) {
   if (!confirm(`${what} を ${cost}コインで交換しますか？\n（今 ${c.have}コイン → ${c.have - cost}コイン）`)) return;
   if (!gameShop || typeof gameShop !== 'object') gameShop = {};
   gameShop[id] = Object.assign({ item, cost, d: today, at: Date.now() }, item === 'reroll' ? { slot: arg } : item === 'boost' ? { until: Date.now() + 15 * 60000 } : {});
-  if (item.startsWith('t_')) gameShop.sel_title = { item: 'sel', val: item, at: Date.now() };
   if (item.startsWith('theme_')) { gameShop.sel_theme = { item: 'sel', val: item.slice(6), at: Date.now() }; gameApplyTheme(); }
   if (item === 'repair') gameRepairInfo().missed.forEach(d => { gameDays[d] = Object.assign({}, gameDayObj(d), { frz: 2 }); });
   try { saveData(); } catch (e) {}
@@ -245,39 +248,59 @@ function gameSetSel(key, val) {
 }
 
 // ---------------- 🏷️ 称号（名前の横に出す） ----------------
+// ★【0.04.58】特別な称号は、コインで交換するのではなく、条件を満たすと手に入る（prog：[今, 目標]）
 const GAME_SP_TITLES = [
-  { id: 't_owl', name: '🦉 夜ふかし学者', cost: 300 }, { id: 't_book', name: '📚 本の虫', cost: 300 }, { id: 't_hunter', name: '🏹 単語ハンター', cost: 500 },
-  { id: 't_rocket', name: '🚀 急成長中', cost: 500 }, { id: 't_captain', name: '⚓ すする船長', cost: 1000 }, { id: 't_master', name: '👑 すするマスター', cost: 2000 },
+  { id: 't_owl', name: '🦉 夜ふかし学者', cond: '夜（22時〜朝4時）に解いた日 10日', prog: x => [x.nightDays, 10] },
+  { id: 't_book', name: '📚 本の虫', cond: '1日に100問以上解いた日 10日', prog: x => [x.bigDays, 10] },
+  { id: 't_hunter', name: '🏹 単語ハンター', cond: 'カードを 300枚 卒業', prog: x => [x.grad, 300] },
+  { id: 't_rocket', name: '🚀 急成長中', cond: '1週間（月〜日）で 1500 XP', prog: x => [x.bestWeekXp, 1500] },
+  { id: 't_captain', name: '⚓ すする船長', cond: '船の飾り（集めるもの）を全部そろえる', prog: x => [x.shipParts, x.shipAll] },
+  { id: 't_master', name: '👑 すするマスター', cond: 'バッジを 30個', prog: x => [x.badgeN, 30] },
 ];
+// 称号の条件に使う数（gameStats とは別に。夜の日・100問の日・いちばん多い週の XP・船の飾り・バッジの数）
+function gameTitleStats(st) {
+  st = st || gameStats();
+  let nightDays = 0, bigDays = 0; const weeks = {};
+  Object.keys(studyDays || {}).forEach(k => { if (gameAnswers(k) >= 100) bigDays++; const m = gameMonday(k); weeks[m] = (weeks[m] || 0) + gameDayXp(k); });
+  Object.keys(gameDays || {}).forEach(k => { if (gameSum(k, 'n:') > 0) nightDays++; });
+  const shipAll = GAME_SHIP_PARTS.length, shipParts = GAME_SHIP_PARTS.filter(p => p.ok(st)).length;
+  return Object.assign({}, st, { nightDays, bigDays, bestWeekXp: Math.max(0, ...Object.values(weeks)), shipParts, shipAll, badgeN: gameBadges(st).filter(b => b.got).length });
+}
+function gameSpTitles(st) { const x = gameTitleStats(st); return GAME_SP_TITLES.map(t => { const [now, need] = t.prog(x); return Object.assign({}, t, { now, need, got: now >= need }); }); }
 // 選べる称号：レベルの称号・手に入れたバッジ・交換した称号
 function gameTitleChoices(st) {
   st = st || gameStats();
   const out = [{ val: '', name: gameTitle(gameLevelOf(st.xp).lv) + '（レベル）' }];
   gameBadges(st).filter(b => b.got).forEach(b => out.push({ val: 'b:' + b.id, name: `${b.icon} ${b.name}` }));
-  GAME_SP_TITLES.filter(t => gameOwned(t.id)).forEach(t => out.push({ val: t.id, name: t.name }));
+  gameSpTitles(st).filter(t => t.got).forEach(t => out.push({ val: t.id, name: t.name }));
   return out;
 }
 function gameMyTitle(st) {
   const v = gameSel('sel_title');
   if (v.startsWith('b:')) { const b = gameBadgeDefs().find(x => x.id === v.slice(2)); if (b && gameBadges(st).find(x => x.id === b.id && x.got)) return `${b.icon} ${b.name}`; }
-  if (v.startsWith('t_')) { const t = GAME_SP_TITLES.find(x => x.id === v); if (t && gameOwned(t.id)) return t.name; }
+  if (v.startsWith('t_')) { const t = gameSpTitles(st).find(x => x.id === v); if (t && t.got) return t.name; }
   return gameTitle(gameLevelOf((st || gameStats()).xp).lv);
 }
 
 // ---------------- 🎨 テーマの色 ----------------
 const GAME_THEMES = [
-  { id: 'sakura', name: '🌸 桜', p: '#ff6fa8', p2: '#e0508c', a: '#ff9ec7', cost: 300 },
-  { id: 'ocean', name: '🌊 海', p: '#14b8d4', p2: '#0e98b0', a: '#3b82f6', cost: 300 },
-  { id: 'forest', name: '🌲 森', p: '#22a55a', p2: '#1a8a49', a: '#84cc16', cost: 300 },
-  { id: 'sunset', name: '🌇 夕焼け', p: '#f97316', p2: '#dc5f0c', a: '#ef4444', cost: 500 },
-  { id: 'night', name: '🌌 夜空', p: '#8b5cf6', p2: '#7140e0', a: '#ec4899', cost: 500 },
-  { id: 'gold', name: '🏆 金', p: '#d4a017', p2: '#b8890f', a: '#f59e0b', cost: 1000 },
+  { id: 'sakura', bg: '#261621', name: '🌸 桜', p: '#ff6fa8', p2: '#e0508c', a: '#ff9ec7', cost: 300 },
+  { id: 'ocean', bg: '#0b2030', name: '🌊 海', p: '#14b8d4', p2: '#0e98b0', a: '#3b82f6', cost: 300 },
+  { id: 'forest', bg: '#112016', name: '🌲 森', p: '#22a55a', p2: '#1a8a49', a: '#84cc16', cost: 300 },
+  { id: 'sunset', bg: '#24130c', name: '🌇 夕焼け', p: '#f97316', p2: '#dc5f0c', a: '#ef4444', cost: 500 },
+  { id: 'night', bg: '#14102e', name: '🌌 夜空', p: '#8b5cf6', p2: '#7140e0', a: '#ec4899', cost: 500 },
+  { id: 'gold', bg: '#1e190a', name: '🏆 金', p: '#d4a017', p2: '#b8890f', a: '#f59e0b', cost: 1000 },
 ];
 function gameApplyTheme() {
-  const id = gameSel('sel_theme'), t = GAME_THEMES.find(x => x.id === id && gameOwned('theme_' + x.id)), r = document.documentElement.style;
-  if (t) { r.setProperty('--primary', t.p); r.setProperty('--primary2', t.p2); r.setProperty('--accent', t.a); }
-  else { r.removeProperty('--primary'); r.removeProperty('--primary2'); r.removeProperty('--accent'); }
+  // ★【0.04.59】背景・カード・枠・文字の色までまとめて変える（index.html の body.theme-◯◯。明るい表示にも、それぞれの色がある）
+  const id = gameSel('sel_theme'), t = GAME_THEMES.find(x => x.id === id && gameOwned('theme_' + x.id)), cl = document.body.classList;
+  GAME_THEMES.forEach(x => cl.remove('theme-' + x.id));
+  if (t) cl.add('theme-' + t.id);
+  try { localStorage.setItem('susuru_anki_theme', t ? t.id : ''); } catch (e) {}
+  const r = document.documentElement.style; r.removeProperty('--primary'); r.removeProperty('--primary2'); r.removeProperty('--accent'); // 前の版の付け方を消す
 }
+// 開いたときすぐに（データを読む前に）前のテーマにする（ちらつかないように）
+try { const t0 = localStorage.getItem('susuru_anki_theme'); if (t0) document.body.classList.add('theme-' + t0); } catch (e) {}
 
 // ---------------- ⛵ わたしの船（育てる） ----------------
 const GAME_SHIP_PARTS = [
@@ -297,7 +320,7 @@ const GAME_SHIP_SHOP = [
   { id: 'ship_dragon', icon: '🐉', name: '🐉 竜', cost: 2000 },
 ];
 function gameShipOf(lv) { return lv >= 30 ? ['🚢', '大型船'] : lv >= 15 ? ['🛳️', '客船'] : lv >= 5 ? ['⛵', '帆船'] : ['🛶', '小舟']; }
-function gameItemDef(item) { return [...GAME_SP_TITLES, ...GAME_THEMES.map(t => Object.assign({}, t, { id: 'theme_' + t.id })), ...GAME_SHIP_SHOP].find(x => x.id === item); }
+function gameItemDef(item) { return [...GAME_THEMES.map(t => Object.assign({}, t, { id: 'theme_' + t.id })), ...GAME_SHIP_SHOP].find(x => x.id === item); }
 function gameShipHTML(st) {
   const lv = gameLevelOf(st.xp).lv, [ship, shipName] = gameShipOf(lv), has = p => p.ok(st), own = id => gameOwned(id);
   const night = GAME_SHIP_PARTS.find(p => p.id === 'stars').ok(st);
@@ -458,7 +481,9 @@ function renderGamePanel() {
       <div class="hint-small" style="margin-top:6px;">XP：解いた数×1・正解×1・学習した日×10・卒業×5・ミッション1つ20（全部で＋30）</div>
       <div class="setting-box-title" style="margin-top:12px;">🏷️ 名前の横の称号</div>
       <select class="form-control" onchange="gameSetSel('sel_title', this.value)">${choices.map(x => `<option value="${escAttr(x.val)}" ${x.val === cur ? 'selected' : ''}>${escapeHtml(x.name)}</option>`).join('')}</select>
-      <div class="hint-small">フレンドと比べる表・週間リーグで、名前の横に出ます。バッジを取ると選べる称号が増えます（ショップにも特別な称号があります）。</div>
+      <div class="hint-small">フレンドと比べる表・週間リーグで、名前の横に出ます。バッジや下の特別な称号を手に入れると、選べる称号が増えます。</div>
+      <div class="setting-box-title" style="margin-top:12px;">🏷️ 特別な称号（条件を満たすと手に入る）</div>
+      <div class="game-shop">${gameSpTitles(st).map(t => `<div class="game-shop-item${t.got ? ' sp-got' : ''}"><div class="game-shop-i">${t.got ? '🏷️' : '🔒'}</div><div style="flex:1; min-width:0;"><div class="game-shop-n">${t.name}</div><div class="hint-small">${t.cond}</div>${t.got ? '' : `<div class="stamp-bar" style="width:100%; margin-top:4px;"><i style="width:${Math.min(100, Math.round(t.now / t.need * 100))}%"></i></div>`}</div><b class="hint-small">${t.got ? (gameSel('sel_title') === t.id ? '✅ 付けています' : `<button class="chip" onclick="gameSetSel('sel_title', '${t.id}')">付ける</button>`) : `${Math.min(t.now, t.need).toLocaleString()}/${t.need.toLocaleString()}`}</b></div>`).join('')}</div>
       <div class="setting-box-title" style="margin-top:12px;">🎯 今日のミッション</div>
       ${gameMsHTML(gameMissions(gameToday()), true)}
       <div class="hint-small">毎日かわります。1つ +20 XP、3つ全部で +30 XP。🔄 で目標を半分にできます（入れかえ券 ${GAME_REROLL_COST}コイン）。</div>
@@ -505,10 +530,8 @@ function gameShopHTML(st) {
   h += '</div><div class="setting-box-title" style="margin-top:10px;">⚡ 勉強の道具</div><div class="game-shop">';
   h += gameShopRow('⚡', 'XP 2倍（15分）', bl > 0 ? `使っています：あと${Math.ceil(bl / 60000)}分` : 'リーグで追い上げたいときに。15分のあいだ、解いた・正解の XP が2倍', 'boost', GAME_BOOST_COST, bl > 0 ? '<span class="hint-small">使用中</span>' : null);
   h += gameShopRow('🔄', 'ミッションの入れかえ券', `今日のミッションの目標を半分にします（ミッションの横の 🔄 から・${GAME_REROLL_COST}コイン）`, 'reroll', GAME_REROLL_COST, `<button class="chip" onclick="_gameTab = 'top'; openPage('pgStats')">ミッションへ</button>`);
-  h += '</div><div class="setting-box-title" style="margin-top:10px;">🏷️ 特別な称号</div><div class="game-shop">';
-  GAME_SP_TITLES.forEach(t => { const own = gameOwned(t.id), on = gameSel('sel_title') === t.id; h += gameShopRow('🏷️', t.name, own ? (on ? '名前の横に付けています' : '交換ずみ') : '名前の横に付けられる称号', t.id, t.cost, own ? (on ? '<span class="hint-small">✅</span>' : `<button class="chip" onclick="gameSetSel('sel_title', '${t.id}')">付ける</button>`) : null); });
   h += '</div><div class="setting-box-title" style="margin-top:10px;">🎨 アプリのテーマの色</div><div class="game-shop">';
-  GAME_THEMES.forEach(t => { const own = gameOwned('theme_' + t.id), on = selT === t.id; h += gameShopRow(`<span class="theme-dot" style="background:linear-gradient(135deg, ${t.p}, ${t.a})"></span>`, t.name, own ? (on ? '使っています' : '交換ずみ') : 'ボタンや枠の色が変わります', 'theme_' + t.id, t.cost, own ? (on ? `<button class="chip" onclick="gameSetSel('sel_theme', '')">もとに戻す</button>` : `<button class="chip" onclick="gameSetSel('sel_theme', '${t.id}')">使う</button>`) : null); });
+  GAME_THEMES.forEach(t => { const own = gameOwned('theme_' + t.id), on = selT === t.id; h += gameShopRow(`<span class="theme-dot" style="background:linear-gradient(135deg, ${t.bg || t.p} 0 45%, ${t.p} 45% 75%, ${t.a} 75%)"></span>`, t.name, own ? (on ? '使っています' : '交換ずみ') : '背景・カード・文字・ボタンの色がまとめて変わります（明るい表示にも）', 'theme_' + t.id, t.cost, own ? (on ? `<button class="chip" onclick="gameSetSel('sel_theme', '')">もとに戻す</button>` : `<button class="chip" onclick="gameSetSel('sel_theme', '${t.id}')">使う</button>`) : null); });
   h += '</div><div class="setting-box-title" style="margin-top:10px;">⛵ 船の特別な飾り</div><div class="game-shop">';
   GAME_SHIP_SHOP.forEach(p => { const own = gameOwned(p.id); h += gameShopRow(p.icon, p.name, own ? '船に乗っています（実績 → ⛵ 船）' : '「わたしの船」のまわりに出ます', p.id, p.cost, own ? '<span class="hint-small">✅</span>' : null); });
   return h + '</div>';
@@ -518,10 +541,10 @@ function gameShopHTML(st) {
 function gameRefundFlames() {
   let n = 0;
   Object.entries(gameShop || {}).forEach(([id, v]) => {
-    if (v && !v.deleted && (String(v.item || '').startsWith('flame_') || id === 'sel_flame')) { gameShop[id] = { deleted: true, at: Date.now() }; n += Number(v.cost) || 0; }
+    if (v && !v.deleted && (String(v.item || '').startsWith('flame_') || String(v.item || '').startsWith('t_') || id === 'sel_flame')) { gameShop[id] = { deleted: true, at: Date.now() }; n += Number(v.cost) || 0; }
   });
   if (n || Object.keys(gameShop || {}).some(k => k === 'sel_flame' && !gameShop[k].deleted)) { try { saveData(); } catch (e) {} }
-  if (n) setTimeout(() => gameCelebrate('💰', `${n}コインを返しました`, '炎の色は連続記録の長さで変わるようにしたので、交換した炎の色を取り消しました'), 2500);
+  if (n) setTimeout(() => gameCelebrate('💰', `${n}コインを返しました`, '炎の色・特別な称号はコインで交換しないようにしたので、交換した分を取り消しました（特別な称号は、条件を満たすと手に入ります）'), 2500);
 }
 
 // 起動・日付が変わったとき
