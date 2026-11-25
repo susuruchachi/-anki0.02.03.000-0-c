@@ -161,15 +161,22 @@ function sharedReconcileCats(docId, data) {
 }
 
 // ★ 定期同期＆起動時同期ロジック
+let _subsSyncing = 0;
 async function syncSubscriptions() {
   if (!currentUser) return;
   if (!subscribedDocs || subscribedDocs.length === 0) return;
+  // ★【0.04.61】同時に何回も走らせない（ただし1分たっても終わらないものは、止まったとみなしてやり直す）
+  if (_subsSyncing && Date.now() - _subsSyncing < 60000) return;
+  _subsSyncing = Date.now();
+  try { await syncSubscriptionsRun(); } finally { _subsSyncing = 0; }
+}
+async function syncSubscriptionsRun() {
   
   let changed = false;
   const needPush = [];
   for (let docId of [...subscribedDocs]) {
     try {
-      const snap = await firestore.collection("susuru_anki_shared").doc(docId).get();
+      const snap = await withTimeout(firestore.collection("susuru_anki_shared").doc(docId).get(), 20000, '共有カテゴリーの読み込み'); // ★【0.04.61】
       if (!snap.exists) {
         // ★【0.03.02】公開が停止・削除されたドキュメント：手元のカードは普通のカードとして残す
         detachSharedDoc(docId); changed = true; continue;
@@ -254,6 +261,7 @@ async function syncSubscriptions() {
     autoMerge();
     if (document.getElementById('pgBox').classList.contains('active')) renderBox();
     if (document.getElementById('pgTree').classList.contains('active')) renderTree();
+    if (typeof refreshVisibleViews === 'function') refreshVisibleViews(); // ★【0.04.61】クイズの範囲・ホームの数も
   }
   for (const docId of needPush) await pushSharedDocFromLocal(docId);
 }
