@@ -242,9 +242,67 @@ function stampAlive(s) { return !s || !(s.d > 0) || (s.a || 0) > s.d; }
 
 let _resolveDataLoaded;
 const dataLoaded = new Promise(r => { _resolveDataLoaded = r; });
+
+// ================================================================
+// ★【0.04.62】端末のデータが大きいときは IndexedDB に置く
+// localStorage は端末の空きに関係なく、1つのサイトで約5MBまで（同じ susuruchachi.github.io の貸し借り帳などとも分け合う）。
+// カード（画像つき）が多いと入りきらず「端末の保存容量がいっぱい」と出ていた（iPad のアプリでよく起きた）。
+//  ・大きいとき（LOCAL_LS_MAX 文字より大きい）・localStorage に入らなかったときは、IndexedDB（susuru_anki_local）に置き、
+//    localStorage の STORAGE_KEY には目印 {"__idb__":1} だけを置く。一度 IndexedDB にしたら、ずっとそちら
+//  ・読むとき：目印なら IndexedDB から読む（少し待つので、loadData は Promise を返す。main.js が待つ）
+//  ・読み終えるまでは書かない（空のデータで上書きしないように）
+// ================================================================
+const LOCAL_IDB = 'susuru_anki_local', LOCAL_IDB_STORE = 'kv';
+const LOCAL_LS_MAX = 1500000; // 文字（localStorage は1文字2バイトで数える端末がある。ほかのデータの分も残す）
+let _localReady = false, _localInIdb = false;
+function localIdb() {
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') return reject(new Error('IndexedDB を使えません'));
+    const req = indexedDB.open(LOCAL_IDB, 1);
+    req.onupgradeneeded = () => { if (!req.result.objectStoreNames.contains(LOCAL_IDB_STORE)) req.result.createObjectStore(LOCAL_IDB_STORE); };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+function localIdbGet(key) {
+  return localIdb().then(d => new Promise((resolve, reject) => {
+    const rq = d.transaction(LOCAL_IDB_STORE, 'readonly').objectStore(LOCAL_IDB_STORE).get(key);
+    rq.onsuccess = () => resolve(rq.result === undefined ? null : rq.result);
+    rq.onerror = () => reject(rq.error);
+  }));
+}
+function localIdbSet(key, value) {
+  return localIdb().then(d => new Promise((resolve, reject) => {
+    const tx = d.transaction(LOCAL_IDB_STORE, 'readwrite');
+    tx.objectStore(LOCAL_IDB_STORE).put(value, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  }));
+}
+function isLocalIdbMark(raw) { return typeof raw === 'string' && raw.length < 200 && raw.indexOf('"__idb__"') >= 0; }
+
+// 端末のデータを読む。localStorage にあればすぐ、IndexedDB にあれば読み終えたら resolve する
 function loadData() {
+  let raw = null;
+  try { raw = localStorage.getItem(STORAGE_KEY); } catch (e) {}
+  if (isLocalIdbMark(raw)) {
+    _localInIdb = true;
+    return localIdbGet(STORAGE_KEY)
+      .then(v => applyLocalRaw(v, true))
+      .catch(e => {
+        console.error('IndexedDB から読めませんでした:', e);
+        setTimeout(() => alert('⚠️ この端末の保存データを読み込めませんでした。\nログインしているならクラウドから復元されます。'), 0);
+      })
+      .then(finishLoadData);
+  }
+  applyLocalRaw(raw, false);
+  finishLoadData();
+  return Promise.resolve();
+}
+
+function applyLocalRaw(raw, fromIdb) {
   try {
-    const raw=localStorage.getItem(STORAGE_KEY);
     if(raw){
       const p=JSON.parse(raw);
       if(p.db) db=p.db;
@@ -274,12 +332,15 @@ function loadData() {
   } catch(e){
     // ★【0.03.13】保存データが壊れていて読めなかったときは、上書きして失う前に別の場所へ退避する
     console.error('保存データを読めませんでした:', e);
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+    if (fromIdb) localIdbSet(STORAGE_KEY + '_unreadable', raw).catch(() => {}); // ★【0.04.62】IndexedDB の分は IndexedDB に退避
+    else try {
       if (raw && !localStorage.getItem(STORAGE_KEY + '_unreadable')) localStorage.setItem(STORAGE_KEY + '_unreadable', raw);
     } catch (e2) {}
     setTimeout(() => alert('⚠️ この端末の保存データを読み込めませんでした。\n読めなかったデータは別の場所に退避してあります。ログインしているならクラウドから復元されます。'), 0);
   }
+}
+
+function finishLoadData() {
   migrateSyncMeta();
   try { shareStats = localStorage.getItem('shareStats') !== 'false'; } catch(e){}
   // ★【0.02.58-g】カテゴリー選択と最終ページを復元
@@ -288,6 +349,7 @@ function loadData() {
     if (savedScope) lastQuizScopePath = JSON.parse(savedScope);
   } catch(e){}
   _structHash = structFingerprint();
+  _localReady = true;
   _resolveDataLoaded();
 }
 
@@ -354,10 +416,25 @@ let _localWriteTimer = null;
 function writeLocal() {
   if (_localWriteTimer) { clearTimeout(_localWriteTimer); _localWriteTimer = null; }
   const payload = buildSyncPayload();
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(payload)); }
-  catch (e) {
-    console.error('ローカル保存に失敗:', e);
-    if (!_quotaWarned) { _quotaWarned = true; setTimeout(() => alert('⚠️ 端末の保存容量がいっぱいで保存できませんでした。\n画像付きのカードを減らすか、JSONでバックアップしてから不要なデータを削除してください。'), 0); }
+  if (!_localReady) return payload; // ★【0.04.62】端末のデータを読み終える前は書かない（空のデータで上書きしないように）
+  const json = JSON.stringify(payload);
+  let ok = false;
+  if (!_localInIdb && json.length <= LOCAL_LS_MAX) {
+    try { localStorage.setItem(STORAGE_KEY, json); ok = true; } catch (e) { console.warn('localStorage に入りませんでした。IndexedDB に置きます:', e); }
+  }
+  // ★【0.04.62】大きいとき・localStorage に入らなかったときは IndexedDB に置く（入れ終えてから localStorage を目印にかえる）
+  if (!ok) {
+    localIdbSet(STORAGE_KEY, json).then(() => {
+      if (_localInIdb) return;
+      _localInIdb = true;
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ __idb__: 1, at: Date.now() })); } catch (e) {}
+      // 前に退避した読めなかったデータも IndexedDB に移して、localStorage をあける
+      let old = null; try { old = localStorage.getItem(STORAGE_KEY + '_unreadable'); } catch (e) {}
+      if (old) localIdbSet(STORAGE_KEY + '_unreadable', old).then(() => { try { localStorage.removeItem(STORAGE_KEY + '_unreadable'); } catch (e) {} }).catch(() => {});
+    }).catch(e => {
+      console.error('ローカル保存に失敗:', e);
+      if (!_quotaWarned) { _quotaWarned = true; setTimeout(() => alert('⚠️ 端末の保存容量がいっぱいで保存できませんでした。\n画像付きのカードを減らすか、JSONでバックアップしてから不要なデータを削除してください。'), 0); }
+    });
   }
   // ★【0.02.58-g】カテゴリー選択を保存
   try { localStorage.setItem(STORAGE_KEY + '_scopePath', JSON.stringify(lastQuizScopePath)); } catch(e){}

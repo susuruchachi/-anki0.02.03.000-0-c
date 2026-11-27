@@ -242,7 +242,7 @@ function widgetBoardMine() {
   } catch (e) {}
   return b;
 }
-window.addEventListener('load', () => setTimeout(() => appWidgetSync(true), 3000));
+window.addEventListener('load', () => dataLoaded.then(() => setTimeout(() => appWidgetSync(true), 3000))); // ★【0.04.62】データを読み終えてから
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') appWidgetSync(true); });
 
 // ================================================================
@@ -335,7 +335,7 @@ function appAlarmSync(now) {
     } catch (e) {}
   }, now ? 0 : 1500);
 }
-window.addEventListener('load', () => setTimeout(() => appAlarmSync(true), 4000));
+window.addEventListener('load', () => dataLoaded.then(() => setTimeout(() => appAlarmSync(true), 4000))); // ★【0.04.62】データを読み終えてから（まだなら今日解いていないと思って鳴らしてしまう）
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') appAlarmSync(true); });
 function alarmStatus() { try { return JSON.parse((isIOSApp() ? window.SusuruIOS.alarmStatus() : window.SusuruApp.alarmStatus()) || '{}'); } catch (e) { return {}; } }
 // ★【0.04.45】iOS：その時刻にアプリを動かせないので、鳴らす時刻を全部ここで決めて渡す（60回まで）
