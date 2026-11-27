@@ -102,7 +102,7 @@ self.addEventListener('push', event => {
   event.waitUntil((async () => {
     if (d.kind === 'update' && d.version) await notifyKvSet('notifiedVersion', d.version);
     if (d.kind === 'reminder') await notifyKvSet('lastRemindDate', localDateStr());
-    await closeOldNotifications(d.kind, d.tag);
+    if (d.kind !== 'chat') await closeOldNotifications(d.kind, d.tag); // ★【0.04.73】チャットはフレンドごと（tag が同じものだけ入れかわる）
     await show(title, body, { tag: d.tag || d.kind || 'susuru', url: d.url || './', renotify: true, kind: d.kind, version: d.version });
   })());
 });
@@ -112,7 +112,7 @@ self.addEventListener('notificationclick', event => {
   const target = new URL((event.notification.data && event.notification.data.url) || './', self.registration.scope).href;
   event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
     // ★【0.03.36】開いている画面があれば、その画面に「このURLを開いて」と伝える（週間プランの課題をそのまま始める）
-    for (const c of list) { if (c.url.startsWith(self.registration.scope) && 'focus' in c) { if (/[?&]plantask=/.test(target)) c.postMessage({ type: 'open-url', url: target }); return c.focus(); } }
+    for (const c of list) { if (c.url.startsWith(self.registration.scope) && 'focus' in c) { if (/[?&](plantask|chat)=/.test(target)) c.postMessage({ type: 'open-url', url: target }); return c.focus(); } }
     return self.clients.openWindow(target);
   }));
 });

@@ -2,6 +2,7 @@
 // ★【0.03.14】プッシュ通知の送信（GitHub Actions から定期的に実行する）
 //   node tools/push-notify.js [all|reminders|update]
 //  ・reminders: 学習の催促。各ユーザーが決めた時刻を過ぎて、その日まだ学習していなければ知らせる（1日1回）
+//  ・chat:      チャット・応援スタンプ（★0.04.73。CHAT_LOOP_SEC 秒のあいだ20秒ごと）
 //  ・update:    アップデートのお知らせ。version-info.js のバージョンが前回知らせたものと違えば、全員に知らせる
 // 必要なもの：環境変数 FIREBASE_SERVICE_ACCOUNT（Firebase のサービスアカウントの秘密鍵 JSON）
 // ================================================================
@@ -336,6 +337,36 @@ async function sendFriendNotices() {
   console.log(`フレンド申請のお知らせ: ${sent} 件送信`);
 }
 
+// ★【0.04.73】チャット・応援スタンプが届いたら、相手に内容つきで知らせる
+//  送った人がチャットの文書（susuru_anki_chats/{2人の UID}）に last・nt（知らせる相手）・np: true・nn（件数）を置く。
+//  np を消す（トランザクション。二重に送らない）→ 相手の通知の設定（chat、はじめはオン）を見て送る。
+//  相手がアプリを開いていてその場で知らせたときは、相手の画面が np を消すので送らない
+async function sendChatNotices() {
+  const snap = await db.collection('susuru_anki_chats').where('np', '==', true).limit(100).get();
+  let sent = 0;
+  for (const doc of snap.docs) {
+    let d = null;
+    await db.runTransaction(async tx => { const s = await tx.get(doc.ref); const x = s.data() || {}; d = x.np ? x : null; if (d) tx.update(doc.ref, { np: false, nn: 0 }); });
+    const l = d && d.last;
+    if (!l || !d.nt || l.by === d.nt || !doc.id.split('_').includes(d.nt) || Date.now() - (Number(l.at) || 0) > 24 * 3600e3) continue;
+    const ref = db.collection(PUSH_COL).doc(d.nt), ps = await ref.get();
+    if (!ps.exists || ps.data().chat === false) continue;
+    const t = String(l.t || ''), cheer = /^📣 応援スタンプ：/.test(t), name = String(l.name || 'フレンド').slice(0, 40);
+    const body = (cheer ? t.replace(/^📣 応援スタンプ：/, '') : t).slice(0, 300) + (d.nn > 1 ? `（ほか ${d.nn - 1} 件）` : '');
+    sent += await sendToUser(ref, ps.data(), { kind: 'chat', tag: 'chat-' + doc.id, title: cheer ? `📣 ${name} さんから応援スタンプ` : `💬 ${name} さん`, body, url: APP_URL + '?chat=' + encodeURIComponent(l.by) });
+  }
+  if (snap.size) console.log(`チャットのお知らせ: ${sent} 件送信（${snap.size} 件）`);
+}
+// ★ chat の回：CHAT_LOOP_SEC 秒のあいだ、20秒ごとに見る（定期実行は5分ごとなので、その間もすぐ届くように）
+async function chatLoop() {
+  const until = Date.now() + (Number(process.env.CHAT_LOOP_SEC) || 0) * 1000;
+  do {
+    await sendChatNotices().catch(e => console.log('チャットのお知らせに失敗:', e.message));
+    if (Date.now() + 20000 > until) break;
+    await new Promise(r => setTimeout(r, 20000));
+  } while (true);
+}
+
 // ★【0.04.22】URL で購読しているカレンダー（.ics）を読んで置いておく
 // ブラウザからは読めない（CORS を許していない）サイト（Studyplus など）の分。アプリの「🔗 URL で購読」が使う
 //  ・1時間より前に読んだもの、または読んでほしいと頼まれた（reqAt）ものだけ。https だけ・5MB まで・20秒まで
@@ -366,6 +397,8 @@ async function refreshIcalFeeds() {
 }
 
 (async () => {
+  if (MODE === 'chat') { await chatLoop(); await db.doc(META_DOC).set({ lastChatRunAt: Date.now() }, { merge: true }); return; }
+  if (MODE === 'all') await sendChatNotices().catch(e => console.log('チャットのお知らせに失敗:', e.message));
   if (MODE === 'all' || MODE === 'ical') await refreshIcalFeeds().catch(e => console.log('購読カレンダーの読み込みに失敗:', e.message));
   if (MODE === 'all' || MODE === 'friends' || MODE === 'reports') await sendReportNotices().catch(e => console.log('要望・報告のお知らせに失敗:', e.message));
   if (MODE === 'all' || MODE === 'friends') await sendFriendNotices().catch(e => console.log('フレンド申請のお知らせに失敗:', e.message));
