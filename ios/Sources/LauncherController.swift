@@ -62,7 +62,7 @@ final class LauncherController: UIViewController {
         NotificationCenter.default.addObserver(self, selector: #selector(wentBackground), name: UIApplication.didEnterBackgroundNotification, object: nil)
     }
 
-    @objc private func wentBackground() { UpdateNotifier.shared.schedule() } // ★【0.04.73】閉じたら、次に起こしてもらう分を頼む
+    @objc private func wentBackground() { UpdateNotifier.shared.schedule() } // ★【0.04.74】閉じたら、次に起こしてもらう分を頼む
 
     @objc private func becameActive() {
         KoukaiNotifier.shared.dataChanged() // 日付が変わっていたら、通知を入れ直す

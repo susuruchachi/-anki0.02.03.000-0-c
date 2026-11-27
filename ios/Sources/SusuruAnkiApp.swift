@@ -49,7 +49,7 @@ enum Router {
 final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = NotificationHandler.shared // 通知を押して開いたとき（閉じていても）に受け取れるよう、はじめに
-        UpdateNotifier.register() // ★【0.04.73】アップデートのお知らせ（バックグラウンド更新）。起動を終える前に登録する
+        UpdateNotifier.register() // ★【0.04.74】アップデートのお知らせ（バックグラウンド更新）。起動を終える前に登録する
         return true
     }
 

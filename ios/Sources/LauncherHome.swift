@@ -15,7 +15,7 @@ final class LauncherModel: ObservableObject {
             if prefs.anyOn { Task { _ = await KoukaiNotifier.shared.requestAuth(); await self.refreshAuth() } }
         }
     }
-    // ★【0.04.73】アップデートのお知らせ
+    // ★【0.04.74】アップデートのお知らせ
     @Published var updateOn: Bool = UserDefaults.standard.bool(forKey: "update_notify_on") {
         didSet {
             guard updateOn != oldValue else { return }
