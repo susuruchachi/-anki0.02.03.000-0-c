@@ -207,9 +207,11 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly(['a', 'r', 'v', 'by', 'at', 'm'])
         && (!('a' in request.resource.data) || (request.resource.data.a is bytes && request.resource.data.a.size() < 900000))
         && (!('r' in request.resource.data) || (request.resource.data.r is string && request.resource.data.r.size() < 2000));
-      allow update: if isAuthenticated() && resource.data.by == uid() && request.resource.data.by == uid()
+      // ★0.04.72 読み方を直した・声を作り直したときは、ほかの人が置いた声・読み方・行の記録も置きかえられる（書いた人は自分になる）
+      allow update: if isAuthenticated() && request.resource.data.by == uid()
         && request.resource.data.keys().hasOnly(['a', 'r', 'v', 'by', 'at', 'm'])
-        && (!('a' in request.resource.data) || (request.resource.data.a is bytes && request.resource.data.a.size() < 900000));
+        && (!('a' in request.resource.data) || (request.resource.data.a is bytes && request.resource.data.a.size() < 900000))
+        && (!('r' in request.resource.data) || (request.resource.data.r is string && request.resource.data.r.size() < 2000));
       allow delete: if false;
     }
 
