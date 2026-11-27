@@ -4,9 +4,9 @@
 name: ios-ipa
 
 on:
-  # 手動で動かすには、このファイルがデフォルトブランチ（main）にも要る。作業ブランチでは ios/ を変えて push したときに動く
+  # ★ サイトは main から公開している（2026/11/27〜）。main で ios/ が変わったとき（PR をマージしたとき）に作って、main に置く
   push:
-    branches: [claude/v0.03.00-chem-kanbun-ui, claude/charming-hamilton-p4pm3a]
+    branches: [main]
     paths: ['ios/**', '.github/workflows/ios-ipa.yml']
   workflow_dispatch:
     inputs:
