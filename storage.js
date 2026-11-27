@@ -405,8 +405,28 @@ function userDocRef() { return firestore.collection("susuru_anki_users").doc(cur
 // カード一覧(db)をgzipで圧縮してバイナリ(Blob)で保存する（だいたい1/5になる）。
 // フォルダー構造などの小さい情報は今まで通りそのまま保存する（旧バージョンの端末がフォルダーを消してしまわないように）
 // ================================================================
-const CLOUD_DOC_LIMIT = 1000000; // 余裕を見て約1MB未満に収める
+let _cloudForceParts = false; // ★【0.04.66】Firestore に大きすぎると断られたら、次からは分けて保存する
+const CLOUD_DOC_LIMIT = 1000000; // 余裕を見て約1MB未満に収める（Firestore の上限は 1,048,576 バイト）
 class CloudTooLargeError extends Error {}
+// ★【0.04.66】Firestore と同じ数え方で、ドキュメントの大きさを見積もる（文字は UTF-8＋1、数は8、真偽・null は1、
+//  バイナリはそのバイト数、地図は「項目名（UTF-8＋1）＋値」の合計、配列は値の合計、ドキュメントに＋32）。
+//  前は JSON の文字数で見積もっていたので、数がたくさんある記録（日ごとの数・カードモードの成績など）で小さく見積もりすぎ、
+//  1MB ぎりぎりのときに Firestore に「大きすぎる」（invalid-argument）と断られていた
+function fsSize(v) {
+  if (v === null || v === undefined) return 1;
+  const t = typeof v;
+  if (t === 'string') return utf8Bytes(v) + 1;
+  if (t === 'number') return 8;
+  if (t === 'boolean') return 1;
+  if (v instanceof Uint8Array) return v.length;
+  if (typeof v.toUint8Array === 'function') return v.toUint8Array().length; // Firestore の Blob
+  if (typeof v._methodName === 'string' || (v.constructor && /FieldValue/.test(v.constructor.name || ''))) return 8; // serverTimestamp など
+  if (Array.isArray(v)) return v.reduce((a, x) => a + fsSize(x), 0);
+  if (t === 'object') { let n = 0; for (const k in v) { if (v[k] === undefined) continue; n += utf8Bytes(k) + 1 + fsSize(v[k]); } return n; }
+  return 8;
+}
+// 本体に付ける項目（version・writer・writeId・lastSync）と、ドキュメントの名前の分
+const CLOUD_DOC_EXTRA = 400;
 function utf8Bytes(str) { return (typeof TextEncoder !== 'undefined') ? new TextEncoder().encode(str).length : unescape(encodeURIComponent(str)).length; }
 function encodeCloudBody(payload) {
   // カード一覧の書き出しは1回だけにする（undefined は JSON.stringify で消える）
@@ -422,43 +442,51 @@ function encodeCloudBody(payload) {
     if (body.drillProgress && Object.keys(body.drillProgress).length) { dp = pako.gzip(JSON.stringify(body.drillProgress)); delete body.drillProgress; }
     let qa = null; // ★【0.03.91】暗記テストの質問も縮めて入れる
     if (body.drillQa && Object.keys(body.drillQa).length) { qa = pako.gzip(JSON.stringify(body.drillQa)); delete body.drillQa; }
-    size = gz.length + (dp ? dp.length : 0) + (qa ? qa.length : 0) + utf8Bytes(JSON.stringify(body)) + 2000; // 圧縮データ以外の部分＋圧縮データの大きさ
+    size = fsSize(body) + gz.length + 8 + (dp ? dp.length + 8 : 0) + (qa ? qa.length + 8 : 0) + CLOUD_DOC_EXTRA + 32; // ★【0.04.66】Firestore と同じ数え方
     body.dbGz = firebase.firestore.Blob.fromUint8Array(gz);
     if (dp) body.dpGz = firebase.firestore.Blob.fromUint8Array(dp);
     if (qa) body.qaGz = firebase.firestore.Blob.fromUint8Array(qa);
   } else {
     body.db = JSON.parse(dbJson);
-    size = utf8Bytes(JSON.stringify(body)) + 2000;
+    size = fsSize(body) + CLOUD_DOC_EXTRA + 32;
   }
-  if (size > CLOUD_DOC_LIMIT) {
+  if (size > CLOUD_DOC_LIMIT || _cloudForceParts) {
     // ★【0.04.64】1MB に収まらないときは、カード・暗記テストの途中経過・質問をまとめて圧縮し、900KB ずつに分けて
     //  susuru_anki_users/{uid}/parts/p0, p1, … に置く（最大9つ＝約8MB）。本体には小さい情報と、分けた数だけを入れる
     if (typeof pako === 'undefined' || !(firebase.firestore && firebase.firestore.Blob)) { const err = new CloudTooLargeError('too_large'); err.size = size; throw err; }
-    const bundle = pako.gzip(JSON.stringify({ db: payload.db || [], drillProgress: payload.drillProgress || {}, drillQa: payload.drillQa || {} }));
+    // ★【0.04.66】フォルダーの構造など前の版の端末が使う小さいもの（CLOUD_KEEP_PLAIN）だけを本体に残し、ほかは全部まとめて分ける。
+    //  それでも本体が大きいときは、それも分ける
+    const clean = JSON.parse(JSON.stringify(payload));
+    let plainKeys = CLOUD_KEEP_PLAIN.filter(k => clean[k] !== undefined);
+    if (fsSize(Object.fromEntries(plainKeys.map(k => [k, clean[k]]))) > CLOUD_DOC_LIMIT / 2) plainKeys = [];
+    const bundleObj = {}, small = {};
+    Object.keys(clean).forEach(k => { if (plainKeys.includes(k)) small[k] = clean[k]; else bundleObj[k] = clean[k]; });
+    const bundle = pako.gzip(JSON.stringify(bundleObj));
     const parts = [];
     for (let i = 0; i < bundle.length; i += CLOUD_PART_SIZE) parts.push(bundle.subarray(i, i + CLOUD_PART_SIZE));
-    const small = JSON.parse(JSON.stringify(Object.assign({}, payload, { db: undefined, drillProgress: undefined, drillQa: undefined })));
-    small.dbFormat = 'parts-v1'; small.parts = parts.length; small.partsLen = bundle.length;
-    const total = bundle.length + utf8Bytes(JSON.stringify(small));
-    if (parts.length > CLOUD_MAX_PARTS || utf8Bytes(JSON.stringify(small)) > CLOUD_DOC_LIMIT) { const err = new CloudTooLargeError('too_large'); err.size = total; err.parts = true; throw err; }
+    small.dbFormat = 'parts-v2'; small.parts = parts.length; small.partsLen = bundle.length;
+    const total = bundle.length + fsSize(small);
+    if (parts.length > CLOUD_MAX_PARTS || fsSize(small) + CLOUD_DOC_EXTRA + 32 > CLOUD_DOC_LIMIT) { const err = new CloudTooLargeError('too_large'); err.size = total; err.parts = true; throw err; }
     Object.defineProperty(small, '_parts', { value: parts, enumerable: false });
     return small;
   }
   return body;
 }
 const CLOUD_PART_SIZE = 900000, CLOUD_MAX_PARTS = 9;
+// 分けて保存するときも本体に残すもの（前の版の端末がフォルダーを消さないように）
+const CLOUD_KEEP_PLAIN = ['categories', 'categoryTree', 'deletedCats', 'catStamps', 'subscribedDocs', 'ownedDocs', 'structAt', 'docStamps', 'catSubjects', 'catSkip'];
 function cloudPartRef(i) { return userDocRef().collection('parts').doc('p' + i); }
 function blobBytes(b) { return typeof b.toUint8Array === 'function' ? b.toUint8Array() : b; }
 // ★【0.04.64】分けて置いたデータも読み戻す。getPart(i) は p◯ の snapshot を返す関数（ふつうの get でも、トランザクションの get でも）
 //  分けた部分の writeId が本体と違う（読んでいるあいだに別の端末が書いた）ときは、読み直す
 async function decodeCloudDocFull(r, getPart) {
-  if (!r || r.dbFormat !== 'parts-v1') return decodeCloudDoc(r);
+  if (!r || (r.dbFormat !== 'parts-v1' && r.dbFormat !== 'parts-v2')) return decodeCloudDoc(r);
   if (typeof pako === 'undefined') throw new Error('圧縮データを読むためのライブラリ(pako)を読み込めませんでした。通信状態を確認して再読み込みしてください。');
   const n = Number(r.parts) || 0, snaps = await Promise.all(Array.from({ length: n }, (_, i) => getPart(i)));
   const arrs = snaps.map((sn, i) => { const d = sn && sn.exists ? sn.data() : null; if (!d || !d.d || d.writeId !== r.writeId) { const e = new Error('parts_mismatch'); e.code = 'parts_mismatch'; throw e; } return blobBytes(d.d); });
   const len = arrs.reduce((a, x) => a + x.length, 0), all = new Uint8Array(len); let off = 0; arrs.forEach(x => { all.set(x, off); off += x.length; });
   const big = JSON.parse(pako.ungzip(all, { to: 'string' }));
-  const out = Object.assign({}, r, { db: big.db || [], drillProgress: big.drillProgress || {}, drillQa: big.drillQa || {} });
+  const out = Object.assign({}, r, big, { db: big.db || [], drillProgress: big.drillProgress || {}, drillQa: big.drillQa || {} }); // ★【0.04.66】parts-v2 は、ほかの記録もまとめて入っている
   delete out.parts; delete out.partsLen; delete out.dbFormat;
   return out;
 }
@@ -491,6 +519,13 @@ function decodeCloudDoc(r) {
 let _tooLargeWarned = false;
 function reportCloudSaveError(err) {
   console.warn('クラウド保存エラー:', err);
+  // ★【0.04.66】見積もりより大きくて断られた（invalid-argument）：分けて保存し直す（1回だけ）
+  if (err && err.code === 'invalid-argument' && !_cloudForceParts) {
+    _cloudForceParts = true;
+    setSyncStatus('saving', '☁️ 分けて保存し直しています…');
+    setTimeout(() => backgroundCloudSave(), 800);
+    return;
+  }
   if (err instanceof CloudTooLargeError) {
     setSyncStatus('error', '⚠️ 容量オーバーで保存できません');
     if (!_tooLargeWarned) {
@@ -526,7 +561,7 @@ async function backgroundCloudSave() {
       if (snap.exists) {
         // 自分が最後に書いた内容のままなら、展開（重い）せずにそのまま上書きする
         const raw = snap.data() || {};
-        prevParts = raw.dbFormat === 'parts-v1' ? Number(raw.parts) || 0 : 0;
+        prevParts = /^parts-v/.test(raw.dbFormat || '') ? Number(raw.parts) || 0 : 0;
         if (!raw.writeId || (raw.writeId !== _lastSeenWriteId && !_myWriteIds.includes(raw.writeId))) { mergeIntoLocal(await decodeCloudDocFull(raw, i => tx.get(cloudPartRef(i)))); merged = true; }
       }
       writeId = newWriteId();
