@@ -14,6 +14,10 @@ service cloud.firestore {
     // 💾 自分のカード・フォルダー（本人だけ）
     match /susuru_anki_users/{userId} {
       allow read, write: if isAuthenticated() && uid() == userId;
+      // ★【0.04.64】1MB に収まらない学習データを分けて置く場所（parts/p0, p1, …）。本人だけ
+      match /parts/{part} {
+        allow read, write: if isAuthenticated() && uid() == userId;
+      }
     }
 
     // 👤 プロフィール（ログインした人は読める。書き換えは本人だけ）

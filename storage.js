@@ -431,9 +431,47 @@ function encodeCloudBody(payload) {
     size = utf8Bytes(JSON.stringify(body)) + 2000;
   }
   if (size > CLOUD_DOC_LIMIT) {
-    const err = new CloudTooLargeError('too_large'); err.size = size; throw err;
+    // ★【0.04.64】1MB に収まらないときは、カード・暗記テストの途中経過・質問をまとめて圧縮し、900KB ずつに分けて
+    //  susuru_anki_users/{uid}/parts/p0, p1, … に置く（最大9つ＝約8MB）。本体には小さい情報と、分けた数だけを入れる
+    if (typeof pako === 'undefined' || !(firebase.firestore && firebase.firestore.Blob)) { const err = new CloudTooLargeError('too_large'); err.size = size; throw err; }
+    const bundle = pako.gzip(JSON.stringify({ db: payload.db || [], drillProgress: payload.drillProgress || {}, drillQa: payload.drillQa || {} }));
+    const parts = [];
+    for (let i = 0; i < bundle.length; i += CLOUD_PART_SIZE) parts.push(bundle.subarray(i, i + CLOUD_PART_SIZE));
+    const small = JSON.parse(JSON.stringify(Object.assign({}, payload, { db: undefined, drillProgress: undefined, drillQa: undefined })));
+    small.dbFormat = 'parts-v1'; small.parts = parts.length; small.partsLen = bundle.length;
+    const total = bundle.length + utf8Bytes(JSON.stringify(small));
+    if (parts.length > CLOUD_MAX_PARTS || utf8Bytes(JSON.stringify(small)) > CLOUD_DOC_LIMIT) { const err = new CloudTooLargeError('too_large'); err.size = total; err.parts = true; throw err; }
+    Object.defineProperty(small, '_parts', { value: parts, enumerable: false });
+    return small;
   }
   return body;
+}
+const CLOUD_PART_SIZE = 900000, CLOUD_MAX_PARTS = 9;
+function cloudPartRef(i) { return userDocRef().collection('parts').doc('p' + i); }
+function blobBytes(b) { return typeof b.toUint8Array === 'function' ? b.toUint8Array() : b; }
+// ★【0.04.64】分けて置いたデータも読み戻す。getPart(i) は p◯ の snapshot を返す関数（ふつうの get でも、トランザクションの get でも）
+//  分けた部分の writeId が本体と違う（読んでいるあいだに別の端末が書いた）ときは、読み直す
+async function decodeCloudDocFull(r, getPart) {
+  if (!r || r.dbFormat !== 'parts-v1') return decodeCloudDoc(r);
+  if (typeof pako === 'undefined') throw new Error('圧縮データを読むためのライブラリ(pako)を読み込めませんでした。通信状態を確認して再読み込みしてください。');
+  const n = Number(r.parts) || 0, snaps = await Promise.all(Array.from({ length: n }, (_, i) => getPart(i)));
+  const arrs = snaps.map((sn, i) => { const d = sn && sn.exists ? sn.data() : null; if (!d || !d.d || d.writeId !== r.writeId) { const e = new Error('parts_mismatch'); e.code = 'parts_mismatch'; throw e; } return blobBytes(d.d); });
+  const len = arrs.reduce((a, x) => a + x.length, 0), all = new Uint8Array(len); let off = 0; arrs.forEach(x => { all.set(x, off); off += x.length; });
+  const big = JSON.parse(pako.ungzip(all, { to: 'string' }));
+  const out = Object.assign({}, r, { db: big.db || [], drillProgress: big.drillProgress || {}, drillQa: big.drillQa || {} });
+  delete out.parts; delete out.partsLen; delete out.dbFormat;
+  return out;
+}
+// 普通に読む（分けた部分が途中で書きかわっていたら、少し待って3回まで読み直す）
+async function readCloudDocFull(raw) {
+  for (let k = 0; ; k++) {
+    try { return await decodeCloudDocFull(raw, i => withTimeout(cloudPartRef(i).get(), 25000, 'クラウドからの読み込み')); }
+    catch (e) {
+      if (e.code !== 'parts_mismatch' || k >= 2) throw e;
+      await new Promise(r => setTimeout(r, 1200));
+      const sn = await withTimeout(userDocRef().get(), 25000, 'クラウドからの読み込み'); raw = sn.data() || {};
+    }
+  }
 }
 // クラウドのドキュメントを読み、圧縮されたカード一覧を元に戻す（旧形式の db もそのまま読める）
 function decodeCloudDoc(r) {
@@ -457,12 +495,15 @@ function reportCloudSaveError(err) {
     setSyncStatus('error', '⚠️ 容量オーバーで保存できません');
     if (!_tooLargeWarned) {
       _tooLargeWarned = true;
-      alert(`⚠️ データが大きすぎてクラウドに保存できません（約${Math.round(err.size / 1024)}KB / 上限 約1MB）。\n\nカードに添付した画像が容量の大部分を占めていることが多いです。画像付きのカードを減らすか、不要なカードを削除してください。\n（この端末には保存されています）`);
+      alert(`⚠️ データが大きすぎてクラウドに保存できません（圧縮して約${Math.round(err.size / 1024)}KB / 上限 約8MB）。\n\nカードに添付した画像が容量の大部分を占めていることが多いです。画像付きのカードを減らすか、不要なカードを削除してください。\n（この端末には保存されています）`);
     }
   } else {
     setSyncStatus('error', `⚠️ 保存エラー: ${err && (err.code || err.message) || ''}`.slice(0, 60));
+    // ★【0.04.64】分けて置く場所（parts）は Firestore のルールに足してある。ルールを公開し直していないと書けない
+    if (err && err.code === 'permission-denied' && !_partsRuleWarned) { _partsRuleWarned = true; alert('⚠️ クラウドに保存できませんでした（権限がありません）。\nデータが1MBを超えたので、分けて保存する場所を使います。管理者の方は、Firebase のコンソールで Firestore のルール（docs/firestore.rules）を公開し直してください。\n（この端末には保存されています）'); }
   }
 }
+let _partsRuleWarned = false;
 
 let _cloudSaving = false, _cloudSaveAgain = false;
 function newWriteId() {
@@ -481,20 +522,25 @@ async function backgroundCloudSave() {
     let writeId = null, merged = false;
     await firestore.runTransaction(async tx => {
       const snap = await tx.get(ref);
+      let prevParts = 0;
       if (snap.exists) {
         // 自分が最後に書いた内容のままなら、展開（重い）せずにそのまま上書きする
         const raw = snap.data() || {};
-        if (!raw.writeId || (raw.writeId !== _lastSeenWriteId && !_myWriteIds.includes(raw.writeId))) { mergeIntoLocal(decodeCloudDoc(raw)); merged = true; }
+        prevParts = raw.dbFormat === 'parts-v1' ? Number(raw.parts) || 0 : 0;
+        if (!raw.writeId || (raw.writeId !== _lastSeenWriteId && !_myWriteIds.includes(raw.writeId))) { mergeIntoLocal(await decodeCloudDocFull(raw, i => tx.get(cloudPartRef(i)))); merged = true; }
       }
       writeId = newWriteId();
-      // undefined を含むとFirestoreが拒否するので、JSONを通して取り除く。カード一覧は圧縮する
+      // undefined を含むとFirestoreが拒否するので、JSONを通して取り除く。カード一覧は圧縮する（大きいときは分ける）
       const body = encodeCloudBody(buildSyncPayload());
+      const parts = body._parts || [];
       tx.set(ref, {
         ...body,
         version: typeof APP_VERSION !== 'undefined' ? APP_VERSION : "unknown",
         writer: DEVICE_ID, writeId,
         lastSync: firebase.firestore.FieldValue.serverTimestamp()
       });
+      parts.forEach((u8, i) => tx.set(cloudPartRef(i), { d: firebase.firestore.Blob.fromUint8Array(u8), writeId, i, n: parts.length }));
+      for (let i = parts.length; i < prevParts; i++) tx.delete(cloudPartRef(i)); // 前より少なくなった分を消す
     });
     _lastSeenWriteId = writeId;
     if (merged) refreshVisibleViews(true);
@@ -678,13 +724,14 @@ function refreshVisibleViews(contentChanged = true) {
 function startCloudListener() {
   if (!currentUser) return;
   if (cloudUnsubscribe) { cloudUnsubscribe(); cloudUnsubscribe = null; }
-  cloudUnsubscribe = userDocRef().onSnapshot(snap => {
+  cloudUnsubscribe = userDocRef().onSnapshot(async snap => {
     if (!snap.exists || (snap.metadata && snap.metadata.hasPendingWrites)) return;
     const raw = snap.data() || {};
     if (raw.writeId && (_myWriteIds.includes(raw.writeId) || raw.writeId === _lastSeenWriteId)) return;
     let r;
-    try { r = decodeCloudDoc(raw); } catch (e) { console.warn(e); setSyncStatus('error', '⚠️ 同期データを読めませんでした'); return; }
-    _lastSeenWriteId = raw.writeId || null;
+    try { r = await readCloudDocFull(raw); } catch (e) { console.warn(e); setSyncStatus('error', '⚠️ 同期データを読めませんでした'); return; }
+    if (r.writeId && (r.writeId === _lastSeenWriteId || _myWriteIds.includes(r.writeId))) return; // 読み直したら自分の書いたものだった
+    _lastSeenWriteId = r.writeId || raw.writeId || null;
     applyCloudState(r);
   }, err => { console.warn('クラウド監視エラー:', err); cloudReady = false; cloudUnsubscribe = null; });
 }
@@ -904,7 +951,7 @@ async function syncToCloud(isSilent = false) {
     const merging = _accountMergePending;
     const mergeInfo = { cards: db.length, cloudCards: 0 };
     if (snap.exists) {
-      let r = decodeCloudDoc(snap.data() || {});
+      let r = await readCloudDocFull(snap.data() || {}); // ★【0.04.64】分けて置いたデータも
       _lastSeenWriteId = r.writeId || null;
       if (merging) { mergeInfo.cloudCards = (r.db || []).length; r = prepareAccountMerge(r); }
       applyCloudState(r, { forcePush: true });
