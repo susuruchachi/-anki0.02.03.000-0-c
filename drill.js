@@ -110,12 +110,16 @@ function drillSplitAll(b) { return b.flatMap(x => String(x.t).split('，').map(t
 // クイズからも使う（暗記テストをしていないときは、この画面だけのまとめ）
 const _drillSpQuiz = {};
 function drillSpMap() { return DS && DS.sp ? DS.sp : _drillSpQuiz; }
+// ★【0.04.70】AI が意味を分けるときに、訳の字を変えたり（称賛 → 賞賛）、落としたり、足したりしていないか。
+//  変わっていると、単語帳どおりに答えても単語帳の訳と同じだと分からず、AI の採点に回って×になることがあった
+function drillWordsKey(list) { return list.flatMap(t => String(t).split(/[，,]/)).map(w => w.trim()).filter(Boolean).sort().join('|'); }
 async function drillGroupSenses(it) {
   if (drillSpMap()[it.id]) return drillSpMap()[it.id];
   const cache = drillLoadSenseCache(), c = cache[it.id];
-  // 前の版で「名」「自」を意味の1つとして保存したまとめは使わない
-  if (c && c.a === it.m && Array.isArray(c.s) && !c.s.some(x => /^(名|他|自|形|副|前|接|動|代|助|句)$/.test(String(x.t || '').trim()))) return (drillSpMap()[it.id] = c.s);
   const b = drillSenses(it), cm = b.filter(x => /[，,]/.test(x.t));
+  // 前の版で「名」「自」を意味の1つとして保存したまとめ・訳の字が単語帳と違うまとめは使わない
+  if (c && c.a === it.m && Array.isArray(c.s) && !c.s.some(x => /^(名|他|自|形|副|前|接|動|代|助|句)$/.test(String(x.t || '').trim()))
+    && drillWordsKey(c.s.map(x => x.t)) === drillWordsKey(b.map(x => x.t))) return (drillSpMap()[it.id] = c.s);
   if (!cm.length) return (drillSpMap()[it.id] = b);
   if (!drillAiOk()) return (drillSpMap()[it.id] = drillSplitAll(b));
   try {
@@ -124,7 +128,8 @@ async function drillGroupSenses(it) {
     b.forEach(x => {
       if (!cm.includes(x)) { out.push(x); return; }
       const gr = r.r && r.r[k++];
-      if (Array.isArray(gr) && gr.length && gr.every(Array.isArray)) gr.forEach(g => out.push({ p: x.p, c: x.c, t: g.join('，') }));
+      // 分けた訳の字が、もとの訳とそっくり同じときだけ使う（違えば、分けずにそのまま）
+      if (Array.isArray(gr) && gr.length && gr.every(Array.isArray) && drillWordsKey(gr.map(g => g.join('，'))) === drillWordsKey([x.t])) gr.forEach(g => out.push({ p: x.p, c: x.c, t: g.join('，') }));
       else out.push(x);
     });
     drillSpMap()[it.id] = out;
