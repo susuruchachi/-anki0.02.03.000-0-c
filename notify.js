@@ -361,15 +361,16 @@ function versionNewer(a, b) {
 async function checkForAppUpdate() {
   if (typeof APP_VERSION === 'undefined' || navigator.onLine === false) return;
   try {
-    const txt = await (await fetch('./version-info.js?t=' + Date.now(), { cache: 'no-store' })).text();
+    const res = await fetch('./version-info.js?t=' + Date.now(), { cache: 'no-store' }), txt = await res.text();
     const v = (txt.match(/APP_VERSION\s*=\s*["']([^"']+)["']/) || [])[1];
     if (!v || !versionNewer(v, APP_VERSION)) return;
-    if (_updateFound && _updateFound.version === v) { showUpdateBar(); maybeAutoUpdate(); return; }
+    if (_updateFound && _updateFound.version === v) { showUpdateBar(); if (_updateFound.ready) maybeAutoUpdate(); else pollUpdateReady(); return; }
+    const lm = Date.parse(res.headers.get('last-modified') || '') || 0;
     let title = '';
     try { const rn = await (await fetch('./release-notes.js?t=' + Date.now(), { cache: 'no-store' })).text(); const m = rn.match(new RegExp(`version:\\s*'${v.replace(/\./g, '\\.')}'[\\s\\S]*?title:\\s*'([^']*)'`)); if (m) title = m[1]; } catch (e) {}
-    _updateFound = { version: v, title };
+    _updateFound = { version: v, title, lm, ready: false };
     showUpdateBar();
-    maybeAutoUpdate();
+    pollUpdateReady();
     // 裏にいるときは通知でも（プッシュ通知・バックグラウンド確認と同じバージョンを二重に出さない）
     const notified = typeof notifyKvGet === 'function' ? await notifyKvGet('notifiedVersion') : null;
     if (notified !== v && document.visibilityState !== 'visible' && getNotifyPrefs().updates && notifPerm() === 'granted') {
@@ -378,11 +379,49 @@ async function checkForAppUpdate() {
     }
   } catch (e) { /* オフラインなど */ }
 }
+// ★【0.04.67】GitHub Pages の配信（CDN）は、URL の「?…」を見ずに、ファイルを1つずつ最大10分おぼえている（cache-control: max-age=600）。
+//  そのため、新しいバージョンが出てすぐは、version-info.js だけ新しくて、ほかのファイル（index.html・〇〇.js）がまだ古いことがあり、
+//  ?upd を付けて読み込み直しても古いまま →「まだ届いていません」が続いていた。
+//  公開したときに、どのファイルも「最後に変わった時刻」（Last-Modified）がそろうので、アプリのファイルが全部 version-info.js と
+//  同じころの時刻になってから（＝配信に新しいものが行き渡ってから）読み込み直す。行き渡るまでは「準備中」と出して、自動で待つ
+function updateFileList() {
+  const set = new Set(['./', './index.html', './sw.js', './version-info.js', './release-notes.js']);
+  document.querySelectorAll('script[src]').forEach(sc => { try { const u = new URL(sc.getAttribute('src'), location.href); if (u.origin === location.origin) set.add(u.pathname); } catch (e) {} });
+  return [...set];
+}
+async function updateFileStamp(f) {
+  try { const r = await fetch(f, { method: 'HEAD', cache: 'no-store' }); if (!r.ok) return -1; return Date.parse(r.headers.get('last-modified') || '') || 0; }
+  catch (e) { return -1; }
+}
+let _updatePollTimer = null;
+async function pollUpdateReady() {
+  clearTimeout(_updatePollTimer);
+  const f = _updateFound; if (!f || f.ready) return;
+  let ready = false;
+  if (!f.lm || Date.now() > f.lm + 12 * 60000) ready = true; // 時刻が分からない・公開から12分たった（どの配信も新しくなっている）
+  else {
+    const st = await Promise.all(updateFileList().map(updateFileStamp));
+    ready = st.every(t => t === 0 || (t > 0 && t >= f.lm - 120000));
+  }
+  if (_updateFound !== f) return;
+  if (ready) {
+    f.ready = true; showUpdateBar();
+    if (f.want) applyAppUpdate(); else maybeAutoUpdate();
+  } else { showUpdateBar(); _updatePollTimer = setTimeout(pollUpdateReady, 20000); }
+}
 function showUpdateBar() {
   if (!_updateFound || _updateDismissed === _updateFound.version) return;
   let bar = document.getElementById('updateBar');
   if (!bar) { bar = document.createElement('div'); bar.id = 'updateBar'; bar.className = 'update-bar'; document.body.appendChild(bar); }
   const busy = document.body.classList.contains('in-quiz') || (typeof _drillActive !== 'undefined' && _drillActive);
+  if (!_updateFound.ready) {
+    const mins = _updateFound.lm ? Math.max(1, Math.ceil((_updateFound.lm + 11 * 60000 - Date.now()) / 60000)) : 0;
+    bar.innerHTML = `<div style="flex:1; min-width:0;"><b>🆕 新しいバージョン v${escapeHtml(_updateFound.version)} を準備しています</b>
+        <div class="hint-small">配信に新しいファイルが行き渡るのを待っています${mins ? `（長くてもあと${mins}分ほど）` : ''}。準備ができたら${_updateFound.want ? '自動で読み込み直します' : 'お知らせします（遊んでいないときは自動で新しくなります）'}。</div></div>
+      <div style="display:flex; gap:6px; flex-shrink:0;">${_updateFound.want ? '' : '<button class="btn btn-primary" style="width:auto; padding:6px 12px;" onclick="applyAppUpdate()">準備できたら更新</button>'}<button class="btn btn-secondary" style="width:auto; padding:6px 10px;" onclick="dismissUpdateBar()">あとで</button></div>`;
+    bar.style.display = 'flex';
+    return;
+  }
   bar.innerHTML = `<div style="flex:1; min-width:0;"><b>🆕 新しいバージョン v${escapeHtml(_updateFound.version)} があります</b>
       <div class="hint-small">${_updateFound.title ? escapeHtml(_updateFound.title) + '。' : ''}再読み込みすると新しくなります（クイズ・対戦・暗記テストが終わってホームなどに戻ると、自動で新しくなります）${busy ? '（クイズ中の問題は最初からになります。暗記テストの途中経過は保存されます）' : ''}</div></div>
     <div style="display:flex; gap:6px; flex-shrink:0;"><button class="btn btn-primary" style="width:auto; padding:6px 12px;" onclick="applyAppUpdate()">🔄 再読み込み</button><button class="btn btn-secondary" style="width:auto; padding:6px 10px;" onclick="dismissUpdateBar()">あとで</button></div>`;
@@ -404,7 +443,7 @@ function appIdleForUpdate(ignoreVisible) { // ★【0.04.24】ignoreVisible：�
   return !!ignoreVisible || document.visibilityState === 'visible';
 }
 function maybeAutoUpdate() {
-  if (!_updateFound || _autoUpdating || !appIdleForUpdate()) return;
+  if (!_updateFound || !_updateFound.ready || _autoUpdating || !appIdleForUpdate()) return;
   _autoUpdating = true;
   if (typeof showAppToast === 'function') showAppToast(`🆕 新しいバージョン v${_updateFound.version} に更新します…`);
   setTimeout(() => { if (appIdleForUpdate()) applyAppUpdate(); else _autoUpdating = false; }, 1500);
@@ -412,6 +451,8 @@ function maybeAutoUpdate() {
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') setTimeout(maybeAutoUpdate, 800); });
 function dismissUpdateBar() { if (_updateFound) _updateDismissed = _updateFound.version; const bar = document.getElementById('updateBar'); if (bar) bar.style.display = 'none'; }
 async function applyAppUpdate() {
+  // ★【0.04.67】配信に行き渡る前なら、行き渡ってから（「準備できたら更新」）
+  if (_updateFound && !_updateFound.ready) { _updateFound.want = true; showUpdateBar(); pollUpdateReady(); return; }
   try { if (typeof drillSave === 'function' && typeof _drillActive !== 'undefined' && _drillActive) drillSave(); } catch (e) {}
   try { if (typeof flushPendingSaves === 'function') flushPendingSaves(); } catch (e) {}
   const bar = document.getElementById('updateBar'); if (bar) bar.innerHTML = '<div style="flex:1;"><b>🔄 新しいバージョンを読み込んでいます…</b></div>';
@@ -445,8 +486,10 @@ async function applyAppUpdate() {
     const u = new URL(location.href); u.searchParams.delete('upd'); history.replaceState(history.state, '', u.pathname + u.search + u.hash);
     let n = 0; try { n = Number(sessionStorage.getItem('susuru_upd_try') || 0); } catch (e) {}
     if (typeof APP_VERSION !== 'undefined' && versionNewer(want, APP_VERSION) && n < 3) {
-      if (typeof showAppToast === 'function') showAppToast(`🔄 新しいバージョン v${want} がまだ届いていません。少し待って、もう一度読み込みます…`);
-      setTimeout(() => { if (appIdleForUpdate()) { try { sessionStorage.setItem('susuru_upd_try', String(n + 1)); } catch (e) {} const v = new URL(location.href); v.searchParams.set('upd', want); location.replace(v.href); } }, 20000);
+      if (typeof showAppToast === 'function') showAppToast(`🔄 新しいバージョン v${want} の配信を待っています。行き渡ったら自動で読み込み直します…`);
+      try { sessionStorage.setItem('susuru_upd_try', String(n + 1)); } catch (e) {}
+      // ★【0.04.67】やみくもに20秒後ではなく、ファイルが全部新しくなるのを待ってから
+      setTimeout(async () => { await checkForAppUpdate(); if (_updateFound) { _updateFound.want = true; pollUpdateReady(); } }, 1500);
     } else { try { sessionStorage.removeItem('susuru_upd_try'); } catch (e) {} }
   });
 })();
