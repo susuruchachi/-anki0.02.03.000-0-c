@@ -715,6 +715,7 @@ async function drillJudge(v) {
     dst.sn = dst.sn || await drillGetSn(it);
     const res = await drillJudgeCore(it, dst.sn, dst, v);
     dlock = false;
+    if ((res.status === 'repeat' || res.status === 'more') && typeof sfxPlay === 'function') sfxPlay('retry'); // ★【0.04.71】聞き直す：ブッブッ
     if (res.status === 'repeat') { dst.ans.pop(); dst.msg = 'その意味はもう答えました。他の意味を答えてください。'; dst.ph = 0; drillDraw(); return; }
     if (res.status === 'wrong') { dst.tip = res.tip; return drillFin(false); }
     if (res.status === 'more') { dst.msg = res.msg; dst.ph = 0; drillDraw(); return; }
@@ -914,6 +915,7 @@ function drillRecord(card, ok) {
 }
 async function drillFin(ok, ans, tip) {
   if (dst.fl) return; dst.fl = 1;
+  if (typeof sfxPlay === 'function') sfxPlay(ok ? 'ok' : 'ng'); // ★【0.04.71】🔔 効果音
   const c = dcur, k = dKey(c);
   drillRecord(c.it ? c.it.card : c.ck.card, ok);
   if (DS.r === 1 && c.it && Number(c.it.card.no) > (DS.mx || 0)) DS.mx = Number(c.it.card.no); // ★【0.04.08】1周目に、どの番号まで進んだか

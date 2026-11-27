@@ -1373,7 +1373,7 @@ function aiFirstHint(r) { const x = r && r.results && r.results.find(y => !y.cor
 // 1回の解答の結果を決める（重点モードなら、間違いのときは答え直しへ）
 function concludeAttempt(cur, ok, info) {
   const attempt = _focus.attempts + 1;
-  if (!ok && focusEnabled(cur) && _focus.attempts < FOCUS_MAX_RETRY) { startFocusRetry(cur, info); return; }
+  if (!ok && focusEnabled(cur) && _focus.attempts < FOCUS_MAX_RETRY) { if (typeof sfxPlay === 'function') sfxPlay('retry'); startFocusRetry(cur, info); return; } // ★【0.04.71】答え直し：ブッブッ
   const fs = document.getElementById('lblFocusStatus'); if (fs) fs.style.display = 'none';
   // 普通のモードでも、AI が出した「答え直すためのヒント」は覚えておく
   if (!ok && info.hint && typeof rememberAiHint === 'function') rememberAiHint(cur, info.kind, info.given, info.hint);
@@ -1456,6 +1456,7 @@ function startAiPartialReask(cur, given, aiSaidCorrect, r) {
   return true;
 }
 function askOtherMeanings(cur, mt, again) {
+  if (typeof sfxPlay === 'function') sfxPlay('retry'); // ★【0.04.71】ほかの意味を聞き直す：ブッブッ
   const left = Math.max(1, mt.meanings.length - _multi.found.length - _multi.aiGiven.length);
   const st = document.getElementById('lblFocusStatus');
   if (st) {
@@ -1776,6 +1777,7 @@ function evaluateRoundAnswer(isCorrect, head, opts = {}) {
   const prevCombo = currentCombo, prevToday = todayCorrectCount;
   if (regrade) recordDailyLogAdjust(isCorrect ? 1 : -1);
   
+  if (!isPass && !regrade && typeof sfxPlay === 'function') sfxPlay(isCorrect ? 'ok' : 'ng'); // ★【0.04.71】🔔 効果音
   if (isPass) {
     // 成績・コンボ・連続記録はそのまま
   } else if(isCorrect) {

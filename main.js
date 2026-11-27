@@ -13,6 +13,7 @@ window.onload = async function() {
   // 成績共有設定をUIに反映
   const chkShareStats = document.getElementById('chkShareStats');
   if(chkShareStats) chkShareStats.checked = shareStats;
+  const chkSfx = document.getElementById('chkSfx'); if (chkSfx && typeof sfxOn === 'function') chkSfx.checked = sfxOn(); // ★【0.04.71】
   
   // ★ 管理者UI表示の初期化
   if (typeof updateAdminUIVisibility === 'function') updateAdminUIVisibility();

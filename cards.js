@@ -146,6 +146,7 @@ function fcKnow() {
   if (!fc || !fc.cur || fc.cur.mode !== 'flip') return;
   const id = fc.cur.u.id, p = fcProg(id);
   fcSetProg(id, { k: Math.min(FC_KNOW, (p.k || 0) + 1) });
+  if (typeof sfxPlay === 'function') sfxPlay('ok'); // ★【0.04.71】わかる：ピンポーン
   fcMark();
   fcFly('right', fcNext);
 }
@@ -154,6 +155,7 @@ function fcDont() {
   if (!fc || !fc.cur || fc.cur.mode !== 'flip') return;
   const id = fc.cur.u.id, p = fcProg(id);
   fcSetProg(id, { d: (p.d || 0) + 1 });
+  if (typeof sfxPlay === 'function') sfxPlay('ng'); // ★【0.04.71】わからない：ブッブー
   fc.queue.push(id);
   fcMark();
   fcFly('left', fcNext);
@@ -217,6 +219,7 @@ async function fcTestSubmit(choice) {
         : res.form ? '意味は合っていますが、品詞（語尾）の形がちがいます。形を直して、もう一度答えてください。'
         : `${res.msg || ''}${got.length ? `ほかの意味もあります（あと${left}つ）。` : 'もう一度答えてください。'}`;
       fc.cur.msg = `${got.length ? '⭕ ' + got.join('、') + '　' : ''}${why}`;
+      if (typeof sfxPlay === 'function') sfxPlay('retry'); // ★【0.04.71】聞き直す：ブッブッ
       fcDraw(); const i2 = document.getElementById('fcAns'); if (i2) { i2.value = ''; i2.focus(); }
       return;
     }
@@ -225,6 +228,7 @@ async function fcTestSubmit(choice) {
     if (!ok && res.tip) fc.cur.tip = res.tip;
   }
   fc.cur.done = true; fc.cur.ok = ok;
+  if (typeof sfxPlay === 'function') sfxPlay(ok ? 'ok' : 'ng'); // ★【0.04.71】🔔 効果音
   if (ok) fcSetProg(u.id, { p: true, k: FC_KNOW });
   else { const p = fcProg(u.id); fcSetProg(u.id, { k: 0, d: (p.d || 0) + 2 }); fc.queue.push(u.id); }
   fcMark();
