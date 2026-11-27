@@ -432,10 +432,12 @@ function studyCSVBuild(p, root, opt) {
   // フォルダー名：使えない名前を直し、今あるフォルダー（または今回の別の場所）とぶつかるときは「名前（親）」に
   const fixed = {}, planned = {};
   const fixName = n => (invalidCategoryName(n) ? n.replace(/>/g, '＞').replace(/^__|__$/g, '_').slice(0, 100) : n) || '未分類';
-  const rootName = fixName(root);
+  // ★【0.04.63】親は「河合英語サブテキ>文法」のように「>」で何段でも（いちばん上はそのまま使う）
+  const rootParts = String(root || '').split('>').map(t => t.trim()).filter(Boolean);
+  const rootName = fixName(rootParts[0] || '未分類');
   items.forEach(x => {
     const path = [rootName]; let parent = rootName;
-    x.parts.forEach(raw => {
+    [...rootParts.slice(1), ...x.parts].forEach(raw => {
       const key = parent + '\u0000' + raw;
       if (!fixed[key]) {
         let name = fixName(raw), k = 1;
@@ -471,29 +473,103 @@ function studyCSVBuild(p, root, opt) {
     if (stars) starN++; if (kind === '自己申告') selfN++; if (kind === '例文') clozeN++;
     rows.push([x.q, x.a, x.path, x.no, memo.join('\n'), kind, stars ? '★'.repeat(stars) : '']);
   });
-  return { rows, count: items.length, folders: Object.keys(byPath).length, starN, selfN, clozeN, rootName };
+  return { rows, items, count: items.length, folders: Object.keys(byPath).length, starN, selfN, clozeN, rootName };
+}
+// ★【0.04.63】前に「今までのCSVの取り込み方」で入れてしまったカードを探す
+//  今までの取り込み方では、3列目（補足）がフォルダーとして読まれ、補足ごとにフォルダーができていた（補足が空なら「未分類」）。
+//  問題と答えが同じで、その「補足のフォルダー」にあるカードだけを、正しいフォルダーへ移す（成績はそのまま）。
+//  見出しの行（#columns:…）から1枚だけできたカードは消す。移したあと空になった「補足のフォルダー」は片づける（未分類は残す）
+function studyCSVOldParts(note) {
+  const parts = String(note || '').split('>').map(t => t.trim()).filter(t => t !== '');
+  if (!parts.length) parts.push('未分類');
+  return parts.map(t => invalidCategoryName(t) ? t.replace(/^__|__$/g, '_').slice(0, 100) : t);
+}
+function studyCSVFindOld(items) {
+  const used = new Set(), moves = [], oldCats = new Set();
+  const ro = d => d.sharedDocId && getSharedAccess(d.sharedDocId).readOnly;
+  const byKey = new Map();
+  db.forEach(d => { const k = `${d.category}\u0000${String(d.question).trim()}\u0000${String(d.answer).trim()}`; if (!byKey.has(k)) byKey.set(k, []); byKey.get(k).push(d); });
+  items.forEach(x => {
+    const parts = studyCSVOldParts(x.note);
+    const oldCat = parts[parts.length - 1];
+    const leaf = x.path.split('>').pop();
+    if (oldCat === leaf) return;
+    const list = byKey.get(`${oldCat}\u0000${x.q}\u0000${x.a}`) || [];
+    const d = list.find(c => !used.has(c.id) && !ro(c));
+    if (!d) return;
+    used.add(d.id); moves.push({ card: d, path: x.path });
+    parts.forEach(t => oldCats.add(t));
+  });
+  const junk = db.filter(d => /^#\s*columns\s*:/i.test(String(d.question)) && !ro(d));
+  junk.forEach(d => oldCats.add(d.category));
+  oldCats.delete('未分類');
+  // 片づけられるフォルダー（移す・消すカードしか入っていない／中のフォルダーも片づけられる）
+  const leaving = new Set([...moves.map(m => m.card.id), ...junk.map(d => d.id)]);
+  const planned = new Set(); items.forEach(x => x.path.split('>').forEach(t => planned.add(t)));
+  const canGo = new Set();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    oldCats.forEach(c => {
+      if (canGo.has(c) || planned.has(c) || !categories.includes(c)) return;
+      if (db.some(d => d.category === c && !leaving.has(d.id))) return;
+      if ((categoryTree[c] || []).some(ch => !canGo.has(ch))) return;
+      canGo.add(c); changed = true;
+    });
+  }
+  return { moves, junk, folders: [...canGo] };
+}
+function studyCSVApplyOld(old) {
+  old.moves.forEach(m => { m.card.category = ensureCategoryPath(m.path); touchCard(m.card); });
+  if (old.junk.length) { const ids = new Set(old.junk.map(d => d.id)); tombstoneCards([...ids]); db = db.filter(d => !ids.has(d.id)); }
+  const del = old.folders.filter(c => !db.some(d => d.category === c));
+  if (del.length) {
+    const ds = new Set(del);
+    categories = categories.filter(c => !ds.has(c));
+    for (const k in categoryTree) { if (ds.has(k)) delete categoryTree[k]; else if (categoryTree[k]) categoryTree[k] = categoryTree[k].filter(c => !ds.has(c)); }
+    markCatsDeleted(del);
+  }
+  return del.length;
 }
 function studyCSVImportAsk(text, fileName) {
   let p;
   try { p = studyCSVParse(text); } catch (err) { console.error(err); alert('CSV解析に失敗しました。'); return; }
   if (p.idx.q === -1 || p.idx.a === -1) { alert('「問題」と「解答（答え）」の列が見つかりませんでした。'); return; }
-  const base = String(fileName || '').replace(/\.(csv|tsv|txt)$/i, '').trim() || '暗記問題';
-  const root = (prompt('📚 章つきの暗記問題CSVです。\n入れる親のフォルダーの名前（この下に章ごとのフォルダーを作ります。同じ名前のフォルダーがあれば、その中に入れて、同じ問題は増やさずに更新できます）', base) || '').trim();
+  // ★【0.04.63】CSV に「#deck:河合英語サブテキ::文法」があれば、それを親のフォルダーにする（「::」は「>」）
+  const deck = String(p.dir.deck || '').split('::').map(t => t.trim()).filter(Boolean).join('>');
+  const base = deck || String(fileName || '').replace(/\.(csv|tsv|txt)$/i, '').trim() || '暗記問題';
+  const root = (prompt('📚 章つきの暗記問題CSVです。\n入れる親のフォルダー（この下に章ごとのフォルダーを作ります。「河合英語サブテキ>文法」のように「>」で区切ると何段でも。同じ名前のフォルダーがあれば、その中に入れて、同じ問題は増やさずに更新できます）', base) || '').trim();
   if (!root) return;
-  const bad = invalidCategoryName(root); if (bad) { alert(bad); return; }
+  const rp = root.split('>').map(t => t.trim()).filter(Boolean);
+  if (!rp.length) return;
+  for (const t of rp) { const bad = invalidCategoryName(t); if (bad) { alert(bad); return; } }
   const go = opt => {
     const b = studyCSVBuild(p, root, opt);
     if (!b.count) { alert('問題と解答のそろった行がありませんでした。'); return; }
+    const old = studyCSVFindOld(b.items);
+    if (old.moves.length || old.junk.length) {
+      // 前に入れたカードを移してから、番号・メモ・★・形式を付け直す（成績はそのまま。元に戻せるように復元ポイントを作る）
+      takeSnapshot('暗記問題CSVの取り込み（前に入れたカードの整理）');
+      const removed = studyCSVApplyOld(old);
+      let plan;
+      try { plan = planCSVImport(b.rows); } catch (err) { console.error(err); alert('CSV解析に失敗しました。'); return; }
+      applyCSVImport(plan, true);
+      if (typeof afterCategoryChange === 'function') { try { afterCategoryChange(); } catch (e) {} }
+      alert(`🧹 前に取り込んだカード ${old.moves.length}枚を「${rp[0]}」の中の章ごとのフォルダーへ移しました（成績はそのまま）。\n空になったフォルダー ${removed}個を片づけました${old.junk.length ? `\n見出しの行からできたカード ${old.junk.length}枚を消しました` : ''}。\n（元に戻すときは、設定の「🛟 復元ポイント」から）`);
+      return;
+    }
     let plan;
     try { plan = planCSVImport(b.rows); } catch (err) { console.error(err); alert('CSV解析に失敗しました。'); return; }
     csvApplyPlanAsk(plan, `章つきCSV（${b.count}問・${b.folders}フォルダー）`);
   };
   const pre = studyCSVBuild(p, root, { stars: true, self: true });
+  const preOld = studyCSVFindOld(pre.items);
   const opt = (title, t) => `<span style="display:block; text-align:left;">${title}<br><span style="font-size:0.75rem; color:var(--text3);">${t}</span></span>`;
+  const oldMsg = preOld.moves.length || preOld.junk.length ? `<br>🧹 前に取り込んだカード ${preOld.moves.length}枚を見つけました。成績はそのままで章ごとのフォルダーへ移し、空になるフォルダー ${preOld.folders.length}個を片づけます` : '';
   openContextMenu(`📚 ${root}：${pre.count}問を ${pre.folders}個のフォルダーへ`, [
-    { html: opt('✅ おすすめで取り込む', `印を★に（超頻出!★★★・頻出!/◆★★・＊★）：${pre.starN}問／長い答え（41字以上・改行あり）は自己申告：${pre.selfN}問／例文空所は形式「例文」：${pre.clozeN}問。補足・小見出し・タグはメモに入ります`), action: () => go({ stars: true, self: true }) },
-    { html: opt('★を付けずに取り込む', '印はメモにだけ残します'), action: () => go({ stars: false, self: true }) },
-    { html: opt('自己申告にせずに取り込む', '長い答えも、記述・4択などふつうに答えます（AI の意味で採点が使えます）'), action: () => go({ stars: true, self: false }) },
+    { html: opt('✅ おすすめで取り込む', `印を★に（超頻出!★★★・頻出!/◆★★・＊★）：${pre.starN}問／長い答え（41字以上・改行あり）は自己申告：${pre.selfN}問／例文空所は形式「例文」：${pre.clozeN}問。補足・小見出し・タグはメモに入ります${oldMsg}`), action: () => go({ stars: true, self: true }) },
+    { html: opt('★を付けずに取り込む', `印はメモにだけ残します${oldMsg}`), action: () => go({ stars: false, self: true }) },
+    { html: opt('自己申告にせずに取り込む', `長い答えも、記述・4択などふつうに答えます（AI の意味で採点が使えます）${oldMsg}`), action: () => go({ stars: true, self: false }) },
     { type: 'separator' },
     { html: 'キャンセル', action: () => {} }
   ]);
