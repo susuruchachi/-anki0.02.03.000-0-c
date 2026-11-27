@@ -556,5 +556,5 @@ function gameInit() {
   renderGameBar();
   setTimeout(() => gameLoadLeague().then(renderGameBar).catch(() => {}), 4000); // 先週のごほうびを受け取る
 }
-window.addEventListener('load', () => setTimeout(gameInit, 1500));
+window.addEventListener('load', () => dataLoaded.then(() => setTimeout(gameInit, 1500)));
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') setTimeout(() => { try { gameUseShields(); } catch (e) {} renderGameBar(); }, 800); });

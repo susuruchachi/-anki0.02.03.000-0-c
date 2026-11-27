@@ -850,7 +850,7 @@ function calCopySub(id) {
   const c = JSON.parse(JSON.stringify(e)); delete c.sub; delete c.id; delete c.gid;
   calEditor(Object.assign(c, { id: '', gid: '' }));
 }
-window.addEventListener('load', () => setTimeout(() => { try { renderCalHome(); } catch (e) {} }, 1500));
+window.addEventListener('load', () => dataLoaded.then(() => setTimeout(() => { try { renderCalHome(); } catch (e) {} }, 1500)));
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') setTimeout(() => calSubRefresh(false), 2000); });
 
 // ================================================================
