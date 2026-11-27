@@ -59,7 +59,10 @@ final class LauncherController: UIViewController {
             for a in MiniApp.allCases { _ = self?.web(a) }
         }
         NotificationCenter.default.addObserver(self, selector: #selector(becameActive), name: UIApplication.didBecomeActiveNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(wentBackground), name: UIApplication.didEnterBackgroundNotification, object: nil)
     }
+
+    @objc private func wentBackground() { UpdateNotifier.shared.schedule() } // ★【0.04.73】閉じたら、次に起こしてもらう分を頼む
 
     @objc private func becameActive() {
         KoukaiNotifier.shared.dataChanged() // 日付が変わっていたら、通知を入れ直す

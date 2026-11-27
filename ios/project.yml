@@ -35,6 +35,9 @@ targets:
         NSPhotoLibraryUsageDescription: 問題の画像を選ぶときに使います
         NSMicrophoneUsageDescription: 声で答えるときに使います
         ITSAppUsesNonExemptEncryption: false
+        # ★【0.04.73】アップデートのお知らせ：アプリを閉じていても、iOS が決めたときに少し起こしてもらう（UpdateNotifier）
+        UIBackgroundModes: [fetch]
+        BGTaskSchedulerPermittedIdentifiers: [io.github.susuruchachi.susuruanki.refresh]
         CFBundleURLTypes:
           - CFBundleURLName: io.github.susuruchachi.susuruanki
             CFBundleURLSchemes: [susuruanki]
