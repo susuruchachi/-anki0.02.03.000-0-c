@@ -296,7 +296,7 @@ async function pushSharedDocFromLocal(docId) {
       update.categoryTree = partialTree;
       if (rootCat !== data.catName) update.catName = rootCat;
     }
-    await ref.update(JSON.parse(JSON.stringify(update)));
+    await ref.update(JSON.parse(JSON.stringify(Object.assign(update, typeof sharedEditExtra === 'function' ? sharedEditExtra(data) : {})))); // ★【0.04.65】グループのメンバーとして直すとき
     if (data.isPublic) syncPublicIndex(docId, Object.assign({}, data, update));
     setSharedMeta(docId, rootCat, allRelated || data.categories || [], newCards.map(c => c.id), allRelated || data.categories || []);
   } catch (e) { console.warn('共有ドキュメントへの書き戻しに失敗:', e); }
@@ -329,7 +329,7 @@ async function updateCardInSharedDoc(docId, card, action) {
     } else if (action === 'add') {
        if (!newCards.some(c => c.id === card.id)) newCards.push(toSharedCard(card));
     }
-    await firestore.collection("susuru_anki_shared").doc(docId).update({ cards: JSON.parse(JSON.stringify(newCards)) });
+    await firestore.collection("susuru_anki_shared").doc(docId).update(Object.assign({ cards: JSON.parse(JSON.stringify(newCards)) }, typeof sharedEditExtra === 'function' ? sharedEditExtra(data) : {}));
   } catch(e) { console.error("Cloud update failed", e); }
 }
 // ★【0.03.38】まとめて削除（1回の書き込みで）
@@ -340,7 +340,7 @@ async function removeCardsFromSharedDoc(docId, ids) {
     const snap = await ref.get();
     if (!snap.exists) return;
     const set = new Set(ids);
-    await ref.update({ cards: JSON.parse(JSON.stringify((snap.data().cards || []).filter(c => !set.has(c.id)))) });
+    await ref.update(Object.assign({ cards: JSON.parse(JSON.stringify((snap.data().cards || []).filter(c => !set.has(c.id)))) }, typeof sharedEditExtra === 'function' ? sharedEditExtra(snap.data()) : {}));
   } catch (e) { console.error('Cloud update failed', e); }
 }
 // ★【0.03.02】まとめて追加（1枚ずつ同時に書き込むと、互いに上書きしてカードが消えることがあったため）
@@ -353,7 +353,7 @@ async function addCardsToSharedDoc(docId, cards) {
     const existing = snap.data().cards || [];
     const ids = new Set(existing.map(c => c.id));
     const added = cards.filter(c => !ids.has(c.id)).map(toSharedCard);
-    await ref.update({ cards: JSON.parse(JSON.stringify([...existing, ...added])) });
+    await ref.update(Object.assign({ cards: JSON.parse(JSON.stringify([...existing, ...added])) }, typeof sharedEditExtra === 'function' ? sharedEditExtra(snap.data()) : {}));
   } catch (e) { console.error("Cloud bulk add failed", e); }
 }
 
@@ -365,7 +365,7 @@ async function shareCategory(catName, opts = {}) {
   const allTargets = getAllSubcategories(catName); const subset = db.filter(q => allTargets.includes(q.category));
   let partialTree = {}; allTargets.forEach(t => { if(categoryTree[t]) partialTree[t] = categoryTree[t]; });
   try {
-    const docRef = await firestore.collection("susuru_anki_shared").add(JSON.parse(JSON.stringify({ catName: catName, cards: subset.map(toSharedCard), categories: allTargets, categoryTree: partialTree, ownerId: currentUser.uid, ownerName: currentUser.displayName || currentUser.email || '不明', friends: [], ...(opts.groupId ? { groupId: opts.groupId, groupName: opts.groupName || '' } : {}) })));
+    const docRef = await firestore.collection("susuru_anki_shared").add(JSON.parse(JSON.stringify({ catName: catName, cards: subset.map(toSharedCard), categories: allTargets, categoryTree: partialTree, ownerId: currentUser.uid, ownerName: currentUser.displayName || currentUser.email || '不明', friends: [], ...(opts.groupId ? { groupId: opts.groupId, groupIds: [opts.groupId], groupName: opts.groupName || '' } : {}) })));
     await docRef.update({ createdAt: firebase.firestore.FieldValue.serverTimestamp() }).catch(() => {});
     if (!opts.groupId) syncPublicIndex(docRef.id, { catName, cards: subset, ownerId: currentUser.uid, ownerName: currentUser.displayName || currentUser.email || '不明', isPublic: true, subscriberUids: [currentUser.uid] });
     
@@ -422,7 +422,7 @@ function renderSharedPage() {
   if (!currentSharedData) return; 
   const data = currentSharedData;
   document.getElementById('sharedTitle').innerText = `🌐 ${escapeHtml(data.catName)}`; 
-  document.getElementById('sharedOwnerName').innerText = (data.ownerName || '') + (data.groupId ? `（👪 グループ「${data.groupName || ''}」で共有）` : ''); 
+  document.getElementById('sharedOwnerName').innerText = (data.ownerName || '') + (typeof groupIdsOf === 'function' && groupIdsOf(data).length > 1 ? `（👪 ${groupIdsOf(data).length}つのグループで共有）` : data.groupId ? `（👪 グループ「${data.groupName || ''}」で共有）` : ''); 
   document.getElementById('sharedCardCount').innerText = (data.cards || []).length;
   const codeRow = document.getElementById('sharedCodeRow');
   if (codeRow) {
@@ -526,13 +526,13 @@ async function removeFriendFromShared(uid) {
 async function addCardToShared() {
   const q = document.getElementById('txtSharedNewQ').value.trim(), a = document.getElementById('txtSharedNewA').value.trim(); if (!q || !a) return;
   const newCard = { id: 'id_' + Math.random().toString(36).slice(2) + Date.now().toString(36), question: q, answer: a, category: currentSharedData.catName, level: 0, correct: 0, incorrect: 0, streak: 0, wrongStreak: 0, shikkariStreak: 0 };
-  try { await firestore.collection("susuru_anki_shared").doc(currentSharedDocId).update({ cards: [...currentSharedData.cards, newCard] }); document.getElementById('txtSharedNewQ').value = ''; document.getElementById('txtSharedNewA').value = ''; } catch(e) {}
+  try { await firestore.collection("susuru_anki_shared").doc(currentSharedDocId).update(Object.assign({ cards: [...currentSharedData.cards, newCard] }, typeof sharedEditExtra === 'function' ? sharedEditExtra(currentSharedData) : {})); document.getElementById('txtSharedNewQ').value = ''; document.getElementById('txtSharedNewA').value = ''; } catch(e) {}
 }
 async function deleteCardFromShared(idx) {
   if (!confirm("クラウド上から削除しますか？")) return;
   const newCards = [...currentSharedData.cards]; const removed = newCards.splice(idx, 1)[0];
   try {
-    await firestore.collection("susuru_anki_shared").doc(currentSharedDocId).update({ cards: newCards });
+    await firestore.collection("susuru_anki_shared").doc(currentSharedDocId).update(Object.assign({ cards: newCards }, typeof sharedEditExtra === 'function' ? sharedEditExtra(currentSharedData) : {}));
     // ★【0.03.02】手元のカードも削除の記録つきで消す（残っていると、次の同期で書き戻されていた）
     if (removed && removed.id) {
       tombstoneCards([removed.id]);

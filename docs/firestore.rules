@@ -134,6 +134,23 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/susuru_anki_groups/$(resource.data.groupId))
         && uid() in get(/databases/$(database)/documents/susuru_anki_groups/$(resource.data.groupId)).data.members
         && changedKeys().hasOnly(['cards', 'categories', 'categoryTree', 'catName', 'updatedAt']);
+      // ★0.04.65 いくつかのグループで共有（groupIds。前の版の文書は groupId だけ）。そのどれかのメンバーなら、
+      //   どのグループのメンバーとして直すか（editGroup）を付けて、カードとフォルダーを直せる
+      function curGroups() { return resource.data.get('groupIds', [resource.data.get('groupId', '')]); }
+      function inGroup(g) { return g is string && g != '' && exists(/databases/$(database)/documents/susuru_anki_groups/$(g))
+        && uid() in get(/databases/$(database)/documents/susuru_anki_groups/$(g)).data.members; }
+      allow update: if isAuthenticated() && request.resource.data.get('editGroup', '') in curGroups() && inGroup(request.resource.data.editGroup)
+        && changedKeys().hasOnly(['cards', 'categories', 'categoryTree', 'catName', 'updatedAt', 'editGroup']);
+      //   直せるメンバーが、自分の入っているほかのグループでも共有する（addGroup を1つ足す）
+      allow update: if isAuthenticated() && request.resource.data.get('editGroup', '') in curGroups() && inGroup(request.resource.data.editGroup)
+        && inGroup(request.resource.data.get('addGroup', ''))
+        && request.resource.data.groupIds.toSet() == curGroups().toSet().union([request.resource.data.addGroup].toSet())
+        && changedKeys().hasOnly(['groupIds', 'addGroup', 'editGroup', 'updatedAt']);
+      //   そのグループのメンバーが、そのグループでの共有をやめる（removeGroup を1つ外す）
+      allow update: if isAuthenticated() && request.resource.data.get('removeGroup', '') in curGroups() && inGroup(request.resource.data.removeGroup)
+        && request.resource.data.groupIds.toSet() == curGroups().toSet().difference([request.resource.data.removeGroup].toSet())
+        && (request.resource.data.get('groupId', '') == '' || request.resource.data.groupId in request.resource.data.groupIds)
+        && changedKeys().hasOnly(['groupIds', 'groupId', 'groupName', 'removeGroup', 'updatedAt']);
       allow update: if isAuthenticated() && changedKeys().hasOnly(['subscriberUids'])
         && request.resource.data.subscriberUids.toSet().difference(resource.data.get('subscriberUids', []).toSet())
              .union(resource.data.get('subscriberUids', []).toSet().difference(request.resource.data.subscriberUids.toSet()))

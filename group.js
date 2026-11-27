@@ -50,9 +50,20 @@ function groupApplyEditRights() {
   }));
 }
 // 共有カテゴリーの文書を、自分が編集できるか（グループの分）
+// ★【0.04.65】いくつかのグループで共有できる（groupIds。前の版の文書は groupId だけ）
+function groupIdsOf(data) { return data ? (Array.isArray(data.groupIds) ? data.groupIds.filter(Boolean) : (data.groupId ? [data.groupId] : [])) : []; }
+function groupMyEditGroup(data) { return groupIdsOf(data).find(g => groupIsMember(groupById(g))) || ''; }
 function groupCanEditShared(data) {
-  if (!data || !data.groupId || !currentUser) return false;
-  return groupIsMember(groupById(data.groupId));
+  if (!data || !currentUser) return false;
+  return !!groupMyEditGroup(data);
+}
+// 共有カテゴリーを書きかえるときに付けるもの：作成者・フレンドでなく、グループのメンバーとして直すときは、
+//  どのグループのメンバーとしてか（editGroup）。前の版のルールで直せる groupId のグループのメンバーなら付けない
+function sharedEditExtra(data) {
+  if (!data || !currentUser || data.ownerId === currentUser.uid || (data.friends || []).includes(currentUser.uid)) return {};
+  if (data.groupId && groupIsMember(groupById(data.groupId))) return {};
+  const g = groupMyEditGroup(data);
+  return g ? { editGroup: g } : {};
 }
 
 // ---------------- 画面（フレンドの画面のカード） ----------------
@@ -206,12 +217,18 @@ async function groupShareCategory(id, catName) {
   let docId = null;
   try {
     if (info.shared) {
-      // もう共有しているフォルダー：自分が作ったものなら、そのままグループにも付ける
-      if (!info.isOwner || info.root !== catName) return alert('このフォルダーは、ほかの人の共有カテゴリーに入っています。自分で作ったフォルダーを選んでください。');
+      // ★【0.04.65】もう共有しているフォルダー：自分が作ったもの、またはグループで共有されていて自分が直せるものなら、このグループでも共有する
       docId = info.docId;
       const snap = await firestore.collection('susuru_anki_shared').doc(docId).get();
-      if (snap.exists && snap.data().groupId && snap.data().groupId !== id) return alert(`このフォルダーは、もう「${groupNameOf(snap.data().groupId)}」で共有しています。`);
-      await firestore.collection('susuru_anki_shared').doc(docId).update({ groupId: id, groupName: g.name });
+      if (!snap.exists) return alert('⚠️ この共有カテゴリーは削除されています。');
+      const data = snap.data(), cur = groupIdsOf(data);
+      if (info.root !== catName) return alert(`このフォルダーは、共有カテゴリー「${data.catName}」の中にあります。グループで共有するときは「${data.catName}」を選んでください。`);
+      if (cur.includes(id)) return alert(`「${catName}」は、もう「${g.name}」で共有しています。`);
+      const owner = data.ownerId === currentUser.uid, via = groupMyEditGroup(data);
+      if (!owner && !via) return alert('このフォルダーは、ほかの人の共有カテゴリーです。作った人か、共有しているグループのメンバーなら、ほかのグループでも共有できます。');
+      const next = [...cur, id];
+      if (owner) await firestore.collection('susuru_anki_shared').doc(docId).update({ groupIds: next, groupId: data.groupId || id, groupName: data.groupName || g.name, updatedAt: Date.now() });
+      else await firestore.collection('susuru_anki_shared').doc(docId).update({ groupIds: next, addGroup: id, editGroup: via, updatedAt: Date.now() });
     } else {
       docId = await shareCategory(catName, { groupId: id, groupName: g.name, quiet: true });
       if (!docId) return;
@@ -242,10 +259,18 @@ async function groupCopyCatLink(docId) {
 async function groupUnshareCat(gid, docId) {
   const g = groupById(gid); if (!g) return;
   const c = (g.cats || []).find(x => x.id === docId); if (!c) return;
-  if (!confirm(`「${c.name}」のグループでの共有をやめますか？（メンバーの手元には残りますが、編集できなくなります）`)) return;
+  if (!confirm(`「${c.name}」の「${g.name}」での共有をやめますか？（このグループのメンバーの手元には残りますが、編集できなくなります。ほかのグループでの共有はそのまま）`)) return;
   try {
     await firestore.collection(GROUP_COL).doc(gid).update({ cats: (g.cats || []).filter(x => x.id !== docId), updatedAt: Date.now() });
-    await firestore.collection('susuru_anki_shared').doc(docId).update({ groupId: '', groupName: '' }).catch(() => {});
+    // ★【0.04.65】このグループだけ外す（ほかのグループでの共有は残す）
+    const sn = await firestore.collection('susuru_anki_shared').doc(docId).get().catch(() => null);
+    if (sn && sn.exists) {
+      const data = sn.data(), rest = groupIdsOf(data).filter(x => x !== gid);
+      const gidNext = data.groupId === gid ? (rest[0] || '') : (data.groupId || '');
+      const upd = { groupIds: rest, groupId: gidNext, groupName: gidNext ? (gidNext === data.groupId ? data.groupName || '' : groupNameOf(gidNext)) : '', updatedAt: Date.now() };
+      if (data.ownerId !== currentUser.uid) upd.removeGroup = gid;
+      await firestore.collection('susuru_anki_shared').doc(docId).update(upd).catch(e => console.warn(e));
+    }
   } catch (e) { alert('⚠️ ' + (e.code || e.message)); }
 }
 
