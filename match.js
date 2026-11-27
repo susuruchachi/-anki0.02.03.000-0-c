@@ -493,6 +493,7 @@ function onlineAnswered(isOk, correctText) {
 }
 
 function showOnlineFeedback(isCorrect, correctAnswer, onNext) {
+  if (typeof sfxPlay === 'function') sfxPlay(isCorrect ? 'ok' : 'ng'); // ★【0.04.71】🔔 効果音
   const color = isCorrect ? 'var(--success)' : 'var(--danger)';
   const icon = isCorrect ? '⭕' : '❌';
   const feedbackDiv = document.createElement('div');

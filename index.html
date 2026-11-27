@@ -1211,6 +1211,8 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 
     <div class="card">
       <div class="setting-box-title">🔊 読み上げと音楽</div>
+      <!-- ★【0.04.71】🔔 効果音（sfx.js） -->
+      <label class="toggle-pill" style="margin-bottom:10px;"><input type="checkbox" id="chkSfx" onchange="sfxSet(this.checked)">🔔 効果音（正解でピンポーン・不正解でブッブー・聞き直しでブッブッ）</label>
       <label class="section-label" style="font-weight:500;">Spotify・YouTube などの音楽を流しているとき</label>
       <select id="selTtsMix" class="form-control" onchange="setTtsMixPref(this.value)">
         <option value="duck">🎵 音楽を少し小さくして読み上げる（おすすめ）</option>
@@ -1858,6 +1860,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 <script src="streak.js"></script>
 <script src="game.js"></script>
 <script src="tts.js"></script>
+<script src="sfx.js"></script>
 <script src="drill.js"></script>
 <script src="cards.js"></script>
 <script src="plan.js"></script>
