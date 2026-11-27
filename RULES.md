@@ -835,6 +835,8 @@ A. (他動詞)(SVO1 to O2)O1をO2に適合させる　合わせる/(自動詞)(S
 
 - ふだんは susuru_anki_users/{uid} の1つのドキュメント（カード・暗記テストの途中経過・質問は gzip で圧縮して Blob。dbFormat: gzip-json-v1）
 - それで約1MB を超えるときは、カード（db）・暗記テストの途中経過（drillProgress）・質問（drillQa）をまとめて gzip にし、900KB ずつに分けて susuru_anki_users/{uid}/parts/p0, p1, … に置く（最大9つ＝約8MB）。本体には小さい情報と dbFormat: 'parts-v1'・parts（分けた数）・partsLen を入れる。本体と分けた部分は1つのトランザクションでまとめて書き、分けた部分にも同じ writeId を入れる。読むときに writeId が違えば（読んでいるあいだに別の端末が書いた）、少し待って3回まで読み直す（readCloudDocFull）。前より分けた数が減ったら、余った分を消す。また1MB に収まるようになったら1つのドキュメントに戻る
+- **大きさの見積もり（0.04.66）**：Firestore と同じ数え方（fsSize：文字 UTF-8＋1・数 8・真偽と null 1・バイナリはそのバイト数・地図は項目名（UTF-8＋1）＋値・ドキュメントに＋32）で、本体に付ける項目の分（400）も足して 1,000,000 を超えたら分ける。前は JSON の文字数で見積もっていて、数の多い記録で3割ほど小さく見積もり、Firestore に invalid-argument（大きすぎる）と断られていた。断られたら _cloudForceParts を立てて、分けて保存し直す（1回）
+- **分け方 parts-v2（0.04.66）**：本体に残すのはフォルダーの構造など前の版の端末が使う小さいもの（CLOUD_KEEP_PLAIN：categories・categoryTree・deletedCats・catStamps・subscribedDocs・ownedDocs・structAt・docStamps・catSubjects・catSkip。これだけで 500KB を超えたら、それも分ける）。ほかの全部（カード・学習の記録・暗記テスト・カレンダー・ごほうびなど）をまとめて gzip にして分ける。parts-v1（カード・暗記テストの途中経過・質問だけを分けた形）も読める
 - Firestore のルールに parts を足した（docs/firestore.rules。**公開し直す**）。公開し直していないと、1MB を超えた人は保存できない（権限がないとお知らせする）
 - 古い版の端末は、分けて置いたデータを読めない（カードが無いように見えるが、消しはしない。新しい版にすれば読める）
 
