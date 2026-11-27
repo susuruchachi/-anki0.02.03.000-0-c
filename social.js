@@ -160,6 +160,7 @@ function startFriendRequestWatch() {
     _friendIntros.forEach(r => friendNotify('🤝 フレンドの紹介', `${r.fromName || 'フレンド'} さんが ${r.introName || '名無し'} さんを紹介しました`, 'intro:' + r.id));
     renderFriendRequests();
   }, e => console.warn('フレンドの紹介の読み込みに失敗:', e.message)));
+  startChatWatch(); // ★【0.04.73】チャット・応援スタンプが届いたら知らせる
   if (location.hash === '#friends') { history.replaceState(null, '', location.pathname + location.search); openPage('pgFriends'); loadAppFriends(); }
 }
 function renderFriendRequests() {
@@ -297,10 +298,13 @@ async function loadAppFriends() {
     friends.forEach((fUid, i) => {
       const fName = names[i];
       const div = document.createElement('div'); div.className = 'achieve-row';
-      div.innerHTML = `<div class="achieve-label">👤 ${escapeHtml(fName)}</div><div style="display:flex; gap:6px;">${friends.length > 1 ? `<button class="btn btn-secondary" style="width:auto; padding:6px 10px; font-size:0.8rem;" onclick="openFriendIntro(${jsArg(fUid)})" title="ほかのフレンドに紹介">🤝 紹介</button>` : ''}<button class="btn" style="width:auto; padding:6px 12px; font-size:0.8rem;" onclick="openChat(${jsArg(fUid)}, ${jsArg(fName)})">💬</button></div>`;
+      div.innerHTML = `<div class="achieve-label">👤 ${escapeHtml(fName)}</div><div style="display:flex; gap:6px;">${friends.length > 1 ? `<button class="btn btn-secondary" style="width:auto; padding:6px 10px; font-size:0.8rem;" onclick="openFriendIntro(${jsArg(fUid)})" title="ほかのフレンドに紹介">🤝 紹介</button>` : ''}<button class="btn" style="width:auto; padding:6px 12px; font-size:0.8rem;" data-chat-uid="${escapeHtml(fUid)}" onclick="openChat(${jsArg(fUid)}, ${jsArg(fName)})">💬</button></div>`;
       listDiv.appendChild(div);
     });
   } catch (e) { listDiv.innerHTML = '<p style="color:var(--danger); font-size:0.8rem; text-align:center;">エラーが発生しました。</p>'; }
+  chatRenderUnread();
+  // フレンドが増えた・減ったら、チャットの見張りを入れ直す
+  try { const fl = await myFriendList(), want = fl.slice(0, 60).map(f => getChatId(currentUser.uid, f)).sort().join(','); if (want !== Object.keys(_chatWatch).sort().join(',')) startChatWatch(); } catch (e) {}
   if (typeof renderRace === 'function') renderRace();
 }
 
@@ -313,6 +317,7 @@ function openChat(friendUid, friendName) {
   document.getElementById('chatWithTitle').innerText = friendName + " とのチャット";
   currentChatFriendUid = friendUid; 
   const chatId = getChatId(currentUser.uid, friendUid); 
+  chatMarkRead(chatId); // ★【0.04.73】
   const msgBox = document.getElementById('chatMessages'); 
   msgBox.innerHTML = '履歴を取得中...';
   
@@ -333,6 +338,76 @@ function openChat(friendUid, friendName) {
   }, err => { clearTimeout(slow); msgBox.innerHTML = `<div style="color:var(--danger); text-align:center; font-size:0.85rem;">⚠️ メッセージを読めませんでした（${escapeHtml(err.code || err.message || '')}）。閉じてもう一度開いてください。</div>`; });
 }
 
+// ================================================================
+// ★【0.04.73】チャット・応援スタンプが届いたら知らせる（内容も出す）
+//  送った人が、チャットの文書（susuru_anki_chats/{2人の UID}）に「最後のメッセージ」last {t 文・by 送った人・name 名前・at 時刻}、
+//  知らせる相手 nt、まだ知らせていない印 np: true、その数 nn を置く。
+//  ・アプリを開いている間：相手の画面がフレンドごとのチャットの文書を見張っていて、その場で知らせる（見ていれば np を消す＝プッシュは送らない）
+//  ・閉じているとき：送信側（tools/push-notify.js の sendChatNotices、数十秒〜数分ごと）が np の付いたものをプッシュ通知で送る
+// ================================================================
+function chatNoteSent(friendUid, text) {
+  if (!currentUser || !friendUid) return;
+  const name = currentUser.displayName || '名無し';
+  firestore.collection('susuru_anki_chats').doc(getChatId(currentUser.uid, friendUid)).set({
+    m: [currentUser.uid, friendUid].sort(), nt: friendUid, np: true, nn: firebase.firestore.FieldValue.increment(1),
+    last: { t: String(text).slice(0, 300), by: currentUser.uid, name, at: Date.now() }
+  }, { merge: true }).catch(e => console.warn('チャットの通知の準備に失敗:', e.message));
+}
+// 知らせた時刻（susuru_anki_chat_seen）と、読んだ時刻（susuru_anki_chat_read：未読の印）
+function chatSeenMap(k) { try { return JSON.parse(localStorage.getItem(k || 'susuru_anki_chat_seen') || '{}') || {}; } catch (e) { return {}; } }
+function chatSeenSet(chatId, at, k) { k = k || 'susuru_anki_chat_seen'; const m = chatSeenMap(k); m[chatId] = Math.max(m[chatId] || 0, at); try { localStorage.setItem(k, JSON.stringify(m)); } catch (e) {} }
+let _chatWatch = {}, _chatLast = {};
+function chatMarkRead(chatId) {
+  const l = _chatLast[chatId], at = Math.max(Date.now(), (l && l.last && l.last.at) || 0); chatSeenSet(chatId, at); chatSeenSet(chatId, at, 'susuru_anki_chat_read');
+  if (l && l.np && l.nt === (currentUser && currentUser.uid)) firestore.collection('susuru_anki_chats').doc(chatId).update({ np: false, nn: 0 }).catch(() => {});
+  chatRenderUnread();
+}
+function chatUnread(chatId) { const l = _chatLast[chatId]; return !!(l && l.last && currentUser && l.last.by !== currentUser.uid && l.last.at > (chatSeenMap('susuru_anki_chat_read')[chatId] || 0) && !!chatSeenMap('susuru_anki_chat_read')[chatId]); }
+function chatRenderUnread() {
+  document.querySelectorAll('[data-chat-uid]').forEach(b => { const on = currentUser && chatUnread(getChatId(currentUser.uid, b.dataset.chatUid)); b.classList.toggle('chat-unread', !!on); });
+}
+async function startChatWatch() {
+  Object.values(_chatWatch).forEach(u => { try { u(); } catch (e) {} }); _chatWatch = {}; _chatLast = {};
+  if (!currentUser) return;
+  let fl = []; try { fl = await myFriendList(); } catch (e) { return; }
+  const me = currentUser.uid;
+  fl.slice(0, 60).forEach(f => {
+    const chatId = getChatId(me, f);
+    _chatWatch[chatId] = firestore.collection('susuru_anki_chats').doc(chatId).onSnapshot(s => {
+      const d = s.exists ? s.data() : null; _chatLast[chatId] = d; chatRenderUnread();
+      const l = d && d.last; if (!l || l.by === me || !currentUser || currentUser.uid !== me) return;
+      const seen = chatSeenMap()[chatId];
+      if (!chatSeenMap('susuru_anki_chat_read')[chatId]) chatSeenSet(chatId, d.np ? 1 : l.at, 'susuru_anki_chat_read'); // この端末で初めて：前のものは読んだことに
+      if (seen ? l.at <= seen : !d.np) { if (!seen) chatSeenSet(chatId, l.at); chatRenderUnread(); return; } // 初めて見る：まだ知らせていないものだけ
+      chatSeenSet(chatId, l.at); chatRenderUnread();
+      const visible = document.visibilityState === 'visible';
+      if (visible && currentChatFriendUid === f && document.getElementById('chatArea') && document.getElementById('chatArea').style.display !== 'none') { chatMarkRead(chatId); return; } // そのチャットを見ている
+      if (getNotifyPrefs().chat === false) return;
+      const cheer = /^📣 応援スタンプ：/.test(l.t);
+      const title = cheer ? `📣 ${l.name || 'フレンド'} さんから応援スタンプ` : `💬 ${l.name || 'フレンド'} さん`;
+      const body = (cheer ? l.t.replace(/^📣 応援スタンプ：/, '') : l.t) + (d.nn > 1 ? `（ほか ${d.nn - 1} 件）` : '');
+      const iosApp = typeof isIOSApp === 'function' && isIOSApp();
+      let shown = false;
+      if (visible) { showAppToast(`${title}：${body}`, () => chatOpenWith(f, l.name)); shown = true; }
+      else if (!iosApp && typeof showLocalNotification === 'function' && notifPerm() === 'granted') { showLocalNotification(title, body, 'chat-' + chatId, 'chat', './?chat=' + encodeURIComponent(f)); shown = true; }
+      if (typeof sfxPlay === 'function' && visible) { try { sfxPlay('ok'); } catch (e) {} }
+      if (shown && d.np && d.nt === me) firestore.collection('susuru_anki_chats').doc(chatId).update({ np: false, nn: 0 }).catch(() => {}); // プッシュで二重に知らせない
+    }, e => console.warn('チャットの見張りに失敗:', e.message));
+  });
+}
+async function chatOpenWith(uid, name) {
+  openPage('pgFriends'); if (typeof loadAppFriends === 'function') loadAppFriends();
+  if (!name) { try { const p = await firestore.collection('susuru_anki_profiles').doc(uid).get(); name = (p.exists && p.data().displayName) || 'フレンド'; } catch (e) { name = 'フレンド'; } }
+  openChat(uid, name);
+}
+// 通知から開いたとき（?chat=相手の UID）。ログインを待ってから開く
+async function chatOpenFromUrl(uid) {
+  try { const u = new URL(location.href); u.searchParams.delete('chat'); history.replaceState(null, '', u.pathname + u.search + u.hash); } catch (e) {}
+  for (let i = 0; i < 40 && !(typeof currentUser !== 'undefined' && currentUser); i++) await new Promise(r => setTimeout(r, 500));
+  if (currentUser && uid) chatOpenWith(uid);
+}
+if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', e => { if (e.data && e.data.type === 'open-url') { try { const c = new URL(e.data.url).searchParams.get('chat'); if (c) chatOpenWith(c); } catch (x) {} } });
+
 function closeChat() { 
   if (currentChatUnsubscribe) { currentChatUnsubscribe(); currentChatUnsubscribe = null; } 
   document.getElementById('chatArea').style.display = 'none'; 
@@ -349,6 +424,7 @@ async function sendChatMessage() {
   input.value = '';
   try { 
     await firestore.collection('susuru_anki_chats').doc(chatId).collection('messages').add({ text: text, senderId: currentUser.uid, timestamp: firebase.firestore.FieldValue.serverTimestamp() }); 
+    chatNoteSent(currentChatFriendUid, text); // ★【0.04.73】相手に通知
   } catch (e) { if (!input.value) input.value = text; alert("⚠️ 送信できませんでした（" + (e.code || e.message || '') + "）。もう一度送ってください。"); }
 }
 
