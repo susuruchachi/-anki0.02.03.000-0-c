@@ -42,7 +42,8 @@ function gameOnAnswer(ok) {
 function gameSeed(d) { let h = 2166136261; for (const ch of d) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); } return h >>> 0; }
 function gameMissions(d) {
   const h = gameSeed(d || gameToday());
-  const ans = [20, 30, 40, 50][h % 4], cor = [15, 20, 30, 40][(h >> 3) % 4], combo = [5, 8, 10, 15][(h >> 6) % 4];
+  // ★【0.04.69】>>> で（前は >> で、日付によっては負の数になり、目標が NaN になっていた）
+  const ans = [20, 30, 40, 50][h % 4], cor = [15, 20, 30, 40][(h >>> 3) % 4], combo = [5, 8, 10, 15][(h >>> 6) % 4];
   // ★【0.04.56】🔄 入れかえ券を使ったミッションは、目標が半分のやさしいものになる
   const rr = new Set(typeof gameShopList === 'function' ? gameShopList().filter(x => x.item === 'reroll' && x.d === d).map(x => x.slot) : []);
   const half = (id, n) => rr.has(id) ? Math.max(3, Math.round(n / 2)) : n;
@@ -538,6 +539,16 @@ function gameShopHTML(st) {
 }
 
 // ★【0.04.55】炎の色はショップで交換しない（連続記録の長さだけ）：交換した分は取り消して、コインを返す
+// ★【0.04.69】目標が NaN になっていた日のミッションに使った入れかえ券は、取り消してコインを返す
+function gameRefundBrokenRerolls() {
+  let n = 0;
+  Object.entries(gameShop || {}).forEach(([id, v]) => {
+    if (!v || v.deleted || v.item !== 'reroll' || !v.d) return;
+    const h = gameSeed(v.d), broken = (v.slot === 'cor' && ((h >> 3) % 4) < 0) || (v.slot === 'combo' && ((h >> 6) % 4) < 0);
+    if (broken) { gameShop[id] = { deleted: true, at: Date.now() }; n += Number(v.cost) || 0; }
+  });
+  if (n) { try { saveData(); } catch (e) {} setTimeout(() => gameCelebrate('💰', `${n}コインを返しました`, 'ミッションの目標がおかしかった（NaN）日に使った入れかえ券を取り消しました'), 3000); }
+}
 function gameRefundFlames() {
   let n = 0;
   Object.entries(gameShop || {}).forEach(([id, v]) => {
@@ -550,6 +561,7 @@ function gameRefundFlames() {
 // 起動・日付が変わったとき
 function gameInit() {
   try { gameRefundFlames(); } catch (e) {}
+  try { gameRefundBrokenRerolls(); } catch (e) {}
   try { gameApplyTheme(); } catch (e) {}
   try { gameUseShields(); } catch (e) {}
   try { gameCheck(false); } catch (e) {}
