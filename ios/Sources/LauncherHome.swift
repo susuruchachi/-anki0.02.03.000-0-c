@@ -15,6 +15,15 @@ final class LauncherModel: ObservableObject {
             if prefs.anyOn { Task { _ = await KoukaiNotifier.shared.requestAuth(); await self.refreshAuth() } }
         }
     }
+    // ★【0.04.74】アップデートのお知らせ
+    @Published var updateOn: Bool = UserDefaults.standard.bool(forKey: "update_notify_on") {
+        didSet {
+            guard updateOn != oldValue else { return }
+            UpdateNotifier.shared.on = updateOn
+            if updateOn { Task { _ = await KoukaiNotifier.shared.requestAuth(); await self.refreshAuth(); await UpdateNotifier.shared.check(); self.refresh() } }
+        }
+    }
+    @Published var updateChecked: Date? = nil
     @Published var auth: UNAuthorizationStatus = .notDetermined
     @Published var lines: [MiniApp: String] = [:]
 
@@ -62,6 +71,7 @@ final class LauncherModel: ObservableObject {
             }
         }
         lines = l
+        updateChecked = UpdateNotifier.shared.lastChecked
         Task { await refreshAuth() }
     }
 
@@ -80,6 +90,10 @@ struct LauncherHome: View {
     private var dateText: String {
         let x = DateFormatter(); x.locale = Locale(identifier: "ja_JP"); x.dateFormat = "M月d日（E）"
         return x.string(from: Date())
+    }
+    static func timeText(_ d: Date) -> String {
+        let x = DateFormatter(); x.locale = Locale(identifier: "ja_JP"); x.dateFormat = "M/d H:mm"
+        return x.string(from: d)
     }
     private var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "" }
 
@@ -149,6 +163,17 @@ struct LauncherHome: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("⚙️ ランチャー").font(.headline).foregroundStyle(.white)
             Toggle("起動したら、前に開いていたアプリをすぐ出す", isOn: $model.autoOpenLast).tint(.orange)
+
+            Divider().overlay(sub.opacity(0.4))
+            Text("🆕 アップデートのお知らせ").font(.headline).foregroundStyle(.white)
+            Toggle("すするanki・すするアプリの新しい版が出たら知らせる", isOn: $model.updateOn).tint(.orange)
+            if model.updateOn && model.auth == .denied {
+                Text("🚫 通知が許可されていないので届きません").font(.footnote).foregroundStyle(.red)
+                Button("⚙️ 設定を開いて許可する") { if let u = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(u) } }
+                    .buttonStyle(.bordered)
+            }
+            Text("アプリを閉じていても、iOS が決めたとき（ふだん使っていれば数時間おきくらい）に新しい版が出ていないか確かめます。すぐには届きません。iPhone・iPad の設定の「一般 → Appのバックグラウンド更新」がオンのときだけ動きます。" + (model.updateChecked.map { "（最後に確かめた時刻：\(Self.timeText($0))）" } ?? ""))
+                .font(.caption).foregroundStyle(sub)
 
             Divider().overlay(sub.opacity(0.4))
             Text("🔔 航海日誌の通知").font(.headline).foregroundStyle(.white)
