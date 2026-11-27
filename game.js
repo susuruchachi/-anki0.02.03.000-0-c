@@ -389,6 +389,7 @@ async function gameSendCheer(uid, i) {
   const text = `📣 応援スタンプ：${GAME_CHEERS[i]}`;
   try {
     await firestore.collection('susuru_anki_chats').doc(getChatId(currentUser.uid, uid)).collection('messages').add({ text, senderId: currentUser.uid, timestamp: firebase.firestore.FieldValue.serverTimestamp() });
+    if (typeof chatNoteSent === 'function') chatNoteSent(uid, text); // ★【0.04.73】相手に通知
   } catch (e) { return alert('⚠️ 送れませんでした（' + (e.code || e.message || '') + '）'); }
   gameShop['p' + Date.now().toString(36)] = { item: 'cheer', cost: GAME_CHEER_COST, to: uid, d: gameToday(), at: Date.now() };
   try { saveData(); } catch (e) {}

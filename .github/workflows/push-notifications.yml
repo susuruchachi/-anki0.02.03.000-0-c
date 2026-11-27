@@ -6,6 +6,7 @@ name: push-notifications
 on:
   schedule:
     - cron: '*/15 * * * *'   # 15分ごと（GitHub の混み具合で数分〜十数分遅れることがあります）
+    - cron: '*/5 * * * *'    # ★0.04.73 チャット・応援スタンプ：5分ごとに起きて、4分半のあいだ20秒ごとに見る
   push:
     # ★ サイトは main から公開している（2026/11/27〜。PR をマージすると main に入る）。main でバージョンが上がったときに送る
     #   送る前に、サイトにそのバージョンが出たかを確かめる（push-notify.js の waitSiteVersion）
@@ -14,12 +15,13 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'all / reminders / update / plan / taunt / friends / index / ical'
+        description: 'all / chat / reminders / update / plan / taunt / friends / index / ical'
         required: false
         default: 'all'
 
 concurrency:
-  group: push-notifications
+  # チャットの回は別の列（ほかの通知の回を待たせない・取り消さない）。二重に送らないのは push-notify.js のトランザクション
+  group: push-notifications-${{ github.event.schedule == '*/5 * * * *' && 'chat' || 'main' }}
   cancel-in-progress: false
 
 jobs:
@@ -36,4 +38,5 @@ jobs:
       - name: Send notifications
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-        run: node tools/push-notify.js ${{ github.event_name == 'push' && 'update' || (github.event.inputs.mode || 'all') }}
+          CHAT_LOOP_SEC: '270'
+        run: node tools/push-notify.js ${{ github.event_name == 'push' && 'update' || github.event.schedule == '*/5 * * * *' && 'chat' || (github.event.inputs.mode || 'all') }}
