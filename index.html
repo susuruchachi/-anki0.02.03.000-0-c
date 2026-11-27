@@ -528,6 +528,11 @@ body.light-mode .sync-status { background: rgba(255,255,255,0.9); }
 .sync-status.saving { color: var(--warn); border-color: var(--warn); }
 .sync-status.success { color: var(--success); border-color: var(--success); }
 .sync-status.error { color: var(--danger); border-color: var(--danger); }
+.sync-status.retry { pointer-events: auto; cursor: pointer; }
+#btnAppReload.spin { animation: appSpin 0.9s linear infinite; }
+@keyframes appSpin { to { transform: rotate(360deg); } }
+.pull-refresh { position: fixed; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 56px); transform: translate(-50%, -80px); z-index: 900; padding: 6px 14px; border-radius: 16px; background: var(--bg2); border: 1px solid var(--border); color: var(--text2); font-size: 0.75rem; font-weight: 700; opacity: 0; pointer-events: none; transition: opacity .2s; box-shadow: 0 4px 14px rgba(0,0,0,.3); }
+.pull-refresh.ready { color: var(--primary); border-color: var(--primary); }
 .sync-status.hidden { opacity: 0; transform: translateY(-20px); }
 .update-banner-title { font-weight: bold; color: var(--primary); display:flex; align-items:center; }
 
@@ -786,7 +791,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
 <body>
 
 <div class="app-container">
-  <div id="cloudSyncStatus" class="sync-status hidden">☁️ 待機中</div>
+  <div id="cloudSyncStatus" class="sync-status hidden" onclick="if (this.classList.contains('retry')) appReload()">☁️ 待機中</div>
 
   <header>
     <div style="display:flex; align-items:center; gap:16px;">
@@ -799,9 +804,12 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
       </div>
     </div>
     <div style="display:flex; gap:10px; align-items:center;">
+      <button class="btn btn-secondary" id="btnAppReload" title="読み込み直す" style="padding: 4px 8px; width:auto; font-size:0.8rem;" onclick="appReload()">🔄</button>
       <button class="btn btn-secondary" style="padding: 4px 8px; width:auto; font-size:0.8rem;" onclick="toggleLightMode()">🌓</button>
     </div>
   </header>
+  <!-- ★【0.04.61】画面を下に引っぱって読み込み直す -->
+  <div id="pullRefresh" class="pull-refresh"><span id="pullRefreshText">↓ 引っぱって読み込み直す</span></div>
 
   <div id="menuOverlay" class="menu-overlay" onclick="closeMenu()"></div>
   <nav id="sideMenu" class="side-menu">
@@ -1245,7 +1253,7 @@ body.in-quiz .screen { padding-bottom: calc(30px + env(safe-area-inset-bottom));
         <button class="btn btn-secondary" onclick="exportTextOpen()">📝 テキスト出力</button>
         <button class="btn btn-secondary" onclick="importTextOpen()">📝 テキスト入力</button>
       </div>
-      <div class="hint-small" style="margin-top:8px;">JSONは学習記録・画像も含む完全バックアップ、CSVはカードのみです。読み上げの読み方（歴史的仮名づかい → 現代仮名づかい など）は、JSON・CSVのどちらにも入ります（CSVでは形式「読み方」の行）。構造式・漢文はテキストなのでどちらにも含まれます。<br>CSVの列：問題・答え・フォルダー（「親>子」で入れ子）・メモ・選択肢（「a / b / c」）・形式（「例文」「テスト」）。同じフォルダーに同じ問題があれば、重複させずに更新するかどうかを確認します（空欄のメモは消しません）。</div>
+      <div class="hint-small" style="margin-top:8px;">JSONは学習記録・画像も含む完全バックアップ、CSVはカードのみです。読み上げの読み方（歴史的仮名づかい → 現代仮名づかい など）は、JSON・CSVのどちらにも入ります（CSVでは形式「読み方」の行）。構造式・漢文はテキストなのでどちらにも含まれます。<br>CSVの列：問題・答え・フォルダー（「親>子」で入れ子）・メモ・選択肢（「a / b / c」）・形式（「例文」「テスト」）。同じフォルダーに同じ問題があれば、重複させずに更新するかどうかを確認します（空欄のメモは消しません）。<br>📚「問題・解答・補足・章・小見出し・タグ」の列のCSV（Anki の #columns: つきも）は、章ごとのフォルダーに分けて、番号・メモ・★・形式を付けて取り込みます。</div>
       <button class="btn btn-secondary" style="margin-top:10px;" onclick="repairInflatedStats()">🩹 異常な成績（正解数・誤答数が1000回以上）を修復</button>
     </div>
 

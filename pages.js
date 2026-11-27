@@ -143,3 +143,68 @@ function executePageTransition(pageId, isBackAction) {
   
   closeMenu();
 }
+
+// ================================================================
+// ★【0.04.61】🔄 読み込み直す（右上の 🔄・画面を下に引っぱる・「押すと再読み込み」のお知らせ）
+//  クラウドとの同期・共有カテゴリー・フレンドのリーグをやり直して、今の画面を描き直す。
+//  何度やってもだめなときは、ページごと読み込み直すか聞く
+// ================================================================
+let _appReloading = false, _appReloadFails = 0;
+async function appReload() {
+  if (_appReloading) return;
+  _appReloading = true;
+  const btn = document.getElementById('btnAppReload'); if (btn) btn.classList.add('spin');
+  if (typeof showAppToast === 'function') showAppToast('🔄 読み込み直しています…');
+  let ok = true;
+  try {
+    if (typeof _syncing !== 'undefined') { _syncing = false; _syncFails = 0; } // 止まっている同期はやめて、やり直す
+    if (typeof _subsSyncing !== 'undefined') _subsSyncing = 0;
+    if (typeof currentUser !== 'undefined' && currentUser) {
+      if (typeof cloudReady !== 'undefined') cloudReady = false;
+      await syncToCloud(true);
+      ok = typeof cloudReady !== 'undefined' ? !!cloudReady : true;
+      if (typeof gameLoadLeague === 'function') gameLoadLeague(true).catch(() => {});
+    } else if (typeof syncSubscriptions === 'function') await syncSubscriptions();
+    // 今の画面を描き直す
+    const act = document.querySelector('.screen.active');
+    if (act) executePageTransition(act.id, true);
+    if (typeof updateHomeSummary === 'function') updateHomeSummary();
+  } catch (e) { ok = false; console.warn(e); }
+  if (btn) btn.classList.remove('spin');
+  _appReloading = false;
+  if (ok) { _appReloadFails = 0; if (typeof showAppToast === 'function') showAppToast('✅ 読み込み直しました'); return; }
+  _appReloadFails++;
+  if (_appReloadFails >= 2 && confirm('⚠️ うまく読み込めませんでした。\nページごと読み込み直しますか？（この端末に保存したデータはそのままです）')) {
+    const u = new URL(location.href); u.searchParams.set('r', Date.now().toString(36)); location.replace(u.toString());
+  } else if (typeof showAppToast === 'function') showAppToast('⚠️ 読み込めませんでした。電波のよいところで、もう一度 🔄 を押してください');
+}
+// 画面のいちばん上で、下に引っぱって離すと読み込み直す
+(function () {
+  let y0 = null, dy = 0;
+  const el = () => document.getElementById('pullRefresh');
+  const screen = () => document.querySelector('.screen.active');
+  document.addEventListener('touchstart', e => {
+    const sc = screen();
+    if (document.body.classList.contains('in-quiz') || !sc || sc.scrollTop > 0 || e.touches.length !== 1) { y0 = null; return; }
+    if (e.target.closest && e.target.closest('.ctx-overlay, input, textarea, select, .ship-scene, canvas')) { y0 = null; return; }
+    y0 = e.touches[0].clientY; dy = 0;
+  }, { passive: true });
+  document.addEventListener('touchmove', e => {
+    if (y0 === null) return;
+    const sc = screen(); if (sc && sc.scrollTop > 0) { y0 = null; const p = el(); if (p) p.style.opacity = 0; return; }
+    dy = e.touches[0].clientY - y0;
+    const p = el(); if (!p) return;
+    if (dy > 20) {
+      const d = Math.min(dy, 120);
+      p.style.opacity = Math.min(1, d / 70); p.style.transform = `translate(-50%, ${d - 80}px)`;
+      p.classList.toggle('ready', dy > 90);
+      document.getElementById('pullRefreshText').textContent = dy > 90 ? '↻ 離すと読み込み直す' : '↓ 引っぱって読み込み直す';
+    }
+  }, { passive: true });
+  document.addEventListener('touchend', () => {
+    const p = el();
+    if (y0 !== null && dy > 90) appReload();
+    y0 = null; dy = 0;
+    if (p) { p.style.opacity = 0; p.style.transform = 'translate(-50%, -80px)'; p.classList.remove('ready'); }
+  }, { passive: true });
+})();

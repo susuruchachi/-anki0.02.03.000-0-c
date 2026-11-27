@@ -391,7 +391,10 @@ function setSyncStatus(state, text) {
   if(!el) return;
   el.className = `sync-status ${state}`;
   el.innerText = text;
-  if (state === 'success' || state === 'error') setTimeout(() => el.classList.add('hidden'), 3000);
+  clearTimeout(el._hideT);
+  // ★【0.04.61】うまく読み込めなかったときは、押せば読み込み直せるように長めに出しておく
+  if (state === 'success' || state === 'error') el._hideT = setTimeout(() => el.classList.add('hidden'), 3000);
+  if (String(state).includes('retry')) el._hideT = setTimeout(() => el.classList.add('hidden'), 15000);
 }
 
 function userDocRef() { return firestore.collection("susuru_anki_users").doc(currentUser.uid); }
@@ -875,15 +878,27 @@ function finishAccountMerge(beforeLocal) {
   setTimeout(() => alert(`🔀 前のアカウントのデータを統合しました。\nカード: ${beforeLocal.cards}枚 ＋ ${beforeLocal.cloudCards}枚 → ${db.length}枚\nフォルダー: ${categories.length}個`), 0);
 }
 
-let _syncing = false;
+let _syncing = false, _syncStartedAt = 0, _syncRetryTimer = null, _syncFails = 0;
+// ★【0.04.61】読み込みに制限時間を付ける（回線が悪いと、クラウドからの読み込みがいつまでも終わらず、同期中のまま止まっていた）
+function withTimeout(promise, ms, label) {
+  let t; return Promise.race([promise, new Promise((_, rej) => { t = setTimeout(() => { const e = new Error((label || '読み込み') + 'に時間がかかりすぎました'); e.code = 'timeout'; rej(e); }, ms); })]).finally(() => clearTimeout(t));
+}
+// 読み込めなかったら、少しずつ間をあけて自動でやり直す（10秒・30秒・1分・2分…）
+function scheduleSyncRetry() {
+  clearTimeout(_syncRetryTimer);
+  const wait = [10, 30, 60, 120, 300][Math.min(_syncFails - 1, 4)] * 1000;
+  _syncRetryTimer = setTimeout(() => { if (currentUser && !cloudReady) syncToCloud(true); }, wait);
+}
 async function syncToCloud(isSilent = false) {
   if (!currentUser) { if (!isSilent) alert("Googleアカウントでログインしてください。"); return; }
   await dataLoaded; // 端末のデータを読み込む前にクラウドと合わせない
-  if (_syncing) return;
-  _syncing = true;
+  if (_syncing && Date.now() - _syncStartedAt < 45000) return; // 45秒たっても終わらない同期は、止まったとみなしてやり直す
+  _syncing = true; _syncStartedAt = Date.now();
+  clearTimeout(_syncRetryTimer);
   try {
     resolveAccountSwitch();
-    const snap = await userDocRef().get();
+    setSyncStatus('saving', '☁️ 読み込み中…');
+    const snap = await withTimeout(userDocRef().get(), 25000, 'クラウドからの読み込み');
     // 最初の同期が終わるまではクラウドに書かない（古いデータでクラウドを上書きしないため）
     cloudReady = true;
     const merging = _accountMergePending;
@@ -900,12 +915,16 @@ async function syncToCloud(isSilent = false) {
     if (merging) finishAccountMerge(mergeInfo);
     startCloudListener();
     refreshVisibleViews();
+    _syncFails = 0;
+    setSyncStatus('success', '☁️ 同期しました');
     if (typeof syncSubscriptions === 'function') await syncSubscriptions();
     if (!isSilent) { alert(`☁️ 同期完了！`); openPage('pgHome'); }
   } catch (err) {
     console.warn('同期エラー:', err);
     cloudReady = false;
-    setSyncStatus('error', `⚠️ 同期エラー: ${err && (err.code || err.message) || ''}`.slice(0, 60));
+    _syncFails++;
+    scheduleSyncRetry();
+    setSyncStatus('error retry', err && err.code === 'timeout' ? '⚠️ 読み込みに時間がかかっています（押すと再読み込み）' : `⚠️ 同期エラー（押すと再読み込み）: ${err && (err.code || err.message) || ''}`.slice(0, 70));
     if (!isSilent) alert(`⚠️ 同期エラー: ${err.message}\n(通信状態やFirebaseのルール設定などを確認してください)`);
   }
   finally { _syncing = false; }
