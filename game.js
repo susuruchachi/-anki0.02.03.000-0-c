@@ -234,7 +234,7 @@ function gameBuy(item, arg) {
   try { renderStreakCard(); } catch (e) {}
   renderGameBar(); renderGamePanel(); renderShopPanel();
 }
-const GAME_REROLL_COST = 80, GAME_BOOST_COST = 200;
+const GAME_REROLL_COST = 40, GAME_BOOST_COST = 100; // ★【0.04.65】半分に（前は 80・200）
 // ⚡ XP 2倍の残り（ms）
 function gameBoostLeft() { const u = Math.max(0, ...gameShopList().filter(x => x.item === 'boost').map(x => Number(x.until) || 0)); return Math.max(0, u - Date.now()); }
 function gameSel(key) { const x = (gameShop || {})[key]; return x && !x.deleted && x.val ? x.val : ''; }
