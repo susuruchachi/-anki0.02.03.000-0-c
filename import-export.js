@@ -212,6 +212,8 @@ function importCSV(e) {
   if (!file) return;
   e.target.value = '';
   const r = new FileReader(); r.onload = function(evt) {
+    // ★【0.04.62】章・小見出し・タグつきの暗記問題CSV（Anki 形式の「#columns:」見出しなど）は、別の取り込み方で
+    if (studyCSVDetect(evt.target.result)) { studyCSVImportAsk(evt.target.result, file.name); return; }
     let plan;
     try { plan = planCSVImport(parseCSVText(evt.target.result)); }
     catch (err) { console.error(err); alert("CSV解析に失敗しました。"); return; }
@@ -324,6 +326,177 @@ function applyCSVImport(plan, withUpdates) {
   if (typeof pushSharedDocsForCategories === 'function') pushSharedDocsForCategories([...touchedCats]);
   if (readings) { try { saveData(true); } catch (e) {} }
   alert(`📊 CSVを取り込みました。\n新規追加: ${added}件\n更新: ${updated}件${readings ? `\n読み方: ${readings}件` : ''}`); openPage('pgHome');
+}
+
+// ================================================================
+// ★【0.04.62】章・小見出し・タグつきの暗記問題CSV（例：「問題,解答,補足,章,小見出し,タグ」）
+//  ・先頭の「#separator:」「#html:」「#columns:」の行（Anki の書き方）を読む。区切りはカンマ・タブ・セミコロン・縦棒
+//  ・フォルダーは「親(ファイル名など)>章>…」。章の「◆…◆」「■…■」は下のフォルダーに分け、
+//    「熟語 1 …」「口語 1 …」のように頭の語が同じ章が2つ以上あれば、その語を間のフォルダーにする。章に「>」があればそのまま
+//  ・問題番号は行の順（小見出しが「No.12」なら 12・12-1・12-2…）。補足・小見出し・印はメモに
+//  ・印（超頻出!・頻出!・◆・＊）は★に、「例文空所」は形式「例文」に、長い答えは「自己申告」に（選べる）
+//  ・取り込みは今の CSV と同じ（planCSVImport・csvApplyPlanAsk。同じ問題は増やさずに更新するか選べる）
+//  ・今あるフォルダーと名前がぶつかって別の場所に入ってしまう章は「名前（親）」にする（今のフォルダーは変えない）
+// ================================================================
+const STUDY_CSV_COLS = {
+  q: ['問題', '表', 'Front', 'front', 'Question', 'question'],
+  a: ['解答', '答え', '裏', 'Back', 'back', 'Answer', 'answer'],
+  note: ['補足', 'メモ', '解説', 'Note', 'note'],
+  chap: ['章', '講', 'Chapter', 'chapter'],
+  sub: ['小見出し', '見出し', 'Section', 'section'],
+  tag: ['タグ', '印', 'Tags', 'tags']
+};
+function studyCSVParse(text) {
+  text = String(text || '').replace(/^﻿/, '');
+  const dir = {};
+  // 先頭の「#…」の行（Anki の見出し）
+  let pos = 0;
+  while (pos < text.length && text[pos] === '#') {
+    let end = text.indexOf('\n', pos); if (end === -1) end = text.length;
+    const line = text.slice(pos, end).replace(/\r$/, '');
+    const m = line.match(/^#\s*([A-Za-z ]+?)\s*:(.*)$/);
+    if (m) dir[m[1].toLowerCase().replace(/\s+/g, '')] = m[2];
+    pos = end + 1;
+  }
+  const sepName = String(dir.separator || '').trim().toLowerCase();
+  const sep = { tab: '\t', semicolon: ';', pipe: '|', comma: ',' }[sepName] || (sepName.length === 1 ? sepName : ',');
+  const body = text.slice(pos);
+  const rows = []; let row = [], cur = '', inQ = false;
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i];
+    if (inQ) {
+      if (c === '"') { if (body[i + 1] === '"') { cur += '"'; i++; } else inQ = false; }
+      else cur += c;
+    } else if (c === '"' && cur === '') inQ = true;
+    else if (c === sep) { row.push(cur); cur = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && body[i + 1] === '\n') i++;
+      row.push(cur); cur = '';
+      if (row.some(x => x.trim() !== '')) rows.push(row);
+      row = [];
+    } else cur += c;
+  }
+  row.push(cur);
+  if (row.some(x => x.trim() !== '')) rows.push(row);
+  let header = dir.columns != null ? String(dir.columns).split(sep).map(x => x.trim()) : null;
+  if (!header) header = (rows.shift() || []).map(x => String(x).trim());
+  const col = k => header.findIndex(h => STUDY_CSV_COLS[k].includes(h));
+  return { header, rows, dir, idx: { q: col('q'), a: col('a'), note: col('note'), chap: col('chap'), sub: col('sub'), tag: col('tag') } };
+}
+// 章・小見出し・タグの列がある（フォルダーの列は無い）CSV か、Anki の「#columns:」がある CSV
+function studyCSVDetect(text) {
+  const head = String(text || '').replace(/^﻿/, '').slice(0, 2000);
+  const hasDir = /^#\s*columns\s*:/im.test(head);
+  let p; try { p = studyCSVParse(head.split(/\r?\n/).slice(0, 6).join('\n')); } catch (e) { return false; }
+  if (p.header.includes('フォルダー')) return false;
+  const special = p.idx.chap !== -1 || p.idx.sub !== -1 || p.idx.tag !== -1 || p.header.includes('解答') || p.header.includes('補足');
+  return (hasDir || special) && p.idx.q !== -1 && p.idx.a !== -1;
+}
+// 章 → フォルダーの並び（「◆…◆」「■…■」は下のフォルダーに、「A>B」はそのまま）
+function studyCSVChapterParts(chap) {
+  const s = String(chap || '').trim();
+  if (!s) return [];
+  if (s.includes('>')) return s.split('>').map(x => x.trim()).filter(Boolean);
+  const m = s.match(/^(.*?)\s*[◆■]\s*(.+?)\s*[◆■]?\s*$/);
+  if (m && m[1].trim() && m[2].trim()) return [m[1].trim(), m[2].trim()];
+  return [s];
+}
+function studyCSVTagStars(tag) {
+  let n = 0;
+  String(tag || '').split(/\s+/).forEach(t => {
+    if (/^超頻出[!！]?$/.test(t)) n = Math.max(n, 3);
+    else if (/^頻出[!！]?$/.test(t) || t === '◆') n = Math.max(n, 2);
+    else if (t === '＊' || t === '*') n = Math.max(n, 1);
+  });
+  return n;
+}
+// 取り込む内容を作る（planCSVImport に渡す行の形）
+function studyCSVBuild(p, root, opt) {
+  const { idx } = p;
+  const get = (r, i) => i === -1 ? '' : String(r[i] == null ? '' : r[i]).trim();
+  const items = p.rows.map(r => ({ q: get(r, idx.q), a: get(r, idx.a), note: get(r, idx.note), chap: get(r, idx.chap), sub: get(r, idx.sub), tag: get(r, idx.tag) })).filter(x => x.q && x.a);
+  // 章を分ける
+  items.forEach(x => { x.parts = studyCSVChapterParts(x.chap); });
+  const tokRest = {};
+  items.forEach(x => {
+    if (x.chap.includes('>') || !x.parts.length) return;
+    const m = x.parts[0].match(/^(\S{1,6})\s+(.+)$/);
+    if (!m || /\d/.test(m[1])) return;
+    (tokRest[m[1]] = tokRest[m[1]] || new Set()).add(m[2]);
+  });
+  items.forEach(x => {
+    if (x.chap.includes('>') || !x.parts.length) return;
+    const m = x.parts[0].match(/^(\S{1,6})\s+(.+)$/);
+    if (m && tokRest[m[1]] && tokRest[m[1]].size >= 2) x.parts = [m[1], m[2], ...x.parts.slice(1)];
+  });
+  // フォルダー名：使えない名前を直し、今あるフォルダー（または今回の別の場所）とぶつかるときは「名前（親）」に
+  const fixed = {}, planned = {};
+  const fixName = n => (invalidCategoryName(n) ? n.replace(/>/g, '＞').replace(/^__|__$/g, '_').slice(0, 100) : n) || '未分類';
+  const rootName = fixName(root);
+  items.forEach(x => {
+    const path = [rootName]; let parent = rootName;
+    x.parts.forEach(raw => {
+      const key = parent + '\u0000' + raw;
+      if (!fixed[key]) {
+        let name = fixName(raw), k = 1;
+        const clash = nm => (categories.includes(nm) && getCategoryParent(nm) !== parent) || (planned[nm] !== undefined && planned[nm] !== parent) || nm === rootName;
+        while (clash(name)) { name = fixName(`${raw}（${rootName}${k > 1 ? k : ''}）`); k++; if (k > 50) break; }
+        fixed[key] = name; planned[name] = parent;
+      }
+      path.push(fixed[key]); parent = fixed[key];
+    });
+    x.path = path.join('>');
+  });
+  // 問題番号（フォルダーごとに行の順。小見出しがすべて「No.12」なら 12・12-1・12-2…）
+  const byPath = {};
+  items.forEach(x => { (byPath[x.path] = byPath[x.path] || []).push(x); });
+  Object.values(byPath).forEach(list => {
+    const useSub = list.every(x => /^No\.?\s*\d+$/i.test(x.sub));
+    if (useSub) {
+      const seen = {};
+      list.forEach(x => { const n = x.sub.match(/\d+/)[0]; seen[n] = (seen[n] || 0) + 1; x.no = seen[n] === 1 ? n : `${n}-${seen[n] - 1}`; x.subUsed = true; });
+    } else list.forEach((x, i) => { x.no = String(i + 1); });
+  });
+  let starN = 0, selfN = 0, clozeN = 0;
+  const rows = [['問題', '答え', 'フォルダー', '番号', 'メモ', '形式', '星']];
+  items.forEach(x => {
+    const memo = [];
+    if (x.note) memo.push(x.note);
+    if (x.sub && !x.subUsed) memo.push(`［${x.sub.replace(/^●/, '')}］`);
+    if (x.tag) memo.push(`タグ：${x.tag}`);
+    const stars = opt.stars ? studyCSVTagStars(x.tag) : 0;
+    let kind = '';
+    if (/例文空所/.test(x.tag)) kind = '例文';
+    else if (opt.self && (x.a.length > 40 || /\n/.test(x.a))) kind = '自己申告';
+    if (stars) starN++; if (kind === '自己申告') selfN++; if (kind === '例文') clozeN++;
+    rows.push([x.q, x.a, x.path, x.no, memo.join('\n'), kind, stars ? '★'.repeat(stars) : '']);
+  });
+  return { rows, count: items.length, folders: Object.keys(byPath).length, starN, selfN, clozeN, rootName };
+}
+function studyCSVImportAsk(text, fileName) {
+  let p;
+  try { p = studyCSVParse(text); } catch (err) { console.error(err); alert('CSV解析に失敗しました。'); return; }
+  if (p.idx.q === -1 || p.idx.a === -1) { alert('「問題」と「解答（答え）」の列が見つかりませんでした。'); return; }
+  const base = String(fileName || '').replace(/\.(csv|tsv|txt)$/i, '').trim() || '暗記問題';
+  const root = (prompt('📚 章つきの暗記問題CSVです。\n入れる親のフォルダーの名前（この下に章ごとのフォルダーを作ります。同じ名前のフォルダーがあれば、その中に入れて、同じ問題は増やさずに更新できます）', base) || '').trim();
+  if (!root) return;
+  const bad = invalidCategoryName(root); if (bad) { alert(bad); return; }
+  const go = opt => {
+    const b = studyCSVBuild(p, root, opt);
+    if (!b.count) { alert('問題と解答のそろった行がありませんでした。'); return; }
+    let plan;
+    try { plan = planCSVImport(b.rows); } catch (err) { console.error(err); alert('CSV解析に失敗しました。'); return; }
+    csvApplyPlanAsk(plan, `章つきCSV（${b.count}問・${b.folders}フォルダー）`);
+  };
+  const pre = studyCSVBuild(p, root, { stars: true, self: true });
+  const opt = (title, t) => `<span style="display:block; text-align:left;">${title}<br><span style="font-size:0.75rem; color:var(--text3);">${t}</span></span>`;
+  openContextMenu(`📚 ${root}：${pre.count}問を ${pre.folders}個のフォルダーへ`, [
+    { html: opt('✅ おすすめで取り込む', `印を★に（超頻出!★★★・頻出!/◆★★・＊★）：${pre.starN}問／長い答え（41字以上・改行あり）は自己申告：${pre.selfN}問／例文空所は形式「例文」：${pre.clozeN}問。補足・小見出し・タグはメモに入ります`), action: () => go({ stars: true, self: true }) },
+    { html: opt('★を付けずに取り込む', '印はメモにだけ残します'), action: () => go({ stars: false, self: true }) },
+    { html: opt('自己申告にせずに取り込む', '長い答えも、記述・4択などふつうに答えます（AI の意味で採点が使えます）'), action: () => go({ stars: true, self: false }) },
+    { type: 'separator' },
+    { html: 'キャンセル', action: () => {} }
+  ]);
 }
 
 window.resetScores = function resetScores() {
